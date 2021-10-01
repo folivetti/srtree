@@ -3,7 +3,18 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/lock_files
 
-packages: []
+packages:
+- completed:
+    name: intervals
+    version: 0.9.1
+    git: https://github.com/folivetti/intervals.git
+    pantry-tree:
+      size: 1077
+      sha256: 29f6b3cee5d9a334f63651af0b5d80f87c3af0deca2b62f64ce5c7ca0c9f2bd7
+    commit: 900c35c5f2f126224ccc10a56f303470f14c5174
+  original:
+    git: https://github.com/folivetti/intervals.git
+    commit: 900c35c5f2f126224ccc10a56f303470f14c5174
 snapshots:
 - completed:
     size: 586041
