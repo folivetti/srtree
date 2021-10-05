@@ -1,3 +1,4 @@
+{-# language ConstraintKinds #-}
 module Random where
 
 import System.Random 
@@ -33,7 +34,7 @@ class HasExps p where
 class HasFuns p where
   _funs :: p ix val -> [Function]
 
-class (HasVars p, HasVals p, HasExps p, HasFuns p) => HasEverything p
+type HasEverything p = (HasVars p, HasVals p, HasExps p, HasFuns p)
 
 type RndTree p ix val = ReaderT (p ix val) (StateT StdGen IO) (Tree ix val)
 
@@ -47,7 +48,6 @@ instance HasExps FullParams where
   _exponents (P _ _ e _) = e
 instance HasFuns FullParams where
   _funs (P _ _ _ fs) = fs
-instance HasEverything FullParams
 
 toss :: StateT StdGen IO Bool
 toss = state random
