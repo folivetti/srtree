@@ -1,9 +1,32 @@
-module Print where
+-----------------------------------------------------------------------------
+-- |
+-- Module      :  Data.SRTree.Print 
+-- Copyright   :  (c) Fabricio Olivetti 2021 - 2021
+-- License     :  BSD3
+-- Maintainer  :  fabricio.olivetti@gmail.com
+-- Stability   :  experimental
+-- Portability :  
+--
+-- Conversion functions to display the expression trees in different formats.
+--
+-----------------------------------------------------------------------------
+module Data.SRTree.Print 
+         ( DisplayNodes(..)
+         , showExpr
+         , showTree
+         , printExpr
+         , showDefault
+         , showTikz
+         , showPython
+         , showSimpy
+         )
+         where
 
 import Control.Monad.Reader
 
-import Tree
+import Data.SRTree.Internal
 
+-- | Data structure containing the needed definitions to print a SRTree.
 data DisplayNodes ix val = D
   { _displayVar      :: ix -> String
   , _displayVal      :: val -> String
@@ -12,7 +35,8 @@ data DisplayNodes ix val = D
   , _displayFloatPow :: String
   }
 
-asExpr :: (Show ix, Show val) => Tree ix val -> Reader (DisplayNodes ix val) String
+-- Auxiliary function to print a tree as an infix expression
+asExpr :: (Show ix, Show val) => SRTree ix val -> Reader (DisplayNodes ix val) String
 asExpr Empty = pure ""
 asExpr (Var ix) = do
   display <- asks _displayVar
@@ -54,7 +78,8 @@ asExpr (LogBase l r) = do
   sr  <- asExpr r
   pure $ mconcat ["log(", sl, ",", sr, ")"]
 
-asTree :: (Show ix, Show val) => Tree ix val -> Reader (DisplayNodes ix val) String
+-- Auxiliary function to print a tree as a tree-like structure
+asTree :: (Show ix, Show val) => SRTree ix val -> Reader (DisplayNodes ix val) String
 asTree Empty = pure ""
 asTree (Var ix) = do
   display <- asks _displayVar
@@ -96,13 +121,18 @@ asTree (LogBase l r) = do
   sr  <- asTree r
   pure $ mconcat ["[log\n", sl, sr, "]\n"]
 
-showExpr, showTree :: (Show ix, Show val) => Tree ix val -> DisplayNodes ix val -> String
+-- | Converts a tree to a `String` using the specifications given by `DisplayNodes`
+showExpr, showTree :: (Show ix, Show val) => SRTree ix val -> DisplayNodes ix val -> String
 showExpr t = runReader (asExpr t)
+{-# INLINE showExpr #-}
 showTree t = runReader (asTree t)
+{-# INLINE showTree #-}
 
-printExpr :: (Show ix, Show val) => Tree ix val -> DisplayNodes ix val -> IO ()
+-- | Prints a tree as an expression using the specifications given by `DisplayNodes`
+printExpr :: (Show ix, Show val) => SRTree ix val -> DisplayNodes ix val -> IO ()
 printExpr t = putStrLn . showExpr t
 
+-- | Displays a tree as an expression
 showDefault t = showExpr t d
   where
     d = D (\ix -> mconcat ["x", show ix])
@@ -111,7 +141,8 @@ showDefault t = showExpr t d
           "^"
           "**"
 
-showTikz :: (Show ix, Show val, RealFrac val) => Tree ix val -> String 
+-- | Displays a tree in Tikz format
+showTikz :: (Show ix, Show val, RealFrac val) => SRTree ix val -> String 
 showTikz t = showTree t d
   where
     d = D (\ix -> mconcat ["$x_{", show ix, "}$"])
@@ -120,6 +151,7 @@ showTikz t = showTree t d
           "\\^{}"
           "**"
 
+-- | Displays a tree as a numpy compatible expression.
 showPython t = showExpr t d
   where
     d = D (\ix -> mconcat ["x[:,", show ix, "]"])
@@ -147,4 +179,5 @@ showPython t = showExpr t d
     pyFun Log    = "np.log"
     pyFun Exp    = "np.exp"
 
+-- | Displays a tree as a sympy compatible expression.
 showSimpy = undefined

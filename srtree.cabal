@@ -25,12 +25,10 @@ source-repository head
 
 library
   exposed-modules:
-      Eval
-      Lib
-      Main
-      Print
-      Random
-      Tree
+      Data.SRTree
+      Data.SRTree.Internal
+      Data.SRTree.Print
+      Data.SRTree.Random
   other-modules:
       Paths_srtree
   hs-source-dirs:
