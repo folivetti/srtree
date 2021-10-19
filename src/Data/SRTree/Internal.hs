@@ -27,9 +27,11 @@ module Data.SRTree.Internal
          , simplify
          , derivative
          , evalFun
+         , inverseFunc
          , evalTree
          , evalTreeMap
          , evalTreeWithMap
+         , evalTreeWithVector
          , relabelOccurrences
          )
          where
@@ -39,6 +41,7 @@ import Numeric.Interval ((|^^|),Interval(..))
 
 import Data.Map.Strict (Map(..), (!), (!?), insert, fromList)
 import qualified Data.Map.Strict as M
+import qualified Data.Vector as V
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Applicative hiding (Const)
@@ -398,6 +401,24 @@ evalFun Exp     = exp
 evalFun Log     = log
 {-# INLINE evalFun #-}
 
+-- | Returns the inverse of a function. This is a partial function.
+inverseFunc :: Function -> Function
+inverseFunc Id     = Id
+inverseFunc Sin    = ASin
+inverseFunc Cos    = ACos
+inverseFunc Tan    = ATan
+inverseFunc Tanh   = ATanh
+inverseFunc ASin   = Sin
+inverseFunc ACos   = Cos
+inverseFunc ATan   = Tan
+inverseFunc ATanh  = Tanh
+inverseFunc Sqrt   = Square
+inverseFunc Square = Sqrt
+inverseFunc Log    = Exp
+inverseFunc Exp    = Log
+inverseFunc x      = error $ show x ++ " has no support for inverse function"
+{-# INLINE inverseFunc #-}
+
 -- | Evaluates a tree with the variables stored in a `Reader` monad.
 evalTree :: (Floating val, OptIntPow val) => SRTree ix val -> Reader (ix -> Maybe val) (Maybe val)
 evalTree Empty         = pure Nothing
@@ -444,6 +465,11 @@ askAbout x = asks ($ x)
 evalTreeWithMap :: (Ord ix, Floating val, OptIntPow val) => SRTree ix val -> Map ix val -> Maybe val
 evalTreeWithMap t m = runReader (evalTree t) (m !?)
 {-# INLINE evalTreeWithMap #-}
+
+-- | Example of using `evalTree` with a Vector.
+evalTreeWithVector :: (Floating val, OptIntPow val) => SRTree Int val -> V.Vector val -> Maybe val
+evalTreeWithVector t v = runReader (evalTree t) (v V.!?)
+{-# INLINE evalTreeWithVector #-}
 
 -- | Relabel occurences of a var into a tuple (ix, Int).
 relabelOccurrences :: forall ix val . Ord ix => SRTree ix val -> SRTree (ix, Int) val

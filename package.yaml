@@ -25,6 +25,7 @@ dependencies:
 - intervals
 - containers
 - random
+- vector
 
 library:
   source-dirs: src

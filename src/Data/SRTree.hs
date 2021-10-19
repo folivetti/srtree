@@ -24,6 +24,7 @@ module Data.SRTree
          , simplify
          , derivative
          , evalFun
+         , inverseFunc
          , evalTree
          , evalTreeMap
          , evalTreeWithMap
@@ -44,6 +45,7 @@ import Data.SRTree.Internal ( SRTree(..)
          , simplify
          , derivative
          , evalFun
+         , inverseFunc
          , evalTree
          , evalTreeMap
          , evalTreeWithMap

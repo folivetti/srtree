@@ -36,25 +36,6 @@ import Data.Maybe (fromJust)
 
 import Data.SRTree.Internal
 
-{- 
-data TIR ix val = TIR { _funY :: Function
-                      , _p :: Sigma ix val
-                      , _q :: Sigma ix val 
-                      }
-type Sigma ix val = [Pi ix val]
-type Pi ix val    = (val, Function, [SRTree ix val])
-
-assembleTree :: (Eq ix, Eq val, Floating val) => TIR ix val -> SRTree ix val
-assembleTree (TIR f p q) = Fun f (assemble p / (1 + assemble q))
-  where
-    -- assemble :: Sigma ix val -> SRTree ix val
-    assemble [p']    = mk p'
-    assemble (p':ps) = mk p' + assemble ps
-
-    -- mk :: Pi ix val -> SRTree ix val
-    mk (v, g, ts) = Const v * Fun g (product ts)
--}
-
 -- * Class definition of properties that a certain parameter type has.
 --
 -- HasVars: does `p` provides a list of the variable indices?
