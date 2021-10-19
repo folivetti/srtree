@@ -16,7 +16,7 @@
 module Data.SRTree.Internal 
          ( SRTree(..)
          , Function(..)
-         , OptIntPow
+         , OptIntPow(..)
          , traverseIx
          , arity
          , getChildren

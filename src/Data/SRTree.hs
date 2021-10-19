@@ -13,7 +13,7 @@
 module Data.SRTree 
          ( SRTree(..)
          , Function(..)
-         , OptIntPow
+         , OptIntPow(..)
          , traverseIx
          , arity
          , getChildren
@@ -34,7 +34,7 @@ module Data.SRTree
          
 import Data.SRTree.Internal ( SRTree(..)
          , Function(..)
-         , OptIntPow
+         , OptIntPow(..)
          , traverseIx
          , arity
          , getChildren
