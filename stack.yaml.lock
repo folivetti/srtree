@@ -10,11 +10,11 @@ packages:
     git: https://github.com/folivetti/intervals.git
     pantry-tree:
       size: 1077
-      sha256: 29f6b3cee5d9a334f63651af0b5d80f87c3af0deca2b62f64ce5c7ca0c9f2bd7
-    commit: 900c35c5f2f126224ccc10a56f303470f14c5174
+      sha256: 253fd09cdfc3b7749ac4db8d7eead98d225a1cc363a0af8afc658e206e32e53f
+    commit: 934c6f4b9edf9480aa07c77a9d82634de2e767eb
   original:
     git: https://github.com/folivetti/intervals.git
-    commit: 900c35c5f2f126224ccc10a56f303470f14c5174
+    commit: 934c6f4b9edf9480aa07c77a9d82634de2e767eb
 snapshots:
 - completed:
     size: 586041

@@ -43,7 +43,7 @@ packages:
 # extra-deps: []
 extra-deps:
   - git: https://github.com/folivetti/intervals.git
-    commit: 900c35c5f2f126224ccc10a56f303470f14c5174
+    commit: 934c6f4b9edf9480aa07c77a9d82634de2e767eb
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

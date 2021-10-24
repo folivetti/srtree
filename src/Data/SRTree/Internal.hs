@@ -103,7 +103,7 @@ instance OptIntPow Float where
 instance (Ord a, Floating a) => OptIntPow (Interval a) where
   (^.) = (|^^|)
   {-# INLINE (^.) #-}
-
+  
 instance OptIntPow (SRTree ix val) where
   (^.) = Pow
   {-# INLINE (^.) #-}
