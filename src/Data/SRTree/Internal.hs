@@ -37,7 +37,6 @@ module Data.SRTree.Internal
          where
 
 import Data.Bifunctor
-import Numeric.Interval ((|^^|),Interval(..))
 
 import Data.Map.Strict (Map(..), (!), (!?), insert, fromList)
 import qualified Data.Map.Strict as M
@@ -100,10 +99,7 @@ instance OptIntPow Float where
   (^.) = (^^)
   {-# INLINE (^.) #-}
   
-instance (Ord a, Floating a) => OptIntPow (Interval a) where
-  (^.) = (|^^|)
-  {-# INLINE (^.) #-}
-  
+ 
 instance OptIntPow (SRTree ix val) where
   (^.) = Pow
   {-# INLINE (^.) #-}

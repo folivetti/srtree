@@ -37,7 +37,6 @@ library
   build-depends:
       base >=4.7 && <5
     , containers
-    , intervals
     , mtl
     , random
     , vector
@@ -54,7 +53,6 @@ test-suite srtree-test
   build-depends:
       base >=4.7 && <5
     , containers
-    , intervals
     , mtl
     , random
     , srtree
