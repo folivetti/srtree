@@ -128,13 +128,14 @@ instance (Eq ix, Eq val, Num val) => Num (SRTree ix val) where
   abs         = Fun Abs
   {-# INLINE abs #-}
   
-  negate      = ((-1) *)
+  negate (Const x) = Const (negate x)
+  negate t         = Const (-1) * t
   {-# INLINE negate #-}
   
   signum t    = case t of
                   Const x -> Const $ signum x
                   _       -> Const 0
-  fromInteger = Const . fromInteger
+  fromInteger x = Const (fromInteger x)
   {-# INLINE fromInteger #-}
 
 instance (Eq ix, Eq val, Fractional val) => Fractional (SRTree ix val) where
