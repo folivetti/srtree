@@ -128,6 +128,9 @@ instance (Eq ix, Eq val, Num val) => Num (SRTree ix val) where
   abs         = Fun Abs
   {-# INLINE abs #-}
   
+  negate      = ((-1) *)
+  {-# INLINE negate #-}
+  
   signum t    = case t of
                   Const x -> Const $ signum x
                   _       -> Const 0
