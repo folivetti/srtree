@@ -104,7 +104,7 @@ instance OptIntPow (SRTree ix val) where
   --t ^. 0         = 1
   --t ^. 1         = t
   --(Const c) ^. k = Const $ c ^. k 
-  t ^. k         = Pow t k
+  (^.) = Pow
   {-# INLINE (^.) #-}
        
 instance (Eq ix, Eq val, Num val) => Num (SRTree ix val) where
