@@ -100,10 +100,13 @@ instance OptIntPow Float where
   {-# INLINE (^.) #-}
   
  
-instance OptIntPow (SRTree ix val) where
-  (^.) = Pow
+instance (Eq ix, Eq val, Num val, OptIntPow val) => OptIntPow (SRTree ix val) where
+  t ^. 0         = 1
+  t ^. 1         = t
+  (Const c) ^. k = Const $ c ^. k 
+  t ^. k         = Pow t k
   {-# INLINE (^.) #-}
-   
+       
 instance (Eq ix, Eq val, Num val) => Num (SRTree ix val) where
   0 + r                   = r
   l + 0                   = l
@@ -256,6 +259,7 @@ traverseIx mf (Mul l r)     = Mul <$> traverseIx mf l <*> traverseIx mf r
 traverseIx mf (Div l r)     = Div <$> traverseIx mf l <*> traverseIx mf r
 traverseIx mf (Power l r)   = Power <$> traverseIx mf l <*> traverseIx mf r
 traverseIx mf (LogBase l r) = LogBase <$> traverseIx mf l <*> traverseIx mf r
+{-# INLINE traverseIx #-}
 
 -- | Arity of the current node
 arity :: SRTree ix val -> Int
@@ -314,7 +318,7 @@ countOccurrences t        iy = sumCounts (`countOccurrences` iy) 0 t
 {-# INLINE countOccurrences #-}
 
 -- | Creates an `SRTree` representing the partial derivative of the input by the variable indexed by `ix`.
-deriveBy :: (Eq ix, Eq val, Floating val) => ix -> SRTree ix val -> SRTree ix val
+deriveBy :: (Eq ix, Eq val, Floating val, OptIntPow val) => ix -> SRTree ix val -> SRTree ix val
 deriveBy _  Empty    = Empty
 deriveBy dx (Var ix)
   | dx == ix  = 1
@@ -338,6 +342,7 @@ deriveBy dx (Mul l r)     = deriveBy dx l * r + l * deriveBy dx r
 deriveBy dx (Div l r)     = (deriveBy dx l * r - l * deriveBy dx r) / r ^. 2
 deriveBy dx (Power l r)   = l ** (r-1) * (r * deriveBy dx l + l * log l * deriveBy dx r)
 deriveBy dx (LogBase l r) = deriveBy dx (log l / log r)
+{-# INLINE deriveBy #-}
 
 -- | Simplifies the `SRTree`.
 simplify :: (Eq ix, Eq val, Floating val, OptIntPow val) => SRTree ix val -> SRTree ix val
@@ -356,6 +361,7 @@ simplify (Div l r)     = simplify l / simplify r
 simplify (Power l r)   = simplify l ** simplify r
 simplify (LogBase l r) = logBase (simplify l) (simplify r)
 simplify t             = t
+{-# INLINE simplify #-}
 
 -- | Derivative of a Function
 derivative :: (Eq ix, Eq val, Floating val) => Function -> SRTree ix val -> SRTree ix val
