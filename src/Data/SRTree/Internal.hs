@@ -100,11 +100,11 @@ instance OptIntPow Float where
   {-# INLINE (^.) #-}
   
  
-instance OptIntPow (SRTree ix val) where
-  --t ^. 0         = 1
-  --t ^. 1         = t
-  --(Const c) ^. k = Const $ c ^. k 
-  (^.) = Pow
+instance (Eq ix, Eq val, Num val, OptIntPow val) => OptIntPow (SRTree ix val) where
+  t ^. 0         = 1
+  t ^. 1         = t
+  (Const c) ^. k = Const $ c ^. k 
+  t ^. k         = Pow t k
   {-# INLINE (^.) #-}
        
 instance (Eq ix, Eq val, Num val) => Num (SRTree ix val) where
@@ -318,7 +318,7 @@ countOccurrences t        iy = sumCounts (`countOccurrences` iy) 0 t
 {-# INLINE countOccurrences #-}
 
 -- | Creates an `SRTree` representing the partial derivative of the input by the variable indexed by `ix`.
-deriveBy :: (Eq ix, Eq val, Floating val) => ix -> SRTree ix val -> SRTree ix val
+deriveBy :: (Eq ix, Eq val, Floating val, OptIntPow val) => ix -> SRTree ix val -> SRTree ix val
 deriveBy _  Empty    = Empty
 deriveBy dx (Var ix)
   | dx == ix  = 1
