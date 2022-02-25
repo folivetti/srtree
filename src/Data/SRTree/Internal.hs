@@ -101,8 +101,8 @@ instance OptIntPow Float where
   
  
 instance (Eq ix, Eq val, Num val, OptIntPow val) => OptIntPow (SRTree ix val) where
-  t ^. 0         = 1
-  t ^. 1         = t
+  --t ^. 0         = 1
+  --t ^. 1         = t
   --(Const c) ^. k = Const $ c ^. k 
   t ^. k         = Pow t k
   {-# INLINE (^.) #-}
