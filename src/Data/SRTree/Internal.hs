@@ -367,7 +367,7 @@ simplify (Sub l r)
       l' = simplify l 
       r' = simplify r
 simplify (Mul l r)
-  | l' == r'  = Power l' 2
+  | l' == r'  = Pow l' 2
   | otherwise = l' * r' 
   where 
       l' = simplify l 
