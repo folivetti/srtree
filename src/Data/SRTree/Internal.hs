@@ -354,10 +354,31 @@ simplify (Pow t k) =
     Const c -> Const $ c ^. k
     t'      -> Pow t' k
     
-simplify (Add l r)     = simplify l + simplify r
-simplify (Sub l r)     = simplify l - simplify r
-simplify (Mul l r)     = simplify l * simplify r
-simplify (Div l r)     = simplify l / simplify r
+simplify (Add l r)
+  | l' == r' = 2 * l' 
+  | otherwise = l' + r' 
+  where 
+      l' = simplify l 
+      r' = simplify r
+simplify (Sub l r)
+  | l' == r' = 0
+  | otherwise = l' - r' 
+  where 
+      l' = simplify l 
+      r' = simplify r
+simplify (Mul l r)
+  | l' == r'  = l' ^ 2 
+  | otherwise = l' * r' 
+  where 
+      l' = simplify l 
+      r' = simplify r
+simplify (Div l r)
+  | l' == r'  = 1
+  | otherwise = l' / r' 
+  where 
+      l' = simplify l 
+      r' = simplify r
+
 simplify (Power l r)   = simplify l ** simplify r
 simplify (LogBase l r) = logBase (simplify l) (simplify r)
 simplify t             = t
