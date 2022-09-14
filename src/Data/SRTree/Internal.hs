@@ -52,6 +52,7 @@ data SRTree ix val =
    Empty 
  | Var ix
  | Const val
+ | Param ix
  | Fun Function (SRTree ix val)
  | Pow (SRTree ix val) Int
  | SRTree ix val `Add`     SRTree ix val
