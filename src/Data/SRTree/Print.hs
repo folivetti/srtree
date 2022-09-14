@@ -29,6 +29,7 @@ import Data.SRTree.Internal
 -- | Data structure containing the needed definitions to print a SRTree.
 data DisplayNodes ix val = D
   { _displayVar      :: ix -> String
+  , _displayPar      :: ix -> String
   , _displayVal      :: val -> String
   , _displayFun      :: Function -> String
   , _displayPow      :: String
@@ -40,6 +41,9 @@ asExpr :: (Show ix, Show val) => SRTree ix val -> Reader (DisplayNodes ix val) S
 asExpr Empty = pure ""
 asExpr (Var ix) = do
   display <- asks _displayVar
+  pure $ display ix
+asExpr (Param ix) = do
+  display <- asks _displayPar
   pure $ display ix
 asExpr (Const val) = do
   display <- asks _displayVal
@@ -83,6 +87,9 @@ asTree :: (Show ix, Show val) => SRTree ix val -> Reader (DisplayNodes ix val) S
 asTree Empty = pure ""
 asTree (Var ix) = do
   display <- asks _displayVar
+  pure $ mconcat ["[", display ix, "]\n"]
+asTree (Param ix) = do
+  display <- asks _displayPar
   pure $ mconcat ["[", display ix, "]\n"]
 asTree (Const val) = do
   display <- asks _displayVal
@@ -136,6 +143,7 @@ printExpr t = putStrLn . showExpr t
 showDefault t = showExpr t d
   where
     d = D (\ix -> mconcat ["x", show ix])
+          (\ix -> mconcat ["t", show ix])
           show
           show
           "^"
@@ -146,6 +154,7 @@ showTikz :: (Show ix, Show val, RealFrac val) => SRTree ix val -> String
 showTikz t = showTree t d
   where
     d = D (\ix -> mconcat ["$x_{", show ix, "}$"])
+          (\ix -> mconcat ["$\\theta_{", show ix, "}$"])
           (\val -> mconcat ["$", show $ (/100) $ fromIntegral $ round $ val*100, "$"])
           show
           "\\^{}"
@@ -155,6 +164,7 @@ showTikz t = showTree t d
 showPython t = showExpr t d
   where
     d = D (\ix -> mconcat ["x[:,", show ix, "]"])
+          (\ix -> mconcat ["t[:,", show ix, "]"])
           show
           pyFun
           "**"
