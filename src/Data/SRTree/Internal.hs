@@ -200,6 +200,7 @@ instance (Eq ix, Eq val, Floating val) => Floating (SRTree ix val) where
 instance Bifunctor SRTree where
   first f Empty         = Empty
   first f (Var ix)      = Var $ f ix
+  first f (Param ix)    = Param $ f ix
   first f (Fun g t)     = Fun g $ first f t
   first f (Pow t k)     = Pow (first f t) k
   first f (Add l r)     = Add (first f l) (first f r)
@@ -218,6 +219,7 @@ instance Applicative (SRTree ix) where
 
   Empty         <*> t = Empty
   Var ix        <*> t = Var ix
+  Param ix      <*> t = Param ix
   Const f       <*> t = fmap f t
   Fun g tf      <*> t = Fun g $ tf <*> t
   Pow tf k      <*> t = Pow (tf <*> t) k
@@ -229,14 +231,16 @@ instance Applicative (SRTree ix) where
   LogBase lf rf <*> t = LogBase (lf <*> t) (rf <*> t)
  
 instance Foldable (SRTree ix) where
-  foldMap f Empty     = mempty
-  foldMap f (Var ix)  = mempty
-  foldMap f (Const c) = f c
-  foldMap f t         = mconcat $ map (foldMap f) $ getChildren t
+  foldMap f Empty      = mempty
+  foldMap f (Var ix)   = mempty
+  foldMap f (Param ix) = mempty
+  foldMap f (Const c)  = f c
+  foldMap f t          = mconcat $ map (foldMap f) $ getChildren t
 
 instance Traversable (SRTree ix) where
   traverse mf Empty         = pure Empty
   traverse mf (Var ix)      = pure $ Var ix
+  traverse mf (Param ix)    = pure $ Param ix
   traverse mf (Const c)     = Const <$> mf c
   traverse mf (Fun g t)     = Fun g <$> traverse mf t
   traverse mf (Pow t k)     = (`Pow` k) <$> traverse mf t
@@ -251,6 +255,7 @@ instance Traversable (SRTree ix) where
 traverseIx :: Applicative f => (ixa -> f ixb) -> SRTree ixa val -> f (SRTree ixb val)
 traverseIx mf Empty         = pure Empty
 traverseIx mf (Var ix)      = Var <$> mf ix
+traverseIx mf (Param ix)    = Param <$> mf ix
 traverseIx mf (Const c)     = pure $ Const c
 traverseIx mf (Fun g t)     = Fun g <$> traverseIx mf t
 traverseIx mf (Pow t k)     = (`Pow` k) <$> traverseIx mf t
@@ -266,6 +271,7 @@ traverseIx mf (LogBase l r) = LogBase <$> traverseIx mf l <*> traverseIx mf r
 arity :: SRTree ix val -> Int
 arity Empty     = 0
 arity (Var _)   = 0
+arity (Param _) = 0
 arity (Const _) = 0
 arity (Fun _ _) = 1
 arity (Pow _ _) = 1
@@ -276,6 +282,7 @@ arity _         = 2
 getChildren :: SRTree ix val -> [SRTree ix val]
 getChildren Empty         = []
 getChildren (Var _)       = []
+getChildren (Param _)     = []
 getChildren (Const _)     = []
 getChildren (Fun _ t)     = [t]
 getChildren (Pow t _)     = [t]
@@ -324,6 +331,7 @@ deriveBy _  Empty    = Empty
 deriveBy dx (Var ix)
   | dx == ix  = 1
   | otherwise = 0
+deriveBy dx (Param ix) = 0
 deriveBy dx (Const val) = 0
 deriveBy dx (Fun g t)   =
   case deriveBy dx t of
@@ -452,6 +460,7 @@ evalTree :: (Floating val, OptIntPow val) => SRTree ix val -> Reader (ix -> Mayb
 evalTree Empty         = pure Nothing
 evalTree (Const c)     = pure $ Just c
 evalTree (Var ix)      = askAbout ix
+evalTree (Param ix)    = pure $ Just 1.0 -- TODO: askAbout paramIx
 evalTree (Fun f t)     = evalFun f <$$> evalTree t
 evalTree (Pow t k)     = (^. k) <$$> evalTree t
 evalTree (Add l r)     = (+)  <$*> evalTree l <*> evalTree r
@@ -467,6 +476,7 @@ evalTreeMap :: (Floating v1, OptIntPow v1, Floating v2, OptIntPow v2) => (v1 -> 
 evalTreeMap f Empty         = pure Nothing
 evalTreeMap f (Const c)     = pure $ Just $ f c
 evalTreeMap f (Var ix)      = askAbout ix
+evalTreeMap f (Var ix)      = pure $ Just $ f 1.0 -- TODO: askAbout paramIx
 evalTreeMap f (Fun g t)     = evalFun g <$$> evalTreeMap f t
 evalTreeMap f (Pow t k)     = (^. k) <$$> evalTreeMap f t
 evalTreeMap f (Add l r)     = (+)  <$*> evalTreeMap f l <*> evalTreeMap f r
