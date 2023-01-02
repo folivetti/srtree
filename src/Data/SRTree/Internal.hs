@@ -80,6 +80,7 @@ data Function =
   | ACosh 
   | ATanh 
   | Sqrt 
+  | Cbrt 
   | Square 
   | Log 
   | Exp 
@@ -410,6 +411,7 @@ derivative ASinh   = recip . sqrt . (1+) . (^2)
 derivative ACosh   = \x -> 1 / (sqrt (x-1) * sqrt (x+1))
 derivative ATanh   = recip . (1-) . (^2)
 derivative Sqrt    = recip . (2*) . sqrt
+derivative Cbrt    = recip . (3*) . cbrt . (^2)
 derivative Square  = (2*)
 derivative Exp     = exp
 derivative Log     = recip
@@ -432,10 +434,15 @@ evalFun ASinh   = asinh
 evalFun ACosh   = acosh
 evalFun ATanh   = atanh
 evalFun Sqrt    = sqrt
+evalFun Cbrt    = cbrt
 evalFun Square  = (^2)
 evalFun Exp     = exp
 evalFun Log     = log
 {-# INLINE evalFun #-}
+
+cbrt :: Floating val => val -> val
+cbrt x = signum x * abs x ** (1/3)
+{-# INLINE cbrt #-}
 
 -- | Returns the inverse of a function. This is a partial function.
 inverseFunc :: Function -> Function
@@ -476,7 +483,7 @@ evalTreeMap :: (Floating v1, OptIntPow v1, Floating v2, OptIntPow v2) => (v1 -> 
 evalTreeMap f Empty         = pure Nothing
 evalTreeMap f (Const c)     = pure $ Just $ f c
 evalTreeMap f (Var ix)      = askAbout ix
-evalTreeMap f (Var ix)      = pure $ Just $ f 1.0 -- TODO: askAbout paramIx
+evalTreeMap f (Param ix)    = pure $ Just $ f 1.0 -- TODO: askAbout paramIx
 evalTreeMap f (Fun g t)     = evalFun g <$$> evalTreeMap f t
 evalTreeMap f (Pow t k)     = (^. k) <$$> evalTreeMap f t
 evalTreeMap f (Add l r)     = (+)  <$*> evalTreeMap f l <*> evalTreeMap f r
