@@ -18,11 +18,12 @@ module Data.SRTree.Print
          , showDefault
          , showTikz
          , showPython
-         , showSimpy
+         , showLatex
          )
          where
 
-import Control.Monad.Reader
+import Control.Monad.Reader ( asks, runReader, Reader )
+import Data.Char ( toLower )
 
 import Data.SRTree.Internal
 
@@ -190,4 +191,20 @@ showPython t = showExpr t d
     pyFun Exp    = "np.exp"
 
 -- | Displays a tree as a sympy compatible expression.
-showSimpy = undefined
+showLatex :: (Show ix, Show val) => SRTree ix val -> String
+showLatex Empty         = ""
+showLatex (Var ix)      = mconcat ["x_{", show ix, "}"]
+showLatex (Param ix)    = mconcat ["\\theta_{", show ix, "}"]
+showLatex (Const val)   = show val
+showLatex (Fun Abs t)   = mconcat ["\\left |", showLatex t, "\\right |"]
+showLatex (Fun f t)     = mconcat [showLatexFun f, "\\left(", showLatex t, "\\right)"]
+showLatex (Pow t ix)    = mconcat ["\\left(", showLatex t, "\\right)^{", show ix, "}"]
+showLatex (Add l r)     = mconcat ["\\left(", showLatex l, "\\right) + \\left(", showLatex r, "\\right)"]
+showLatex (Sub l r)     = mconcat ["\\left(", showLatex l, "\\right) - \\left(", showLatex r, "\\right)"]
+showLatex (Mul l r)     = mconcat ["\\left(", showLatex l, "\\right) \\left(", showLatex r, "\\right)"]
+showLatex (Div l r)     = mconcat ["\\frac{", showLatex l, "}{", showLatex r, "}"]
+showLatex (Power l r)   = mconcat ["\\left(", showLatex l, "\\right)^{", showLatex r, "}"]
+showLatex (LogBase l r) = mconcat ["\\log_{", showLatex r, "}{", showLatex l, "}"]
+
+showLatexFun :: Function -> String
+showLatexFun f = mconcat ["\\operatorname{", map toLower $ show f, "}"]
