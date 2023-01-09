@@ -165,7 +165,7 @@ showTikz t = showTree t d
 showPython t = showExpr t d
   where
     d = D (\ix -> mconcat ["x[:,", show ix, "]"])
-          (\ix -> mconcat ["t[:,", show ix, "]"])
+          (\ix -> mconcat ["t[", show ix, "]"])
           show
           pyFun
           "**"
