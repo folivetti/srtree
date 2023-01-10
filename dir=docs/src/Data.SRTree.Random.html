@@ -1,0 +1,858 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><link rel="stylesheet" type="text/css" href="style.css" /><script type="text/javascript" src="highlight.js"></script></head><body><pre><span class="hs-pragma">{-# language ConstraintKinds #-}</span><span>
+</span><span id="line-2"></span><span class="hs-comment">-----------------------------------------------------------------------------</span><span>
+</span><span id="line-3"></span><span class="hs-comment">-- |</span><span>
+</span><span id="line-4"></span><span class="hs-comment">-- Module      :  Data.SRTree.Random </span><span>
+</span><span id="line-5"></span><span class="hs-comment">-- Copyright   :  (c) Fabricio Olivetti 2021 - 2021</span><span>
+</span><span id="line-6"></span><span class="hs-comment">-- License     :  BSD3</span><span>
+</span><span id="line-7"></span><span class="hs-comment">-- Maintainer  :  fabricio.olivetti@gmail.com</span><span>
+</span><span id="line-8"></span><span class="hs-comment">-- Stability   :  experimental</span><span>
+</span><span id="line-9"></span><span class="hs-comment">-- Portability :  ConstraintKinds</span><span>
+</span><span id="line-10"></span><span class="hs-comment">--</span><span>
+</span><span id="line-11"></span><span class="hs-comment">-- Functions to generate random trees and nodes.</span><span>
+</span><span id="line-12"></span><span class="hs-comment">--</span><span>
+</span><span id="line-13"></span><span class="hs-comment">-----------------------------------------------------------------------------</span><span>
+</span><span id="line-14"></span><span class="hs-keyword">module</span><span> </span><span class="hs-identifier">Data.SRTree.Random</span><span> </span><span>
+</span><span id="line-15"></span><span>         </span><span class="hs-special">(</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasVars"><span class="hs-identifier">HasVars</span></a></span><span>
+</span><span id="line-16"></span><span>         </span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasVals"><span class="hs-identifier">HasVals</span></a></span><span>
+</span><span id="line-17"></span><span>         </span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasFuns"><span class="hs-identifier">HasFuns</span></a></span><span>
+</span><span id="line-18"></span><span>         </span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasEverything"><span class="hs-identifier">HasEverything</span></a></span><span>
+</span><span id="line-19"></span><span>         </span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#FullParams"><span class="hs-identifier">FullParams</span></a></span><span class="hs-special">(</span><span class="hs-glyph">..</span><span class="hs-special">)</span><span>
+</span><span id="line-20"></span><span>         </span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#RndTree"><span class="hs-identifier">RndTree</span></a></span><span>
+</span><span id="line-21"></span><span>         </span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#randomVar"><span class="hs-identifier">randomVar</span></a></span><span>
+</span><span id="line-22"></span><span>         </span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#randomConst"><span class="hs-identifier">randomConst</span></a></span><span>
+</span><span id="line-23"></span><span>         </span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#randomPow"><span class="hs-identifier">randomPow</span></a></span><span>
+</span><span id="line-24"></span><span>         </span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#randomFunction"><span class="hs-identifier">randomFunction</span></a></span><span>
+</span><span id="line-25"></span><span>         </span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#randomNode"><span class="hs-identifier">randomNode</span></a></span><span>
+</span><span id="line-26"></span><span>         </span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#randomNonTerminal"><span class="hs-identifier">randomNonTerminal</span></a></span><span>
+</span><span id="line-27"></span><span>         </span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#randomTree"><span class="hs-identifier">randomTree</span></a></span><span>
+</span><span id="line-28"></span><span>         </span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#randomTreeBalanced"><span class="hs-identifier">randomTreeBalanced</span></a></span><span>
+</span><span id="line-29"></span><span>         </span><span class="hs-special">)</span><span>
+</span><span id="line-30"></span><span>         </span><span class="hs-keyword">where</span><span>
+</span><span id="line-31"></span><span>
+</span><span id="line-32"></span><span class="hs-keyword">import</span><span> </span><span class="annot"><span class="hs-identifier">System.Random</span></span><span> </span><span>
+</span><span id="line-33"></span><span class="hs-keyword">import</span><span> </span><span class="annot"><span class="hs-identifier">Control.Monad.State</span></span><span> </span><span>
+</span><span id="line-34"></span><span class="hs-keyword">import</span><span> </span><span class="annot"><span class="hs-identifier">Control.Monad.Reader</span></span><span> </span><span>
+</span><span id="line-35"></span><span class="hs-keyword">import</span><span> </span><span class="annot"><span class="hs-identifier">Data.Maybe</span></span><span> </span><span class="hs-special">(</span><span class="annot"><span class="hs-identifier">fromJust</span></span><span class="hs-special">)</span><span>
+</span><span id="line-36"></span><span>
+</span><span id="line-37"></span><span class="hs-keyword">import</span><span> </span><span class="annot"><a href="Data.SRTree.Internal.html"><span class="hs-identifier">Data.SRTree.Internal</span></a></span><span>
+</span><span id="line-38"></span><span>
+</span><span id="line-39"></span><span class="hs-comment">-- * Class definition of properties that a certain parameter type has.</span><span>
+</span><span id="line-40"></span><span class="hs-comment">--</span><span>
+</span><span id="line-41"></span><span class="hs-comment">-- HasVars: does `p` provides a list of the variable indices?</span><span>
+</span><span id="line-42"></span><span class="hs-comment">-- HasVals: does `p` provides a range of values for the constants?</span><span>
+</span><span id="line-43"></span><span class="hs-comment">-- HasExps: does `p` provides a range for the integral exponentes?</span><span>
+</span><span id="line-44"></span><span class="hs-comment">-- HasFuns: does `p` provides a list of allowed functions?</span><span>
+</span><span id="line-45"></span><span class="hs-keyword">class</span><span> </span><span id="HasVars"><span class="annot"><a href="Data.SRTree.Random.html#HasVars"><span class="hs-identifier hs-var">HasVars</span></a></span></span><span> </span><span id="local-6989586621679049083"><span class="annot"><a href="#local-6989586621679049083"><span class="hs-identifier hs-type">p</span></a></span></span><span> </span><span class="hs-keyword">where</span><span>
+</span><span id="line-46"></span><span>  </span><span id="local-6989586621679049086"><span id="local-6989586621679049087"><span id="_vars"><span class="annot"><a href="Data.SRTree.Random.html#_vars"><span class="hs-identifier hs-type">_vars</span></a></span></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><a href="#local-6989586621679049083"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049087"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049086"><span class="hs-identifier hs-type">val</span></a></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="hs-special">[</span><span class="annot"><a href="#local-6989586621679049087"><span class="hs-identifier hs-type">ix</span></a></span><span class="hs-special">]</span></span></span><span>
+</span><span id="line-47"></span><span class="hs-keyword">class</span><span> </span><span id="HasVals"><span class="annot"><a href="Data.SRTree.Random.html#HasVals"><span class="hs-identifier hs-var">HasVals</span></a></span></span><span> </span><span id="local-6989586621679049076"><span class="annot"><a href="#local-6989586621679049076"><span class="hs-identifier hs-type">p</span></a></span></span><span> </span><span class="hs-keyword">where</span><span>
+</span><span id="line-48"></span><span>  </span><span id="local-6989586621679049078"><span id="local-6989586621679049079"><span id="_range"><span class="annot"><a href="Data.SRTree.Random.html#_range"><span class="hs-identifier hs-type">_range</span></a></span></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><a href="#local-6989586621679049076"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049079"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049078"><span class="hs-identifier hs-type">val</span></a></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="hs-special">(</span><span class="annot"><a href="#local-6989586621679049078"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><a href="#local-6989586621679049078"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">)</span></span></span><span>
+</span><span id="line-49"></span><span class="hs-keyword">class</span><span> </span><span id="HasExps"><span class="annot"><a href="Data.SRTree.Random.html#HasExps"><span class="hs-identifier hs-var">HasExps</span></a></span></span><span> </span><span id="local-6989586621679049070"><span class="annot"><a href="#local-6989586621679049070"><span class="hs-identifier hs-type">p</span></a></span></span><span> </span><span class="hs-keyword">where</span><span>
+</span><span id="line-50"></span><span>  </span><span id="local-6989586621679049072"><span id="local-6989586621679049073"><span id="_exponents"><span class="annot"><a href="Data.SRTree.Random.html#_exponents"><span class="hs-identifier hs-type">_exponents</span></a></span></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><a href="#local-6989586621679049070"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049073"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049072"><span class="hs-identifier hs-type">val</span></a></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="hs-special">(</span><span class="annot"><span class="hs-identifier hs-type">Int</span></span><span class="hs-special">,</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Int</span></span><span class="hs-special">)</span></span></span><span>
+</span><span id="line-51"></span><span class="hs-keyword">class</span><span> </span><span id="HasFuns"><span class="annot"><a href="Data.SRTree.Random.html#HasFuns"><span class="hs-identifier hs-var">HasFuns</span></a></span></span><span> </span><span id="local-6989586621679049064"><span class="annot"><a href="#local-6989586621679049064"><span class="hs-identifier hs-type">p</span></a></span></span><span> </span><span class="hs-keyword">where</span><span>
+</span><span id="line-52"></span><span>  </span><span id="local-6989586621679049066"><span id="local-6989586621679049067"><span id="_funs"><span class="annot"><a href="Data.SRTree.Random.html#_funs"><span class="hs-identifier hs-type">_funs</span></a></span></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><a href="#local-6989586621679049064"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049067"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049066"><span class="hs-identifier hs-type">val</span></a></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="hs-special">[</span><span class="annot"><a href="Data.SRTree.Internal.html#Function"><span class="hs-identifier hs-type">Function</span></a></span><span class="hs-special">]</span></span></span><span>
+</span><span id="line-53"></span><span>
+</span><span id="line-54"></span><span class="hs-comment">-- | Constraint synonym for all properties.</span><span>
+</span><span id="line-55"></span><span class="hs-keyword">type</span><span> </span><span id="HasEverything"><span class="annot"><a href="Data.SRTree.Random.html#HasEverything"><span class="hs-identifier hs-var">HasEverything</span></a></span></span><span> </span><span id="local-6989586621679048926"><span class="annot"><a href="#local-6989586621679048926"><span class="hs-identifier hs-type">p</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Random.html#HasVars"><span class="hs-identifier hs-type">HasVars</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048926"><span class="hs-identifier hs-type">p</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasVals"><span class="hs-identifier hs-type">HasVals</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048926"><span class="hs-identifier hs-type">p</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasExps"><span class="hs-identifier hs-type">HasExps</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048926"><span class="hs-identifier hs-type">p</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasFuns"><span class="hs-identifier hs-type">HasFuns</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048926"><span class="hs-identifier hs-type">p</span></a></span><span class="hs-special">)</span><span>
+</span><span id="line-56"></span><span>
+</span><span id="line-57"></span><span class="hs-comment">-- | A structure with every property</span><span>
+</span><span id="line-58"></span><span class="hs-keyword">data</span><span> </span><span id="FullParams"><span class="annot"><a href="Data.SRTree.Random.html#FullParams"><span class="hs-identifier hs-var">FullParams</span></a></span></span><span> </span><span id="local-6989586621679048925"><span class="annot"><a href="#local-6989586621679048925"><span class="hs-identifier hs-type">ix</span></a></span></span><span> </span><span id="local-6989586621679048924"><span class="annot"><a href="#local-6989586621679048924"><span class="hs-identifier hs-type">val</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span id="P"><span class="annot"><a href="Data.SRTree.Random.html#P"><span class="hs-identifier hs-var">P</span></a></span></span><span> </span><span class="hs-special">[</span><span class="annot"><a href="#local-6989586621679048925"><span class="hs-identifier hs-type">ix</span></a></span><span class="hs-special">]</span><span> </span><span class="hs-special">(</span><span class="annot"><a href="#local-6989586621679048924"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><a href="#local-6989586621679048924"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">)</span><span> </span><span class="hs-special">(</span><span class="annot"><span class="hs-identifier hs-type">Int</span></span><span class="hs-special">,</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Int</span></span><span class="hs-special">)</span><span> </span><span class="hs-special">[</span><span class="annot"><a href="Data.SRTree.Internal.html#Function"><span class="hs-identifier hs-type">Function</span></a></span><span class="hs-special">]</span><span>
+</span><span id="line-59"></span><span>
+</span><span id="line-60"></span><span class="hs-keyword">instance</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasVars"><span class="hs-identifier hs-type">HasVars</span></a></span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#FullParams"><span class="hs-identifier hs-type">FullParams</span></a></span><span> </span><span class="hs-keyword">where</span><span>
+</span><span id="line-61"></span><span>  </span><span id="local-6989586621679048919"><span class="annot"><span class="annottext">_vars :: forall ix val. FullParams ix val -&gt; [ix]
+</span><a href="#local-6989586621679048919"><span class="hs-identifier hs-var hs-var hs-var hs-var">_vars</span></a></span></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Random.html#P"><span class="hs-identifier hs-type">P</span></a></span><span> </span><span id="local-6989586621679048918"><span class="annot"><span class="annottext">[ix]
+</span><a href="#local-6989586621679048918"><span class="hs-identifier hs-var">ixs</span></a></span></span><span> </span><span class="annot"><span class="annottext">(val, val)
+</span><span class="hs-identifier">_</span></span><span> </span><span class="annot"><span class="annottext">(Int, Int)
+</span><span class="hs-identifier">_</span></span><span> </span><span class="annot"><span class="annottext">[Function]
+</span><span class="hs-identifier">_</span></span><span class="hs-special">)</span><span> </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">[ix]
+</span><a href="#local-6989586621679048918"><span class="hs-identifier hs-var">ixs</span></a></span><span>
+</span><span id="line-62"></span><span class="hs-keyword">instance</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasVals"><span class="hs-identifier hs-type">HasVals</span></a></span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#FullParams"><span class="hs-identifier hs-type">FullParams</span></a></span><span> </span><span class="hs-keyword">where</span><span>
+</span><span id="line-63"></span><span>  </span><span id="local-6989586621679048914"><span class="annot"><span class="annottext">_range :: forall ix val. FullParams ix val -&gt; (val, val)
+</span><a href="#local-6989586621679048914"><span class="hs-identifier hs-var hs-var hs-var hs-var">_range</span></a></span></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Random.html#P"><span class="hs-identifier hs-type">P</span></a></span><span> </span><span class="annot"><span class="annottext">[ix]
+</span><span class="hs-identifier">_</span></span><span> </span><span id="local-6989586621679048913"><span class="annot"><span class="annottext">(val, val)
+</span><a href="#local-6989586621679048913"><span class="hs-identifier hs-var">r</span></a></span></span><span> </span><span class="annot"><span class="annottext">(Int, Int)
+</span><span class="hs-identifier">_</span></span><span> </span><span class="annot"><span class="annottext">[Function]
+</span><span class="hs-identifier">_</span></span><span class="hs-special">)</span><span> </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">(val, val)
+</span><a href="#local-6989586621679048913"><span class="hs-identifier hs-var">r</span></a></span><span>
+</span><span id="line-64"></span><span class="hs-keyword">instance</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasExps"><span class="hs-identifier hs-type">HasExps</span></a></span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#FullParams"><span class="hs-identifier hs-type">FullParams</span></a></span><span> </span><span class="hs-keyword">where</span><span>
+</span><span id="line-65"></span><span>  </span><span id="local-6989586621679048909"><span class="annot"><span class="annottext">_exponents :: forall ix val. FullParams ix val -&gt; (Int, Int)
+</span><a href="#local-6989586621679048909"><span class="hs-identifier hs-var hs-var hs-var hs-var">_exponents</span></a></span></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Random.html#P"><span class="hs-identifier hs-type">P</span></a></span><span> </span><span class="annot"><span class="annottext">[ix]
+</span><span class="hs-identifier">_</span></span><span> </span><span class="annot"><span class="annottext">(val, val)
+</span><span class="hs-identifier">_</span></span><span> </span><span id="local-6989586621679048908"><span class="annot"><span class="annottext">(Int, Int)
+</span><a href="#local-6989586621679048908"><span class="hs-identifier hs-var">e</span></a></span></span><span> </span><span class="annot"><span class="annottext">[Function]
+</span><span class="hs-identifier">_</span></span><span class="hs-special">)</span><span> </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">(Int, Int)
+</span><a href="#local-6989586621679048908"><span class="hs-identifier hs-var">e</span></a></span><span>
+</span><span id="line-66"></span><span class="hs-keyword">instance</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasFuns"><span class="hs-identifier hs-type">HasFuns</span></a></span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#FullParams"><span class="hs-identifier hs-type">FullParams</span></a></span><span> </span><span class="hs-keyword">where</span><span>
+</span><span id="line-67"></span><span>  </span><span id="local-6989586621679048904"><span class="annot"><span class="annottext">_funs :: forall ix val. FullParams ix val -&gt; [Function]
+</span><a href="#local-6989586621679048904"><span class="hs-identifier hs-var hs-var hs-var hs-var">_funs</span></a></span></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Random.html#P"><span class="hs-identifier hs-type">P</span></a></span><span> </span><span class="annot"><span class="annottext">[ix]
+</span><span class="hs-identifier">_</span></span><span> </span><span class="annot"><span class="annottext">(val, val)
+</span><span class="hs-identifier">_</span></span><span> </span><span class="annot"><span class="annottext">(Int, Int)
+</span><span class="hs-identifier">_</span></span><span> </span><span id="local-6989586621679048903"><span class="annot"><span class="annottext">[Function]
+</span><a href="#local-6989586621679048903"><span class="hs-identifier hs-var">fs</span></a></span></span><span class="hs-special">)</span><span> </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">[Function]
+</span><a href="#local-6989586621679048903"><span class="hs-identifier hs-var">fs</span></a></span><span>
+</span><span id="line-68"></span><span>
+</span><span id="line-69"></span><span class="hs-comment">-- auxiliary function to sample between False and True</span><span>
+</span><span id="line-70"></span><span class="annot"><a href="Data.SRTree.Random.html#toss"><span class="hs-identifier hs-type">toss</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><span class="hs-identifier hs-type">StateT</span></span><span> </span><span class="annot"><span class="hs-identifier hs-type">StdGen</span></span><span> </span><span class="annot"><span class="hs-identifier hs-type">IO</span></span><span> </span><span class="annot"><span class="hs-identifier hs-type">Bool</span></span><span>
+</span><span id="line-71"></span><span id="toss"><span class="annot"><span class="annottext">toss :: StateT StdGen IO Bool
+</span><a href="Data.SRTree.Random.html#toss"><span class="hs-identifier hs-var hs-var">toss</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">(StdGen -&gt; (Bool, StdGen)) -&gt; StateT StdGen IO Bool
+forall s (m :: * -&gt; *) a. MonadState s m =&gt; (s -&gt; (a, s)) -&gt; m a
+</span><span class="hs-identifier hs-var">state</span></span><span> </span><span class="annot"><span class="annottext">StdGen -&gt; (Bool, StdGen)
+forall a g. (Random a, RandomGen g) =&gt; g -&gt; (a, g)
+</span><span class="hs-identifier hs-var">random</span></span><span>
+</span><span id="line-72"></span><span class="hs-pragma">{-# INLINE</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#toss"><span class="hs-pragma hs-type">toss</span></a></span><span> </span><span class="hs-pragma">#-}</span><span>
+</span><span id="line-73"></span><span>
+</span><span id="line-74"></span><span class="hs-comment">-- returns a random element of a list</span><span>
+</span><span id="line-75"></span><span id="local-6989586621679049056"><span class="annot"><a href="Data.SRTree.Random.html#randomFrom"><span class="hs-identifier hs-type">randomFrom</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="hs-special">[</span><span class="annot"><a href="#local-6989586621679049056"><span class="hs-identifier hs-type">a</span></a></span><span class="hs-special">]</span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="hs-identifier hs-type">StateT</span></span><span> </span><span class="annot"><span class="hs-identifier hs-type">StdGen</span></span><span> </span><span class="annot"><span class="hs-identifier hs-type">IO</span></span><span> </span><span class="annot"><a href="#local-6989586621679049056"><span class="hs-identifier hs-type">a</span></a></span></span><span>
+</span><span id="line-76"></span><span id="randomFrom"><span class="annot"><span class="annottext">randomFrom :: forall a. [a] -&gt; StateT StdGen IO a
+</span><a href="Data.SRTree.Random.html#randomFrom"><span class="hs-identifier hs-var hs-var">randomFrom</span></a></span></span><span> </span><span id="local-6989586621679048882"><span class="annot"><span class="annottext">[a]
+</span><a href="#local-6989586621679048882"><span class="hs-identifier hs-var">funs</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="hs-keyword">do</span><span> </span><span id="local-6989586621679048881"><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048881"><span class="hs-identifier hs-var">n</span></a></span></span><span> </span><span class="hs-glyph">&lt;-</span><span> </span><span class="annot"><span class="annottext">(Int, Int) -&gt; StateT StdGen IO Int
+forall val.
+(Ord val, Random val) =&gt;
+(val, val) -&gt; StateT StdGen IO val
+</span><a href="Data.SRTree.Random.html#randomRange"><span class="hs-identifier hs-var">randomRange</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">0</span></span><span class="hs-special">,</span><span> </span><span class="annot"><span class="annottext">[a] -&gt; Int
+forall (t :: * -&gt; *) a. Foldable t =&gt; t a -&gt; Int
+</span><span class="hs-identifier hs-var">length</span></span><span> </span><span class="annot"><span class="annottext">[a]
+</span><a href="#local-6989586621679048882"><span class="hs-identifier hs-var">funs</span></a></span><span> </span><span class="annot"><span class="annottext">Int -&gt; Int -&gt; Int
+forall a. Num a =&gt; a -&gt; a -&gt; a
+</span><span class="hs-glyph hs-var">-</span></span><span> </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">1</span></span><span class="hs-special">)</span><span>
+</span><span id="line-77"></span><span>                     </span><span class="annot"><span class="annottext">a -&gt; StateT StdGen IO a
+forall (f :: * -&gt; *) a. Applicative f =&gt; a -&gt; f a
+</span><span class="hs-identifier hs-var">pure</span></span><span> </span><span class="annot"><span class="annottext">(a -&gt; StateT StdGen IO a) -&gt; a -&gt; StateT StdGen IO a
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">[a]
+</span><a href="#local-6989586621679048882"><span class="hs-identifier hs-var">funs</span></a></span><span> </span><span class="annot"><span class="annottext">[a] -&gt; Int -&gt; a
+forall a. [a] -&gt; Int -&gt; a
+</span><span class="hs-operator hs-var">!!</span></span><span> </span><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048881"><span class="hs-identifier hs-var">n</span></a></span><span>
+</span><span id="line-78"></span><span class="hs-pragma">{-# INLINE</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#randomFrom"><span class="hs-pragma hs-type">randomFrom</span></a></span><span> </span><span class="hs-pragma">#-}</span><span>
+</span><span id="line-79"></span><span>
+</span><span id="line-80"></span><span class="hs-comment">-- returns a random element within a range</span><span>
+</span><span id="line-81"></span><span id="local-6989586621679049050"><span class="annot"><a href="Data.SRTree.Random.html#randomRange"><span class="hs-identifier hs-type">randomRange</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="hs-special">(</span><span class="annot"><span class="hs-identifier hs-type">Ord</span></span><span> </span><span class="annot"><a href="#local-6989586621679049050"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Random</span></span><span> </span><span class="annot"><a href="#local-6989586621679049050"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">)</span><span> </span><span class="hs-glyph">=&gt;</span><span> </span><span class="hs-special">(</span><span class="annot"><a href="#local-6989586621679049050"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><a href="#local-6989586621679049050"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">)</span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="hs-identifier hs-type">StateT</span></span><span> </span><span class="annot"><span class="hs-identifier hs-type">StdGen</span></span><span> </span><span class="annot"><span class="hs-identifier hs-type">IO</span></span><span> </span><span class="annot"><a href="#local-6989586621679049050"><span class="hs-identifier hs-type">val</span></a></span></span><span>
+</span><span id="line-82"></span><span id="randomRange"><span class="annot"><span class="annottext">randomRange :: forall val.
+(Ord val, Random val) =&gt;
+(val, val) -&gt; StateT StdGen IO val
+</span><a href="Data.SRTree.Random.html#randomRange"><span class="hs-identifier hs-var hs-var">randomRange</span></a></span></span><span> </span><span id="local-6989586621679048872"><span class="annot"><span class="annottext">(val, val)
+</span><a href="#local-6989586621679048872"><span class="hs-identifier hs-var">rng</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">(StdGen -&gt; (val, StdGen)) -&gt; StateT StdGen IO val
+forall s (m :: * -&gt; *) a. MonadState s m =&gt; (s -&gt; (a, s)) -&gt; m a
+</span><span class="hs-identifier hs-var">state</span></span><span> </span><span class="hs-special">(</span><span class="annot"><span class="annottext">(val, val) -&gt; StdGen -&gt; (val, StdGen)
+forall a g. (Random a, RandomGen g) =&gt; (a, a) -&gt; g -&gt; (a, g)
+</span><span class="hs-identifier hs-var">randomR</span></span><span> </span><span class="annot"><span class="annottext">(val, val)
+</span><a href="#local-6989586621679048872"><span class="hs-identifier hs-var">rng</span></a></span><span class="hs-special">)</span><span>
+</span><span id="line-83"></span><span class="hs-pragma">{-# INLINE</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#randomRange"><span class="hs-pragma hs-type">randomRange</span></a></span><span> </span><span class="hs-pragma">#-}</span><span>
+</span><span id="line-84"></span><span>
+</span><span id="line-85"></span><span class="hs-comment">-- Replace the child of a unary tree.</span><span>
+</span><span id="line-86"></span><span id="local-6989586621679049037"><span id="local-6989586621679049038"><span class="annot"><a href="Data.SRTree.Random.html#replaceChild"><span class="hs-identifier hs-type">replaceChild</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><a href="Data.SRTree.Internal.html#SRTree"><span class="hs-identifier hs-type">SRTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049038"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049037"><span class="hs-identifier hs-type">val</span></a></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><a href="Data.SRTree.Internal.html#SRTree"><span class="hs-identifier hs-type">SRTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049038"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049037"><span class="hs-identifier hs-type">val</span></a></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Maybe</span></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Internal.html#SRTree"><span class="hs-identifier hs-type">SRTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049038"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049037"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">)</span></span></span><span>
+</span><span id="line-87"></span><span id="replaceChild"><span class="annot"><span class="annottext">replaceChild :: forall ix val.
+SRTree ix val -&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+</span><a href="Data.SRTree.Random.html#replaceChild"><span class="hs-identifier hs-var hs-var">replaceChild</span></a></span></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Internal.html#Fun"><span class="hs-identifier hs-type">Fun</span></a></span><span> </span><span id="local-6989586621679048868"><span class="annot"><span class="annottext">Function
+</span><a href="#local-6989586621679048868"><span class="hs-identifier hs-var">g</span></a></span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span class="hs-special">)</span><span> </span><span id="local-6989586621679048867"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048867"><span class="hs-identifier hs-var">t</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a. a -&gt; Maybe a
+</span><span class="hs-identifier hs-var">Just</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; Maybe (SRTree ix val))
+-&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">Function -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. Function -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Fun"><span class="hs-identifier hs-var">Fun</span></a></span><span> </span><span class="annot"><span class="annottext">Function
+</span><a href="#local-6989586621679048868"><span class="hs-identifier hs-var">g</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048867"><span class="hs-identifier hs-var">t</span></a></span><span>
+</span><span id="line-88"></span><span class="annot"><a href="Data.SRTree.Random.html#replaceChild"><span class="hs-identifier hs-var">replaceChild</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Internal.html#Pow"><span class="hs-identifier hs-type">Pow</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span> </span><span id="local-6989586621679048865"><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048865"><span class="hs-identifier hs-var">k</span></a></span></span><span class="hs-special">)</span><span> </span><span id="local-6989586621679048864"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048864"><span class="hs-identifier hs-var">t</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a. a -&gt; Maybe a
+</span><span class="hs-identifier hs-var">Just</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; Maybe (SRTree ix val))
+-&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; Int -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; Int -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Pow"><span class="hs-identifier hs-var">Pow</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048864"><span class="hs-identifier hs-var">t</span></a></span><span> </span><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048865"><span class="hs-identifier hs-var">k</span></a></span><span>
+</span><span id="line-89"></span><span class="annot"><a href="Data.SRTree.Random.html#replaceChild"><span class="hs-identifier hs-var">replaceChild</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span>         </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">Maybe (SRTree ix val)
+forall a. Maybe a
+</span><span class="hs-identifier hs-var">Nothing</span></span><span> </span><span>
+</span><span id="line-90"></span><span class="hs-pragma">{-# INLINE</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#replaceChild"><span class="hs-pragma hs-type">replaceChild</span></a></span><span> </span><span class="hs-pragma">#-}</span><span>
+</span><span id="line-91"></span><span>
+</span><span id="line-92"></span><span class="hs-comment">-- Replace the children of a binary tree.</span><span>
+</span><span id="line-93"></span><span id="local-6989586621679049029"><span id="local-6989586621679049030"><span class="annot"><a href="Data.SRTree.Random.html#replaceChildren"><span class="hs-identifier hs-type">replaceChildren</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><a href="Data.SRTree.Internal.html#SRTree"><span class="hs-identifier hs-type">SRTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049030"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049029"><span class="hs-identifier hs-type">val</span></a></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><a href="Data.SRTree.Internal.html#SRTree"><span class="hs-identifier hs-type">SRTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049030"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049029"><span class="hs-identifier hs-type">val</span></a></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><a href="Data.SRTree.Internal.html#SRTree"><span class="hs-identifier hs-type">SRTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049030"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049029"><span class="hs-identifier hs-type">val</span></a></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Maybe</span></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Internal.html#SRTree"><span class="hs-identifier hs-type">SRTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049030"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049029"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">)</span></span></span><span>
+</span><span id="line-94"></span><span id="replaceChildren"><span class="annot"><span class="annottext">replaceChildren :: forall ix val.
+SRTree ix val
+-&gt; SRTree ix val -&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+</span><a href="Data.SRTree.Random.html#replaceChildren"><span class="hs-identifier hs-var hs-var">replaceChildren</span></a></span></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Internal.html#Add"><span class="hs-identifier hs-type">Add</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span class="hs-special">)</span><span> </span><span id="local-6989586621679048861"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048861"><span class="hs-identifier hs-var">l</span></a></span></span><span> </span><span id="local-6989586621679048860"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048860"><span class="hs-identifier hs-var">r</span></a></span></span><span>     </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a. a -&gt; Maybe a
+</span><span class="hs-identifier hs-var">Just</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; Maybe (SRTree ix val))
+-&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Add"><span class="hs-identifier hs-var">Add</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048861"><span class="hs-identifier hs-var">l</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048860"><span class="hs-identifier hs-var">r</span></a></span><span>
+</span><span id="line-95"></span><span class="annot"><a href="Data.SRTree.Random.html#replaceChildren"><span class="hs-identifier hs-var">replaceChildren</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Internal.html#Sub"><span class="hs-identifier hs-type">Sub</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span class="hs-special">)</span><span> </span><span id="local-6989586621679048858"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048858"><span class="hs-identifier hs-var">l</span></a></span></span><span> </span><span id="local-6989586621679048857"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048857"><span class="hs-identifier hs-var">r</span></a></span></span><span>     </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a. a -&gt; Maybe a
+</span><span class="hs-identifier hs-var">Just</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; Maybe (SRTree ix val))
+-&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Sub"><span class="hs-identifier hs-var">Sub</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048858"><span class="hs-identifier hs-var">l</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048857"><span class="hs-identifier hs-var">r</span></a></span><span>
+</span><span id="line-96"></span><span class="annot"><a href="Data.SRTree.Random.html#replaceChildren"><span class="hs-identifier hs-var">replaceChildren</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Internal.html#Mul"><span class="hs-identifier hs-type">Mul</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span class="hs-special">)</span><span> </span><span id="local-6989586621679048855"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048855"><span class="hs-identifier hs-var">l</span></a></span></span><span> </span><span id="local-6989586621679048854"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048854"><span class="hs-identifier hs-var">r</span></a></span></span><span>     </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a. a -&gt; Maybe a
+</span><span class="hs-identifier hs-var">Just</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; Maybe (SRTree ix val))
+-&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Mul"><span class="hs-identifier hs-var">Mul</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048855"><span class="hs-identifier hs-var">l</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048854"><span class="hs-identifier hs-var">r</span></a></span><span>
+</span><span id="line-97"></span><span class="annot"><a href="Data.SRTree.Random.html#replaceChildren"><span class="hs-identifier hs-var">replaceChildren</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Internal.html#Div"><span class="hs-identifier hs-type">Div</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span class="hs-special">)</span><span> </span><span id="local-6989586621679048852"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048852"><span class="hs-identifier hs-var">l</span></a></span></span><span> </span><span id="local-6989586621679048851"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048851"><span class="hs-identifier hs-var">r</span></a></span></span><span>     </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a. a -&gt; Maybe a
+</span><span class="hs-identifier hs-var">Just</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; Maybe (SRTree ix val))
+-&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Div"><span class="hs-identifier hs-var">Div</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048852"><span class="hs-identifier hs-var">l</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048851"><span class="hs-identifier hs-var">r</span></a></span><span>
+</span><span id="line-98"></span><span class="annot"><a href="Data.SRTree.Random.html#replaceChildren"><span class="hs-identifier hs-var">replaceChildren</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Internal.html#Power"><span class="hs-identifier hs-type">Power</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span class="hs-special">)</span><span> </span><span id="local-6989586621679048849"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048849"><span class="hs-identifier hs-var">l</span></a></span></span><span> </span><span id="local-6989586621679048848"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048848"><span class="hs-identifier hs-var">r</span></a></span></span><span>   </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a. a -&gt; Maybe a
+</span><span class="hs-identifier hs-var">Just</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; Maybe (SRTree ix val))
+-&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Power"><span class="hs-identifier hs-var">Power</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048849"><span class="hs-identifier hs-var">l</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048848"><span class="hs-identifier hs-var">r</span></a></span><span>
+</span><span id="line-99"></span><span class="annot"><a href="Data.SRTree.Random.html#replaceChildren"><span class="hs-identifier hs-var">replaceChildren</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Internal.html#LogBase"><span class="hs-identifier hs-type">LogBase</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span class="hs-special">)</span><span> </span><span id="local-6989586621679048846"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048846"><span class="hs-identifier hs-var">l</span></a></span></span><span> </span><span id="local-6989586621679048845"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048845"><span class="hs-identifier hs-var">r</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a. a -&gt; Maybe a
+</span><span class="hs-identifier hs-var">Just</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; Maybe (SRTree ix val))
+-&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#LogBase"><span class="hs-identifier hs-var">LogBase</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048846"><span class="hs-identifier hs-var">l</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048845"><span class="hs-identifier hs-var">r</span></a></span><span>
+</span><span id="line-100"></span><span class="annot"><a href="Data.SRTree.Random.html#replaceChildren"><span class="hs-identifier hs-var">replaceChildren</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span>             </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><span class="hs-identifier">_</span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="annottext">Maybe (SRTree ix val)
+forall a. Maybe a
+</span><span class="hs-identifier hs-var">Nothing</span></span><span>
+</span><span id="line-101"></span><span class="hs-pragma">{-# INLINE</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#replaceChildren"><span class="hs-pragma hs-type">replaceChildren</span></a></span><span> </span><span class="hs-pragma">#-}</span><span>
+</span><span id="line-102"></span><span>
+</span><span id="line-103"></span><span class="hs-comment">-- | RndTree is a Monad Transformer to generate random trees of type `SRTree ix val` </span><span>
+</span><span id="line-104"></span><span class="hs-comment">-- given the parameters `p ix val` using the random number generator `StdGen`.</span><span>
+</span><span id="line-105"></span><span class="hs-keyword">type</span><span> </span><span id="RndTree"><span class="annot"><a href="Data.SRTree.Random.html#RndTree"><span class="hs-identifier hs-var">RndTree</span></a></span></span><span> </span><span id="local-6989586621679048844"><span class="annot"><a href="#local-6989586621679048844"><span class="hs-identifier hs-type">p</span></a></span></span><span> </span><span id="local-6989586621679048843"><span class="annot"><a href="#local-6989586621679048843"><span class="hs-identifier hs-type">ix</span></a></span></span><span> </span><span id="local-6989586621679048842"><span class="annot"><a href="#local-6989586621679048842"><span class="hs-identifier hs-type">val</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="annot"><span class="hs-identifier hs-type">ReaderT</span></span><span> </span><span class="hs-special">(</span><span class="annot"><a href="#local-6989586621679048844"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048843"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048842"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">)</span><span> </span><span class="hs-special">(</span><span class="annot"><span class="hs-identifier hs-type">StateT</span></span><span> </span><span class="annot"><span class="hs-identifier hs-type">StdGen</span></span><span> </span><span class="annot"><span class="hs-identifier hs-type">IO</span></span><span class="hs-special">)</span><span> </span><span class="hs-special">(</span><span class="annot"><a href="Data.SRTree.Internal.html#SRTree"><span class="hs-identifier hs-type">SRTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048843"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048842"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">)</span><span>
+</span><span id="line-106"></span><span>
+</span><span id="line-107"></span><span class="hs-comment">-- | Returns a random variable, the parameter `p` must have the `HasVars` property</span><span>
+</span><span id="line-108"></span><span id="local-6989586621679049024"><span id="local-6989586621679049025"><span id="local-6989586621679049026"><span class="annot"><a href="Data.SRTree.Random.html#randomVar"><span class="hs-identifier hs-type">randomVar</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasVars"><span class="hs-identifier hs-type">HasVars</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049026"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="hs-glyph">=&gt;</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#RndTree"><span class="hs-identifier hs-type">RndTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049026"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049025"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049024"><span class="hs-identifier hs-type">val</span></a></span></span></span></span><span>
+</span><span id="line-109"></span><span id="randomVar"><span class="annot"><span class="annottext">randomVar :: forall (p :: * -&gt; * -&gt; *) ix val. HasVars p =&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomVar"><span class="hs-identifier hs-var hs-var">randomVar</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="hs-keyword">do</span><span> </span><span id="local-6989586621679048828"><span class="annot"><span class="annottext">[ix]
+</span><a href="#local-6989586621679048828"><span class="hs-identifier hs-var">vars</span></a></span></span><span> </span><span class="hs-glyph">&lt;-</span><span> </span><span class="annot"><span class="annottext">(p ix val -&gt; [ix]) -&gt; ReaderT (p ix val) (StateT StdGen IO) [ix]
+forall r (m :: * -&gt; *) a. MonadReader r m =&gt; (r -&gt; a) -&gt; m a
+</span><span class="hs-identifier hs-var">asks</span></span><span> </span><span class="annot"><span class="annottext">p ix val -&gt; [ix]
+forall (p :: * -&gt; * -&gt; *) ix val. HasVars p =&gt; p ix val -&gt; [ix]
+</span><a href="Data.SRTree.Random.html#_vars"><span class="hs-identifier hs-var">_vars</span></a></span><span>
+</span><span id="line-110"></span><span>               </span><span class="annot"><span class="annottext">StateT StdGen IO (SRTree ix val) -&gt; RndTree p ix val
+forall (t :: (* -&gt; *) -&gt; * -&gt; *) (m :: * -&gt; *) a.
+(MonadTrans t, Monad m) =&gt;
+m a -&gt; t m a
+</span><span class="hs-identifier hs-var">lift</span></span><span> </span><span class="annot"><span class="annottext">(StateT StdGen IO (SRTree ix val) -&gt; RndTree p ix val)
+-&gt; StateT StdGen IO (SRTree ix val) -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">ix -&gt; SRTree ix val
+forall ix val. ix -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Var"><span class="hs-identifier hs-var">Var</span></a></span><span> </span><span class="annot"><span class="annottext">(ix -&gt; SRTree ix val)
+-&gt; StateT StdGen IO ix -&gt; StateT StdGen IO (SRTree ix val)
+forall (f :: * -&gt; *) a b. Functor f =&gt; (a -&gt; b) -&gt; f a -&gt; f b
+</span><span class="hs-operator hs-var">&lt;$&gt;</span></span><span> </span><span class="annot"><span class="annottext">[ix] -&gt; StateT StdGen IO ix
+forall a. [a] -&gt; StateT StdGen IO a
+</span><a href="Data.SRTree.Random.html#randomFrom"><span class="hs-identifier hs-var">randomFrom</span></a></span><span> </span><span class="annot"><span class="annottext">[ix]
+</span><a href="#local-6989586621679048828"><span class="hs-identifier hs-var">vars</span></a></span><span>
+</span><span id="line-111"></span><span>
+</span><span id="line-112"></span><span class="hs-comment">-- | Returns a random constant, the parameter `p` must have the `HasConst` property</span><span>
+</span><span id="line-113"></span><span id="local-6989586621679048998"><span id="local-6989586621679048999"><span id="local-6989586621679049000"><span class="annot"><a href="Data.SRTree.Random.html#randomConst"><span class="hs-identifier hs-type">randomConst</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="hs-special">(</span><span class="annot"><span class="hs-identifier hs-type">Ord</span></span><span> </span><span class="annot"><a href="#local-6989586621679049000"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Random</span></span><span> </span><span class="annot"><a href="#local-6989586621679049000"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasVals"><span class="hs-identifier hs-type">HasVals</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048999"><span class="hs-identifier hs-type">p</span></a></span><span class="hs-special">)</span><span> </span><span class="hs-glyph">=&gt;</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#RndTree"><span class="hs-identifier hs-type">RndTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048999"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048998"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679049000"><span class="hs-identifier hs-type">val</span></a></span></span></span></span><span>
+</span><span id="line-114"></span><span id="randomConst"><span class="annot"><span class="annottext">randomConst :: forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasVals p) =&gt;
+RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomConst"><span class="hs-identifier hs-var hs-var">randomConst</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="hs-keyword">do</span><span> </span><span id="local-6989586621679048810"><span class="annot"><span class="annottext">(val, val)
+</span><a href="#local-6989586621679048810"><span class="hs-identifier hs-var">rng</span></a></span></span><span> </span><span class="hs-glyph">&lt;-</span><span> </span><span class="annot"><span class="annottext">(p ix val -&gt; (val, val))
+-&gt; ReaderT (p ix val) (StateT StdGen IO) (val, val)
+forall r (m :: * -&gt; *) a. MonadReader r m =&gt; (r -&gt; a) -&gt; m a
+</span><span class="hs-identifier hs-var">asks</span></span><span> </span><span class="annot"><span class="annottext">p ix val -&gt; (val, val)
+forall (p :: * -&gt; * -&gt; *) ix val.
+HasVals p =&gt;
+p ix val -&gt; (val, val)
+</span><a href="Data.SRTree.Random.html#_range"><span class="hs-identifier hs-var">_range</span></a></span><span>
+</span><span id="line-115"></span><span>                 </span><span class="annot"><span class="annottext">StateT StdGen IO (SRTree ix val) -&gt; RndTree p ix val
+forall (t :: (* -&gt; *) -&gt; * -&gt; *) (m :: * -&gt; *) a.
+(MonadTrans t, Monad m) =&gt;
+m a -&gt; t m a
+</span><span class="hs-identifier hs-var">lift</span></span><span> </span><span class="annot"><span class="annottext">(StateT StdGen IO (SRTree ix val) -&gt; RndTree p ix val)
+-&gt; StateT StdGen IO (SRTree ix val) -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">val -&gt; SRTree ix val
+forall ix val. val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Const"><span class="hs-identifier hs-var">Const</span></a></span><span> </span><span class="annot"><span class="annottext">(val -&gt; SRTree ix val)
+-&gt; StateT StdGen IO val -&gt; StateT StdGen IO (SRTree ix val)
+forall (f :: * -&gt; *) a b. Functor f =&gt; (a -&gt; b) -&gt; f a -&gt; f b
+</span><span class="hs-operator hs-var">&lt;$&gt;</span></span><span> </span><span class="annot"><span class="annottext">(val, val) -&gt; StateT StdGen IO val
+forall val.
+(Ord val, Random val) =&gt;
+(val, val) -&gt; StateT StdGen IO val
+</span><a href="Data.SRTree.Random.html#randomRange"><span class="hs-identifier hs-var">randomRange</span></a></span><span> </span><span class="annot"><span class="annottext">(val, val)
+</span><a href="#local-6989586621679048810"><span class="hs-identifier hs-var">rng</span></a></span><span>
+</span><span id="line-116"></span><span>
+</span><span id="line-117"></span><span class="hs-comment">-- | Returns a random integer power node, the parameter `p` must have the `HasExps` property</span><span>
+</span><span id="line-118"></span><span id="local-6989586621679048992"><span id="local-6989586621679048993"><span id="local-6989586621679048994"><span class="annot"><a href="Data.SRTree.Random.html#randomPow"><span class="hs-identifier hs-type">randomPow</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="hs-special">(</span><span class="annot"><span class="hs-identifier hs-type">Ord</span></span><span> </span><span class="annot"><a href="#local-6989586621679048994"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Random</span></span><span> </span><span class="annot"><a href="#local-6989586621679048994"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasExps"><span class="hs-identifier hs-type">HasExps</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048993"><span class="hs-identifier hs-type">p</span></a></span><span class="hs-special">)</span><span> </span><span class="hs-glyph">=&gt;</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#RndTree"><span class="hs-identifier hs-type">RndTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048993"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048992"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048994"><span class="hs-identifier hs-type">val</span></a></span></span></span></span><span>
+</span><span id="line-119"></span><span id="randomPow"><span class="annot"><span class="annottext">randomPow :: forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasExps p) =&gt;
+RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomPow"><span class="hs-identifier hs-var hs-var">randomPow</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="hs-keyword">do</span><span> </span><span id="local-6989586621679048795"><span class="annot"><span class="annottext">(Int, Int)
+</span><a href="#local-6989586621679048795"><span class="hs-identifier hs-var">rng</span></a></span></span><span> </span><span class="hs-glyph">&lt;-</span><span> </span><span class="annot"><span class="annottext">(p ix val -&gt; (Int, Int))
+-&gt; ReaderT (p ix val) (StateT StdGen IO) (Int, Int)
+forall r (m :: * -&gt; *) a. MonadReader r m =&gt; (r -&gt; a) -&gt; m a
+</span><span class="hs-identifier hs-var">asks</span></span><span> </span><span class="annot"><span class="annottext">p ix val -&gt; (Int, Int)
+forall (p :: * -&gt; * -&gt; *) ix val.
+HasExps p =&gt;
+p ix val -&gt; (Int, Int)
+</span><a href="Data.SRTree.Random.html#_exponents"><span class="hs-identifier hs-var">_exponents</span></a></span><span>
+</span><span id="line-120"></span><span>               </span><span class="annot"><span class="annottext">StateT StdGen IO (SRTree ix val) -&gt; RndTree p ix val
+forall (t :: (* -&gt; *) -&gt; * -&gt; *) (m :: * -&gt; *) a.
+(MonadTrans t, Monad m) =&gt;
+m a -&gt; t m a
+</span><span class="hs-identifier hs-var">lift</span></span><span> </span><span class="annot"><span class="annottext">(StateT StdGen IO (SRTree ix val) -&gt; RndTree p ix val)
+-&gt; StateT StdGen IO (SRTree ix val) -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; Int -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; Int -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Pow"><span class="hs-identifier hs-var">Pow</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span> </span><span class="annot"><span class="annottext">(Int -&gt; SRTree ix val)
+-&gt; StateT StdGen IO Int -&gt; StateT StdGen IO (SRTree ix val)
+forall (f :: * -&gt; *) a b. Functor f =&gt; (a -&gt; b) -&gt; f a -&gt; f b
+</span><span class="hs-operator hs-var">&lt;$&gt;</span></span><span> </span><span class="annot"><span class="annottext">(Int, Int) -&gt; StateT StdGen IO Int
+forall val.
+(Ord val, Random val) =&gt;
+(val, val) -&gt; StateT StdGen IO val
+</span><a href="Data.SRTree.Random.html#randomRange"><span class="hs-identifier hs-var">randomRange</span></a></span><span> </span><span class="annot"><span class="annottext">(Int, Int)
+</span><a href="#local-6989586621679048795"><span class="hs-identifier hs-var">rng</span></a></span><span>
+</span><span id="line-121"></span><span>
+</span><span id="line-122"></span><span class="hs-comment">-- | Returns a random function, the parameter `p` must have the `HasFuns` property</span><span>
+</span><span id="line-123"></span><span id="local-6989586621679048986"><span id="local-6989586621679048987"><span id="local-6989586621679048988"><span class="annot"><a href="Data.SRTree.Random.html#randomFunction"><span class="hs-identifier hs-type">randomFunction</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasFuns"><span class="hs-identifier hs-type">HasFuns</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048988"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="hs-glyph">=&gt;</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#RndTree"><span class="hs-identifier hs-type">RndTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048988"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048987"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048986"><span class="hs-identifier hs-type">val</span></a></span></span></span></span><span>
+</span><span id="line-124"></span><span id="randomFunction"><span class="annot"><span class="annottext">randomFunction :: forall (p :: * -&gt; * -&gt; *) ix val. HasFuns p =&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomFunction"><span class="hs-identifier hs-var hs-var">randomFunction</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="hs-keyword">do</span><span> </span><span id="local-6989586621679048784"><span class="annot"><span class="annottext">[Function]
+</span><a href="#local-6989586621679048784"><span class="hs-identifier hs-var">funs</span></a></span></span><span> </span><span class="hs-glyph">&lt;-</span><span> </span><span class="annot"><span class="annottext">(p ix val -&gt; [Function])
+-&gt; ReaderT (p ix val) (StateT StdGen IO) [Function]
+forall r (m :: * -&gt; *) a. MonadReader r m =&gt; (r -&gt; a) -&gt; m a
+</span><span class="hs-identifier hs-var">asks</span></span><span> </span><span class="annot"><span class="annottext">p ix val -&gt; [Function]
+forall (p :: * -&gt; * -&gt; *) ix val.
+HasFuns p =&gt;
+p ix val -&gt; [Function]
+</span><a href="Data.SRTree.Random.html#_funs"><span class="hs-identifier hs-var">_funs</span></a></span><span>
+</span><span id="line-125"></span><span>                    </span><span class="annot"><span class="annottext">StateT StdGen IO (SRTree ix val) -&gt; RndTree p ix val
+forall (t :: (* -&gt; *) -&gt; * -&gt; *) (m :: * -&gt; *) a.
+(MonadTrans t, Monad m) =&gt;
+m a -&gt; t m a
+</span><span class="hs-identifier hs-var">lift</span></span><span> </span><span class="annot"><span class="annottext">(StateT StdGen IO (SRTree ix val) -&gt; RndTree p ix val)
+-&gt; StateT StdGen IO (SRTree ix val) -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="hs-special">(</span><span class="annot"><span class="annottext">Function -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. Function -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Fun"><span class="hs-operator hs-var">`Fun`</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span class="hs-special">)</span><span> </span><span class="annot"><span class="annottext">(Function -&gt; SRTree ix val)
+-&gt; StateT StdGen IO Function -&gt; StateT StdGen IO (SRTree ix val)
+forall (f :: * -&gt; *) a b. Functor f =&gt; (a -&gt; b) -&gt; f a -&gt; f b
+</span><span class="hs-operator hs-var">&lt;$&gt;</span></span><span> </span><span class="annot"><span class="annottext">[Function] -&gt; StateT StdGen IO Function
+forall a. [a] -&gt; StateT StdGen IO a
+</span><a href="Data.SRTree.Random.html#randomFrom"><span class="hs-identifier hs-var">randomFrom</span></a></span><span> </span><span class="annot"><span class="annottext">[Function]
+</span><a href="#local-6989586621679048784"><span class="hs-identifier hs-var">funs</span></a></span><span>
+</span><span id="line-126"></span><span>
+</span><span id="line-127"></span><span class="hs-comment">-- | Returns a random node, the parameter `p` must have every property.</span><span>
+</span><span id="line-128"></span><span id="local-6989586621679048979"><span id="local-6989586621679048981"><span id="local-6989586621679048982"><span class="annot"><a href="Data.SRTree.Random.html#randomNode"><span class="hs-identifier hs-type">randomNode</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="hs-special">(</span><span class="annot"><span class="hs-identifier hs-type">Ord</span></span><span> </span><span class="annot"><a href="#local-6989586621679048982"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Random</span></span><span> </span><span class="annot"><a href="#local-6989586621679048982"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasEverything"><span class="hs-identifier hs-type">HasEverything</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048981"><span class="hs-identifier hs-type">p</span></a></span><span class="hs-special">)</span><span> </span><span class="hs-glyph">=&gt;</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#RndTree"><span class="hs-identifier hs-type">RndTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048981"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048979"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048982"><span class="hs-identifier hs-type">val</span></a></span></span></span></span><span>
+</span><span id="line-129"></span><span id="randomNode"><span class="annot"><span class="annottext">randomNode :: forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasEverything p) =&gt;
+RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomNode"><span class="hs-identifier hs-var hs-var">randomNode</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="hs-keyword">do</span><span>
+</span><span id="line-130"></span><span>  </span><span id="local-6989586621679048727"><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048727"><span class="hs-identifier hs-var">choice</span></a></span></span><span> </span><span class="hs-glyph">&lt;-</span><span> </span><span class="annot"><span class="annottext">StateT StdGen IO Int -&gt; ReaderT (p ix val) (StateT StdGen IO) Int
+forall (t :: (* -&gt; *) -&gt; * -&gt; *) (m :: * -&gt; *) a.
+(MonadTrans t, Monad m) =&gt;
+m a -&gt; t m a
+</span><span class="hs-identifier hs-var">lift</span></span><span> </span><span class="annot"><span class="annottext">(StateT StdGen IO Int -&gt; ReaderT (p ix val) (StateT StdGen IO) Int)
+-&gt; StateT StdGen IO Int
+-&gt; ReaderT (p ix val) (StateT StdGen IO) Int
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">(Int, Int) -&gt; StateT StdGen IO Int
+forall val.
+(Ord val, Random val) =&gt;
+(val, val) -&gt; StateT StdGen IO val
+</span><a href="Data.SRTree.Random.html#randomRange"><span class="hs-identifier hs-var">randomRange</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">0</span></span><span class="hs-special">,</span><span> </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">9</span></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Int</span></span><span class="hs-special">)</span><span>
+</span><span id="line-131"></span><span>  </span><span class="hs-keyword">case</span><span> </span><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048727"><span class="hs-identifier hs-var">choice</span></a></span><span> </span><span class="hs-keyword">of</span><span>
+</span><span id="line-132"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">0</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">RndTree p ix val
+forall (p :: * -&gt; * -&gt; *) ix val. HasVars p =&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomVar"><span class="hs-identifier hs-var">randomVar</span></a></span><span>
+</span><span id="line-133"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">1</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">RndTree p ix val
+forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasVals p) =&gt;
+RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomConst"><span class="hs-identifier hs-var">randomConst</span></a></span><span>
+</span><span id="line-134"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">2</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">RndTree p ix val
+forall (p :: * -&gt; * -&gt; *) ix val. HasFuns p =&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomFunction"><span class="hs-identifier hs-var">randomFunction</span></a></span><span>
+</span><span id="line-135"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">3</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">RndTree p ix val
+forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasExps p) =&gt;
+RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomPow"><span class="hs-identifier hs-var">randomPow</span></a></span><span>
+</span><span id="line-136"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">4</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; RndTree p ix val
+forall (f :: * -&gt; *) a. Applicative f =&gt; a -&gt; f a
+</span><span class="hs-identifier hs-var">pure</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; RndTree p ix val)
+-&gt; SRTree ix val -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Add"><span class="hs-identifier hs-var">Add</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span>
+</span><span id="line-137"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">5</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; RndTree p ix val
+forall (f :: * -&gt; *) a. Applicative f =&gt; a -&gt; f a
+</span><span class="hs-identifier hs-var">pure</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; RndTree p ix val)
+-&gt; SRTree ix val -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Sub"><span class="hs-identifier hs-var">Sub</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span>
+</span><span id="line-138"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">6</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; RndTree p ix val
+forall (f :: * -&gt; *) a. Applicative f =&gt; a -&gt; f a
+</span><span class="hs-identifier hs-var">pure</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; RndTree p ix val)
+-&gt; SRTree ix val -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Mul"><span class="hs-identifier hs-var">Mul</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span>
+</span><span id="line-139"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">7</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; RndTree p ix val
+forall (f :: * -&gt; *) a. Applicative f =&gt; a -&gt; f a
+</span><span class="hs-identifier hs-var">pure</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; RndTree p ix val)
+-&gt; SRTree ix val -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Div"><span class="hs-identifier hs-var">Div</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span>
+</span><span id="line-140"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">8</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; RndTree p ix val
+forall (f :: * -&gt; *) a. Applicative f =&gt; a -&gt; f a
+</span><span class="hs-identifier hs-var">pure</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; RndTree p ix val)
+-&gt; SRTree ix val -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Power"><span class="hs-identifier hs-var">Power</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span>
+</span><span id="line-141"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">9</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; RndTree p ix val
+forall (f :: * -&gt; *) a. Applicative f =&gt; a -&gt; f a
+</span><span class="hs-identifier hs-var">pure</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; RndTree p ix val)
+-&gt; SRTree ix val -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#LogBase"><span class="hs-identifier hs-var">LogBase</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span>
+</span><span id="line-142"></span><span>
+</span><span id="line-143"></span><span class="hs-comment">-- | Returns a random non-terminal node, the parameter `p` must have every property.</span><span>
+</span><span id="line-144"></span><span id="local-6989586621679048724"><span id="local-6989586621679048725"><span id="local-6989586621679048726"><span class="annot"><a href="Data.SRTree.Random.html#randomNonTerminal"><span class="hs-identifier hs-type">randomNonTerminal</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="hs-special">(</span><span class="annot"><span class="hs-identifier hs-type">Ord</span></span><span> </span><span class="annot"><a href="#local-6989586621679048726"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Random</span></span><span> </span><span class="annot"><a href="#local-6989586621679048726"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasEverything"><span class="hs-identifier hs-type">HasEverything</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048725"><span class="hs-identifier hs-type">p</span></a></span><span class="hs-special">)</span><span> </span><span class="hs-glyph">=&gt;</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#RndTree"><span class="hs-identifier hs-type">RndTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048725"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048724"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048726"><span class="hs-identifier hs-type">val</span></a></span></span></span></span><span>
+</span><span id="line-145"></span><span id="randomNonTerminal"><span class="annot"><span class="annottext">randomNonTerminal :: forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasEverything p) =&gt;
+RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomNonTerminal"><span class="hs-identifier hs-var hs-var">randomNonTerminal</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="hs-keyword">do</span><span>
+</span><span id="line-146"></span><span>  </span><span id="local-6989586621679048683"><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048683"><span class="hs-identifier hs-var">choice</span></a></span></span><span> </span><span class="hs-glyph">&lt;-</span><span> </span><span class="annot"><span class="annottext">StateT StdGen IO Int -&gt; ReaderT (p ix val) (StateT StdGen IO) Int
+forall (t :: (* -&gt; *) -&gt; * -&gt; *) (m :: * -&gt; *) a.
+(MonadTrans t, Monad m) =&gt;
+m a -&gt; t m a
+</span><span class="hs-identifier hs-var">lift</span></span><span> </span><span class="annot"><span class="annottext">(StateT StdGen IO Int -&gt; ReaderT (p ix val) (StateT StdGen IO) Int)
+-&gt; StateT StdGen IO Int
+-&gt; ReaderT (p ix val) (StateT StdGen IO) Int
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">(Int, Int) -&gt; StateT StdGen IO Int
+forall val.
+(Ord val, Random val) =&gt;
+(val, val) -&gt; StateT StdGen IO val
+</span><a href="Data.SRTree.Random.html#randomRange"><span class="hs-identifier hs-var">randomRange</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">0</span></span><span class="hs-special">,</span><span> </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">7</span></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Int</span></span><span class="hs-special">)</span><span>
+</span><span id="line-147"></span><span>  </span><span class="hs-keyword">case</span><span> </span><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048683"><span class="hs-identifier hs-var">choice</span></a></span><span> </span><span class="hs-keyword">of</span><span>
+</span><span id="line-148"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">0</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">RndTree p ix val
+forall (p :: * -&gt; * -&gt; *) ix val. HasFuns p =&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomFunction"><span class="hs-identifier hs-var">randomFunction</span></a></span><span>
+</span><span id="line-149"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">1</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">RndTree p ix val
+forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasExps p) =&gt;
+RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomPow"><span class="hs-identifier hs-var">randomPow</span></a></span><span>
+</span><span id="line-150"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">2</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; RndTree p ix val
+forall (f :: * -&gt; *) a. Applicative f =&gt; a -&gt; f a
+</span><span class="hs-identifier hs-var">pure</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; RndTree p ix val)
+-&gt; SRTree ix val -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Add"><span class="hs-identifier hs-var">Add</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span>
+</span><span id="line-151"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">3</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; RndTree p ix val
+forall (f :: * -&gt; *) a. Applicative f =&gt; a -&gt; f a
+</span><span class="hs-identifier hs-var">pure</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; RndTree p ix val)
+-&gt; SRTree ix val -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Sub"><span class="hs-identifier hs-var">Sub</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span>
+</span><span id="line-152"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">4</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; RndTree p ix val
+forall (f :: * -&gt; *) a. Applicative f =&gt; a -&gt; f a
+</span><span class="hs-identifier hs-var">pure</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; RndTree p ix val)
+-&gt; SRTree ix val -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Mul"><span class="hs-identifier hs-var">Mul</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span>
+</span><span id="line-153"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">5</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; RndTree p ix val
+forall (f :: * -&gt; *) a. Applicative f =&gt; a -&gt; f a
+</span><span class="hs-identifier hs-var">pure</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; RndTree p ix val)
+-&gt; SRTree ix val -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Div"><span class="hs-identifier hs-var">Div</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span>
+</span><span id="line-154"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">6</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; RndTree p ix val
+forall (f :: * -&gt; *) a. Applicative f =&gt; a -&gt; f a
+</span><span class="hs-identifier hs-var">pure</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; RndTree p ix val)
+-&gt; SRTree ix val -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Power"><span class="hs-identifier hs-var">Power</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span>
+</span><span id="line-155"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">7</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; RndTree p ix val
+forall (f :: * -&gt; *) a. Applicative f =&gt; a -&gt; f a
+</span><span class="hs-identifier hs-var">pure</span></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; RndTree p ix val)
+-&gt; SRTree ix val -&gt; RndTree p ix val
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+forall ix val. SRTree ix val -&gt; SRTree ix val -&gt; SRTree ix val
+</span><a href="Data.SRTree.Internal.html#LogBase"><span class="hs-identifier hs-var">LogBase</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+forall ix val. SRTree ix val
+</span><a href="Data.SRTree.Internal.html#Empty"><span class="hs-identifier hs-var">Empty</span></a></span><span>
+</span><span id="line-156"></span><span>    </span><span>
+</span><span id="line-157"></span><span class="hs-comment">-- | Returns a random tree with a limited budget, the parameter `p` must have every property.</span><span>
+</span><span id="line-158"></span><span id="local-6989586621679048964"><span id="local-6989586621679048965"><span id="local-6989586621679048966"><span class="annot"><a href="Data.SRTree.Random.html#randomTree"><span class="hs-identifier hs-type">randomTree</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="hs-special">(</span><span class="annot"><span class="hs-identifier hs-type">Ord</span></span><span> </span><span class="annot"><a href="#local-6989586621679048966"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Random</span></span><span> </span><span class="annot"><a href="#local-6989586621679048966"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasEverything"><span class="hs-identifier hs-type">HasEverything</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048965"><span class="hs-identifier hs-type">p</span></a></span><span class="hs-special">)</span><span> </span><span class="hs-glyph">=&gt;</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Int</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#RndTree"><span class="hs-identifier hs-type">RndTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048965"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048964"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048966"><span class="hs-identifier hs-type">val</span></a></span></span></span></span><span>
+</span><span id="line-159"></span><span id="randomTree"><span class="annot"><span class="annottext">randomTree :: forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasEverything p) =&gt;
+Int -&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomTree"><span class="hs-identifier hs-var hs-var">randomTree</span></a></span></span><span> </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">0</span></span><span>      </span><span class="hs-glyph">=</span><span> </span><span class="hs-keyword">do</span><span>
+</span><span id="line-160"></span><span>  </span><span id="local-6989586621679048630"><span class="annot"><span class="annottext">Bool
+</span><a href="#local-6989586621679048630"><span class="hs-identifier hs-var">coin</span></a></span></span><span> </span><span class="hs-glyph">&lt;-</span><span> </span><span class="annot"><span class="annottext">StateT StdGen IO Bool -&gt; ReaderT (p ix val) (StateT StdGen IO) Bool
+forall (t :: (* -&gt; *) -&gt; * -&gt; *) (m :: * -&gt; *) a.
+(MonadTrans t, Monad m) =&gt;
+m a -&gt; t m a
+</span><span class="hs-identifier hs-var">lift</span></span><span> </span><span class="annot"><span class="annottext">StateT StdGen IO Bool
+</span><a href="Data.SRTree.Random.html#toss"><span class="hs-identifier hs-var">toss</span></a></span><span>
+</span><span id="line-161"></span><span>  </span><span class="hs-keyword">if</span><span> </span><span class="annot"><span class="annottext">Bool
+</span><a href="#local-6989586621679048630"><span class="hs-identifier hs-var">coin</span></a></span><span>
+</span><span id="line-162"></span><span>    </span><span class="hs-keyword">then</span><span> </span><span class="annot"><span class="annottext">RndTree p ix val
+forall (p :: * -&gt; * -&gt; *) ix val. HasVars p =&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomVar"><span class="hs-identifier hs-var">randomVar</span></a></span><span>
+</span><span id="line-163"></span><span>    </span><span class="hs-keyword">else</span><span> </span><span class="annot"><span class="annottext">RndTree p ix val
+forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasVals p) =&gt;
+RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomConst"><span class="hs-identifier hs-var">randomConst</span></a></span><span>
+</span><span id="line-164"></span><span class="annot"><a href="Data.SRTree.Random.html#randomTree"><span class="hs-identifier hs-var">randomTree</span></a></span><span> </span><span id="local-6989586621679048629"><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048629"><span class="hs-identifier hs-var">budget</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="hs-keyword">do</span><span> </span><span>
+</span><span id="line-165"></span><span>  </span><span id="local-6989586621679048628"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048628"><span class="hs-identifier hs-var">node</span></a></span></span><span>  </span><span class="hs-glyph">&lt;-</span><span> </span><span class="annot"><span class="annottext">RndTree p ix val
+forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasEverything p) =&gt;
+RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomNode"><span class="hs-identifier hs-var">randomNode</span></a></span><span>
+</span><span id="line-166"></span><span>  </span><span class="annot"><span class="annottext">Maybe (SRTree ix val) -&gt; SRTree ix val
+forall a. HasCallStack =&gt; Maybe a -&gt; a
+</span><span class="hs-identifier hs-var">fromJust</span></span><span> </span><span class="annot"><span class="annottext">(Maybe (SRTree ix val) -&gt; SRTree ix val)
+-&gt; ReaderT (p ix val) (StateT StdGen IO) (Maybe (SRTree ix val))
+-&gt; RndTree p ix val
+forall (f :: * -&gt; *) a b. Functor f =&gt; (a -&gt; b) -&gt; f a -&gt; f b
+</span><span class="hs-operator hs-var">&lt;$&gt;</span></span><span> </span><span class="hs-keyword">case</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; Int
+forall ix val. SRTree ix val -&gt; Int
+</span><a href="Data.SRTree.Internal.html#arity"><span class="hs-identifier hs-var">arity</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048628"><span class="hs-identifier hs-var">node</span></a></span><span> </span><span class="hs-keyword">of</span><span>
+</span><span id="line-167"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">0</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">Maybe (SRTree ix val)
+-&gt; ReaderT (p ix val) (StateT StdGen IO) (Maybe (SRTree ix val))
+forall (f :: * -&gt; *) a. Applicative f =&gt; a -&gt; f a
+</span><span class="hs-identifier hs-var">pure</span></span><span> </span><span class="annot"><span class="annottext">(Maybe (SRTree ix val)
+ -&gt; ReaderT (p ix val) (StateT StdGen IO) (Maybe (SRTree ix val)))
+-&gt; Maybe (SRTree ix val)
+-&gt; ReaderT (p ix val) (StateT StdGen IO) (Maybe (SRTree ix val))
+forall a b. (a -&gt; b) -&gt; a -&gt; b
+</span><span class="hs-operator hs-var">$</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; Maybe (SRTree ix val)
+forall a. a -&gt; Maybe a
+</span><span class="hs-identifier hs-var">Just</span></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048628"><span class="hs-identifier hs-var">node</span></a></span><span>
+</span><span id="line-168"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">1</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+forall ix val.
+SRTree ix val -&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+</span><a href="Data.SRTree.Random.html#replaceChild"><span class="hs-identifier hs-var">replaceChild</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048628"><span class="hs-identifier hs-var">node</span></a></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; Maybe (SRTree ix val))
+-&gt; RndTree p ix val
+-&gt; ReaderT (p ix val) (StateT StdGen IO) (Maybe (SRTree ix val))
+forall (f :: * -&gt; *) a b. Functor f =&gt; (a -&gt; b) -&gt; f a -&gt; f b
+</span><span class="hs-operator hs-var">&lt;$&gt;</span></span><span> </span><span class="annot"><span class="annottext">Int -&gt; RndTree p ix val
+forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasEverything p) =&gt;
+Int -&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomTree"><span class="hs-identifier hs-var">randomTree</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048629"><span class="hs-identifier hs-var">budget</span></a></span><span> </span><span class="annot"><span class="annottext">Int -&gt; Int -&gt; Int
+forall a. Num a =&gt; a -&gt; a -&gt; a
+</span><span class="hs-glyph hs-var">-</span></span><span> </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">1</span></span><span class="hs-special">)</span><span>
+</span><span id="line-169"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">2</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+-&gt; SRTree ix val -&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+forall ix val.
+SRTree ix val
+-&gt; SRTree ix val -&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+</span><a href="Data.SRTree.Random.html#replaceChildren"><span class="hs-identifier hs-var">replaceChildren</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048628"><span class="hs-identifier hs-var">node</span></a></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; SRTree ix val -&gt; Maybe (SRTree ix val))
+-&gt; RndTree p ix val
+-&gt; ReaderT
+     (p ix val)
+     (StateT StdGen IO)
+     (SRTree ix val -&gt; Maybe (SRTree ix val))
+forall (f :: * -&gt; *) a b. Functor f =&gt; (a -&gt; b) -&gt; f a -&gt; f b
+</span><span class="hs-operator hs-var">&lt;$&gt;</span></span><span> </span><span class="annot"><span class="annottext">Int -&gt; RndTree p ix val
+forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasEverything p) =&gt;
+Int -&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomTree"><span class="hs-identifier hs-var">randomTree</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048629"><span class="hs-identifier hs-var">budget</span></a></span><span> </span><span class="annot"><span class="annottext">Int -&gt; Int -&gt; Int
+forall a. Integral a =&gt; a -&gt; a -&gt; a
+</span><span class="hs-operator hs-var">`div`</span></span><span> </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">2</span></span><span class="hs-special">)</span><span> </span><span class="annot"><span class="annottext">ReaderT
+  (p ix val)
+  (StateT StdGen IO)
+  (SRTree ix val -&gt; Maybe (SRTree ix val))
+-&gt; RndTree p ix val
+-&gt; ReaderT (p ix val) (StateT StdGen IO) (Maybe (SRTree ix val))
+forall (f :: * -&gt; *) a b. Applicative f =&gt; f (a -&gt; b) -&gt; f a -&gt; f b
+</span><span class="hs-operator hs-var">&lt;*&gt;</span></span><span> </span><span class="annot"><span class="annottext">Int -&gt; RndTree p ix val
+forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasEverything p) =&gt;
+Int -&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomTree"><span class="hs-identifier hs-var">randomTree</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048629"><span class="hs-identifier hs-var">budget</span></a></span><span> </span><span class="annot"><span class="annottext">Int -&gt; Int -&gt; Int
+forall a. Integral a =&gt; a -&gt; a -&gt; a
+</span><span class="hs-operator hs-var">`div`</span></span><span> </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">2</span></span><span class="hs-special">)</span><span>
+</span><span id="line-170"></span><span>    </span><span>
+</span><span id="line-171"></span><span class="hs-comment">-- | Returns a random tree with a approximately a number `n` of nodes, the parameter `p` must have every property.</span><span>
+</span><span id="line-172"></span><span id="local-6989586621679048623"><span id="local-6989586621679048624"><span id="local-6989586621679048625"><span class="annot"><a href="Data.SRTree.Random.html#randomTreeBalanced"><span class="hs-identifier hs-type">randomTreeBalanced</span></a></span><span> </span><span class="hs-glyph">::</span><span> </span><span class="hs-special">(</span><span class="annot"><span class="hs-identifier hs-type">Ord</span></span><span> </span><span class="annot"><a href="#local-6989586621679048625"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Random</span></span><span> </span><span class="annot"><a href="#local-6989586621679048625"><span class="hs-identifier hs-type">val</span></a></span><span class="hs-special">,</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#HasEverything"><span class="hs-identifier hs-type">HasEverything</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048624"><span class="hs-identifier hs-type">p</span></a></span><span class="hs-special">)</span><span> </span><span class="hs-glyph">=&gt;</span><span> </span><span class="annot"><span class="hs-identifier hs-type">Int</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><a href="Data.SRTree.Random.html#RndTree"><span class="hs-identifier hs-type">RndTree</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048624"><span class="hs-identifier hs-type">p</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048623"><span class="hs-identifier hs-type">ix</span></a></span><span> </span><span class="annot"><a href="#local-6989586621679048625"><span class="hs-identifier hs-type">val</span></a></span></span></span></span><span>
+</span><span id="line-173"></span><span id="randomTreeBalanced"><span class="annot"><span class="annottext">randomTreeBalanced :: forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasEverything p) =&gt;
+Int -&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomTreeBalanced"><span class="hs-identifier hs-var hs-var">randomTreeBalanced</span></a></span></span><span> </span><span id="local-6989586621679048575"><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048575"><span class="hs-identifier hs-var">n</span></a></span></span><span> </span><span class="hs-glyph">|</span><span> </span><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048575"><span class="hs-identifier hs-var">n</span></a></span><span> </span><span class="annot"><span class="annottext">Int -&gt; Int -&gt; Bool
+forall a. Ord a =&gt; a -&gt; a -&gt; Bool
+</span><span class="hs-operator hs-var">&lt;=</span></span><span> </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">1</span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="hs-keyword">do</span><span>
+</span><span id="line-174"></span><span>  </span><span id="local-6989586621679048573"><span class="annot"><span class="annottext">Bool
+</span><a href="#local-6989586621679048573"><span class="hs-identifier hs-var">coin</span></a></span></span><span> </span><span class="hs-glyph">&lt;-</span><span> </span><span class="annot"><span class="annottext">StateT StdGen IO Bool -&gt; ReaderT (p ix val) (StateT StdGen IO) Bool
+forall (t :: (* -&gt; *) -&gt; * -&gt; *) (m :: * -&gt; *) a.
+(MonadTrans t, Monad m) =&gt;
+m a -&gt; t m a
+</span><span class="hs-identifier hs-var">lift</span></span><span> </span><span class="annot"><span class="annottext">StateT StdGen IO Bool
+</span><a href="Data.SRTree.Random.html#toss"><span class="hs-identifier hs-var">toss</span></a></span><span>
+</span><span id="line-175"></span><span>  </span><span class="hs-keyword">if</span><span> </span><span class="annot"><span class="annottext">Bool
+</span><a href="#local-6989586621679048573"><span class="hs-identifier hs-var">coin</span></a></span><span>
+</span><span id="line-176"></span><span>    </span><span class="hs-keyword">then</span><span> </span><span class="annot"><span class="annottext">RndTree p ix val
+forall (p :: * -&gt; * -&gt; *) ix val. HasVars p =&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomVar"><span class="hs-identifier hs-var">randomVar</span></a></span><span>
+</span><span id="line-177"></span><span>    </span><span class="hs-keyword">else</span><span> </span><span class="annot"><span class="annottext">RndTree p ix val
+forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasVals p) =&gt;
+RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomConst"><span class="hs-identifier hs-var">randomConst</span></a></span><span>
+</span><span id="line-178"></span><span class="annot"><a href="Data.SRTree.Random.html#randomTreeBalanced"><span class="hs-identifier hs-var">randomTreeBalanced</span></a></span><span> </span><span id="local-6989586621679048572"><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048572"><span class="hs-identifier hs-var">n</span></a></span></span><span> </span><span class="hs-glyph">=</span><span> </span><span class="hs-keyword">do</span><span> </span><span>
+</span><span id="line-179"></span><span>  </span><span id="local-6989586621679048571"><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048571"><span class="hs-identifier hs-var">node</span></a></span></span><span>  </span><span class="hs-glyph">&lt;-</span><span> </span><span class="annot"><span class="annottext">RndTree p ix val
+forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasEverything p) =&gt;
+RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomNonTerminal"><span class="hs-identifier hs-var">randomNonTerminal</span></a></span><span>
+</span><span id="line-180"></span><span>  </span><span class="annot"><span class="annottext">Maybe (SRTree ix val) -&gt; SRTree ix val
+forall a. HasCallStack =&gt; Maybe a -&gt; a
+</span><span class="hs-identifier hs-var">fromJust</span></span><span> </span><span class="annot"><span class="annottext">(Maybe (SRTree ix val) -&gt; SRTree ix val)
+-&gt; ReaderT (p ix val) (StateT StdGen IO) (Maybe (SRTree ix val))
+-&gt; RndTree p ix val
+forall (f :: * -&gt; *) a b. Functor f =&gt; (a -&gt; b) -&gt; f a -&gt; f b
+</span><span class="hs-operator hs-var">&lt;$&gt;</span></span><span> </span><span class="hs-keyword">case</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; Int
+forall ix val. SRTree ix val -&gt; Int
+</span><a href="Data.SRTree.Internal.html#arity"><span class="hs-identifier hs-var">arity</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048571"><span class="hs-identifier hs-var">node</span></a></span><span> </span><span class="hs-keyword">of</span><span>
+</span><span id="line-181"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">1</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val -&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+forall ix val.
+SRTree ix val -&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+</span><a href="Data.SRTree.Random.html#replaceChild"><span class="hs-identifier hs-var">replaceChild</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048571"><span class="hs-identifier hs-var">node</span></a></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; Maybe (SRTree ix val))
+-&gt; RndTree p ix val
+-&gt; ReaderT (p ix val) (StateT StdGen IO) (Maybe (SRTree ix val))
+forall (f :: * -&gt; *) a b. Functor f =&gt; (a -&gt; b) -&gt; f a -&gt; f b
+</span><span class="hs-operator hs-var">&lt;$&gt;</span></span><span> </span><span class="annot"><span class="annottext">Int -&gt; RndTree p ix val
+forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasEverything p) =&gt;
+Int -&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomTreeBalanced"><span class="hs-identifier hs-var">randomTreeBalanced</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048572"><span class="hs-identifier hs-var">n</span></a></span><span> </span><span class="annot"><span class="annottext">Int -&gt; Int -&gt; Int
+forall a. Num a =&gt; a -&gt; a -&gt; a
+</span><span class="hs-glyph hs-var">-</span></span><span> </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">1</span></span><span class="hs-special">)</span><span>
+</span><span id="line-182"></span><span>    </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">2</span></span><span> </span><span class="hs-glyph">-&gt;</span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+-&gt; SRTree ix val -&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+forall ix val.
+SRTree ix val
+-&gt; SRTree ix val -&gt; SRTree ix val -&gt; Maybe (SRTree ix val)
+</span><a href="Data.SRTree.Random.html#replaceChildren"><span class="hs-identifier hs-var">replaceChildren</span></a></span><span> </span><span class="annot"><span class="annottext">SRTree ix val
+</span><a href="#local-6989586621679048571"><span class="hs-identifier hs-var">node</span></a></span><span> </span><span class="annot"><span class="annottext">(SRTree ix val -&gt; SRTree ix val -&gt; Maybe (SRTree ix val))
+-&gt; RndTree p ix val
+-&gt; ReaderT
+     (p ix val)
+     (StateT StdGen IO)
+     (SRTree ix val -&gt; Maybe (SRTree ix val))
+forall (f :: * -&gt; *) a b. Functor f =&gt; (a -&gt; b) -&gt; f a -&gt; f b
+</span><span class="hs-operator hs-var">&lt;$&gt;</span></span><span> </span><span class="annot"><span class="annottext">Int -&gt; RndTree p ix val
+forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasEverything p) =&gt;
+Int -&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomTreeBalanced"><span class="hs-identifier hs-var">randomTreeBalanced</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048572"><span class="hs-identifier hs-var">n</span></a></span><span> </span><span class="annot"><span class="annottext">Int -&gt; Int -&gt; Int
+forall a. Integral a =&gt; a -&gt; a -&gt; a
+</span><span class="hs-operator hs-var">`div`</span></span><span> </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">2</span></span><span class="hs-special">)</span><span> </span><span class="annot"><span class="annottext">ReaderT
+  (p ix val)
+  (StateT StdGen IO)
+  (SRTree ix val -&gt; Maybe (SRTree ix val))
+-&gt; RndTree p ix val
+-&gt; ReaderT (p ix val) (StateT StdGen IO) (Maybe (SRTree ix val))
+forall (f :: * -&gt; *) a b. Applicative f =&gt; f (a -&gt; b) -&gt; f a -&gt; f b
+</span><span class="hs-operator hs-var">&lt;*&gt;</span></span><span> </span><span class="annot"><span class="annottext">Int -&gt; RndTree p ix val
+forall val (p :: * -&gt; * -&gt; *) ix.
+(Ord val, Random val, HasEverything p) =&gt;
+Int -&gt; RndTree p ix val
+</span><a href="Data.SRTree.Random.html#randomTreeBalanced"><span class="hs-identifier hs-var">randomTreeBalanced</span></a></span><span> </span><span class="hs-special">(</span><span class="annot"><span class="annottext">Int
+</span><a href="#local-6989586621679048572"><span class="hs-identifier hs-var">n</span></a></span><span> </span><span class="annot"><span class="annottext">Int -&gt; Int -&gt; Int
+forall a. Integral a =&gt; a -&gt; a -&gt; a
+</span><span class="hs-operator hs-var">`div`</span></span><span> </span><span class="annot"><span class="annottext">Int
+</span><span class="hs-number">2</span></span><span class="hs-special">)</span><span>    </span><span>
+</span><span id="line-183"></span></pre></body></html>
