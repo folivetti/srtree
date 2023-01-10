@@ -30,6 +30,7 @@ module Data.SRTree
          , evalTreeWithMap
          , evalTreeWithVector
          , relabelOccurrences
+         , relabelParams
          )
          where
          
@@ -52,4 +53,5 @@ import Data.SRTree.Internal ( SRTree(..)
          , evalTreeWithMap
          , evalTreeWithVector
          , relabelOccurrences
+         , relabelParams
          )

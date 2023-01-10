@@ -33,6 +33,7 @@ module Data.SRTree.Internal
          , evalTreeWithMap
          , evalTreeWithVector
          , relabelOccurrences
+         , relabelParams
          )
          where
 
