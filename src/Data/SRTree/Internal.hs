@@ -528,3 +528,19 @@ relabelOccurrences t = traverseIx updVar t `evalState` M.empty
                       pure (ix, 0)
         Just c  -> do put $ insert ix (c+1) s
                       pure (ix, c+1)
+
+-- | Relabel the parameters sequentially starting from 0
+relabelParams :: Num ix => SRTree ix val -> SRTree ix val
+relabelParams t = (toState t) `evalState` 0
+  where
+    toState :: Num ix => SRTree ix val -> State ix (SRTree ix val)
+    toState (Param x) = do n <- get; put (n+1); pure (Param n)
+    toState (Add l r) = do l' <- toState l; r' <- toState r; pure (Add l' r')
+    toState (Sub l r) = do l' <- toState l; r' <- toState r; pure (Sub l' r')
+    toState (Mul l r) = do l' <- toState l; r' <- toState r; pure (Mul l' r')
+    toState (Div l r) = do l' <- toState l; r' <- toState r; pure (Div l' r')
+    toState (Power l r) = do l' <- toState l; r' <- toState r; pure (Power l' r')
+    toState (LogBase l r) = do l' <- toState l; r' <- toState r; pure (LogBase l' r')
+    toState (Fun f n) = do n' <- toState n; pure (Fun f n')
+    toState (Pow n i) = do n' <- toState n; pure (Pow n' i)
+    toState n = pure n
