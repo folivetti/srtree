@@ -7,7 +7,7 @@ cabal-version: 1.12
 name:           srtree
 version:        0.1.0.0
 synopsis:       A general framework to work with Symbolic Regression expression trees.
-description:    Please see the README on GitHub at <https://github.com/githubuser/srtree#readme>
+description:    Please see the README on GitHub at <https://github.com/folivetti/srtree#readme>
 category:       Math, Data, Data Structures
 homepage:       https://github.com/folivetti/srtree#readme
 bug-reports:    https://github.com/folivetti/srtree/issues
