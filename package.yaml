@@ -1,10 +1,12 @@
 name:                srtree
 version:             0.1.0.0
-github:              "githubuser/srtree"
+synopsis:            A general framework to work with Symbolic Regression expression trees.
+github:              "folivetti/srtree"
 license:             BSD3
-author:              "Author name here"
-maintainer:          "example@example.com"
-copyright:           "2021 Author name here"
+author:              "Fabricio Olivetti de França"
+maintainer:          "fabricio.olivetti@gmail.com"
+category:            Math, Data, Data Structures
+copyright:           "2023 Fabricio Olivetti de França"
 
 extra-source-files:
 - README.md
@@ -20,11 +22,11 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/githubuser/srtree#readme>
 
 dependencies:
-- base >= 4.7 && < 5
-- mtl
-- containers
-- random
-- vector
+- base >= 4.15 && < 4.16
+- mtl >= 2.2 && < 2.3
+- containers >= 0.6 && < 0.7
+- random >= 1.2 && < 1.3
+- vector >= 0.12 && < 0.13
 
 library:
   source-dirs: src
