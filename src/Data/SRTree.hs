@@ -21,6 +21,7 @@ module Data.SRTree
          , countVarNodes
          , countOccurrences
          , deriveBy
+         , deriveParamBy
          , simplify
          , derivative
          , evalFun
@@ -44,6 +45,7 @@ import Data.SRTree.Internal ( SRTree(..)
          , countVarNodes
          , countOccurrences
          , deriveBy
+         , deriveParamBy
          , simplify
          , derivative
          , evalFun

@@ -21,14 +21,13 @@ There is also a `Bifunctor` instance that allows to change the type of both para
 ## Other features:
 
 - simplification algorithm (`simplify`)
-- derivative w.r.t. a variable (`deriveBy`)
+- derivative w.r.t. a variable (`deriveBy`) and w.r.t. a parameter (`deriveParamBy`)
 - evaluation (`evalTree`)
 - relabel free parameters sequentially (`relabelParams`)
 - relabel variables couting their occurrence (`relabelOccurrences`, used with interval arithmetic)
 
 ## TODO:
 
-- derivative w.r.t. free parameters
 - support more advanced functions
 - support conditional branching (`IF-THEN-ELSE`)
 

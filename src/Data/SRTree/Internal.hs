@@ -24,6 +24,7 @@ module Data.SRTree.Internal
          , countVarNodes
          , countOccurrences
          , deriveBy
+         , deriveParamBy
          , simplify
          , derivative
          , evalFun
@@ -354,6 +355,34 @@ deriveBy dx (Div l r)     = (deriveBy dx l * r - l * deriveBy dx r) / r ^. 2
 deriveBy dx (Power l r)   = l ** (r-1) * (r * deriveBy dx l + l * log l * deriveBy dx r)
 deriveBy dx (LogBase l r) = deriveBy dx (log l / log r)
 {-# INLINE deriveBy #-}
+
+-- | Creates an `SRTree` representing the partial derivative of the input by the parameter indexed by `ix`.
+deriveParamBy :: (Eq ix, Eq val, Floating val, OptIntPow val) => ix -> SRTree ix val -> SRTree ix val
+deriveParamBy _  Empty    = Empty
+deriveParamBy dx (Var ix) = 0
+deriveParamBy dx (Param ix)
+  | dx == ix  = 1
+  | otherwise = 0
+deriveParamBy dx (Const val) = 0
+deriveParamBy dx (Fun g t)   =
+  case deriveParamBy dx t of
+    0  -> 0
+    1  -> derivative g t
+    t' -> derivative g t * t'
+deriveParamBy dx (Pow t 0)   = 0    
+deriveParamBy dx (Pow t 1)   = deriveParamBy dx t
+deriveParamBy dx (Pow t k)   = 
+  case deriveParamBy dx t of
+    0 -> 0
+    Const val -> Const (val * fromIntegral k) * (t ^. (k-1))
+    t'        -> fromIntegral k * (t ^. (k-1)) * t'
+deriveParamBy dx (Add l r)     = deriveParamBy dx l + deriveParamBy dx r
+deriveParamBy dx (Sub l r)     = deriveParamBy dx l - deriveParamBy dx r
+deriveParamBy dx (Mul l r)     = deriveParamBy dx l * r + l * deriveParamBy dx r
+deriveParamBy dx (Div l r)     = (deriveParamBy dx l * r - l * deriveParamBy dx r) / r ^. 2
+deriveParamBy dx (Power l r)   = l ** (r-1) * (r * deriveParamBy dx l + l * log l * deriveParamBy dx r)
+deriveParamBy dx (LogBase l r) = deriveParamBy dx (log l / log r)
+{-# INLINE deriveParamBy #-}
 
 -- | Simplifies the `SRTree`.
 simplify :: (Eq ix, Eq val, Floating val, OptIntPow val) => SRTree ix val -> SRTree ix val
