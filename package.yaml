@@ -1,5 +1,5 @@
 name:                srtree
-version:             0.1.2.0
+version:             0.1.2.1
 synopsis:            A general framework to work with Symbolic Regression expression trees.
 github:              "folivetti/srtree"
 license:             BSD3
