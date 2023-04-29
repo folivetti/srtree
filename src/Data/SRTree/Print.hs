@@ -11,14 +11,14 @@
 --
 -----------------------------------------------------------------------------
 module Data.SRTree.Print 
-         ( DisplayNodes(..)
-         , showExpr
-         , showTree
+         ( showExpr
          , printExpr
-         , showDefault
          , showTikz
+         , printTikz
          , showPython
+         , printPython
          , showLatex
+         , printLatex
          )
          where
 
@@ -26,150 +26,37 @@ import Control.Monad.Reader ( asks, runReader, Reader )
 import Data.Char ( toLower )
 
 import Data.SRTree.Internal
+import Data.SRTree.Recursion
 
--- | Data structure containing the needed definitions to print a SRTree.
-data DisplayNodes ix val = D
-  { _displayVar      :: ix -> String
-  , _displayPar      :: ix -> String
-  , _displayVal      :: val -> String
-  , _displayFun      :: Function -> String
-  , _displayPow      :: String
-  , _displayFloatPow :: String
-  }
-
--- Auxiliary function to print a tree as an infix expression
-asExpr :: (Show ix, Show val) => SRTree ix val -> Reader (DisplayNodes ix val) String
-asExpr Empty = pure ""
-asExpr (Var ix) = do
-  display <- asks _displayVar
-  pure $ display ix
-asExpr (Param ix) = do
-  display <- asks _displayPar
-  pure $ display ix
-asExpr (Const val) = do
-  display <- asks _displayVal
-  pure $ display val 
-asExpr (Fun f t) = do
-  display <- asks _displayFun
-  st      <- asExpr t
-  pure $ mconcat [display f, "(", st, ")"]
-asExpr (Pow t ix) = do
-  st  <- asExpr t
-  pow <- asks _displayPow
-  pure $ mconcat ["(", st, ")", pow, "(", show ix, ")"]
-asExpr (Add l r) = do
-  sl <- asExpr l
-  sr <- asExpr r
-  pure $ mconcat ["(", sl, ") + (", sr, ")"]
-asExpr (Sub l r) = do
-  sl <- asExpr l
-  sr <- asExpr r
-  pure $ mconcat ["(", sl, ") - (", sr, ")"]
-asExpr (Mul l r) = do
-  sl <- asExpr l
-  sr <- asExpr r
-  pure $ mconcat ["(", sl, ") * (", sr, ")"]
-asExpr (Div l r) = do
-  sl <- asExpr l
-  sr <- asExpr r
-  pure $ mconcat ["(", sl, ") / (", sr, ")"]
-asExpr (Power l r) = do
-  sl  <- asExpr l
-  sr  <- asExpr r
-  pow <- asks _displayFloatPow
-  pure $ mconcat ["(", sl, ")", pow, "(", sr, ")"]
-asExpr (LogBase l r) = do
-  sl  <- asExpr l
-  sr  <- asExpr r
-  pure $ mconcat ["log(", sl, ",", sr, ")"]
-
--- Auxiliary function to print a tree as a tree-like structure
-asTree :: (Show ix, Show val) => SRTree ix val -> Reader (DisplayNodes ix val) String
-asTree Empty = pure ""
-asTree (Var ix) = do
-  display <- asks _displayVar
-  pure $ mconcat ["[", display ix, "]\n"]
-asTree (Param ix) = do
-  display <- asks _displayPar
-  pure $ mconcat ["[", display ix, "]\n"]
-asTree (Const val) = do
-  display <- asks _displayVal
-  pure $ mconcat ["[", display val, "]\n"]
-asTree (Fun f t) = do
-  display <- asks _displayFun
-  st      <- asTree t
-  pure $ mconcat ["[", display f, "\n", st, "]\n"]
-asTree (Pow t ix) = do
-  st  <- asTree t
-  pow <- asks _displayPow
-  pure $ mconcat ["[", pow, "\n", st, "[", show ix, "]\n]"] 
-asTree (Add l r) = do
-  sl <- asTree l
-  sr <- asTree r
-  pure $ mconcat ["[+\n", sl, sr, "]\n"]
-asTree (Sub l r) = do
-  sl <- asTree l
-  sr <- asTree r
-  pure $ mconcat ["[-\n", sl, sr, "]\n"]
-asTree (Mul l r) = do
-  sl <- asTree l
-  sr <- asTree r
-  pure $ mconcat ["[×\n", sl, sr, "]\n"]
-asTree (Div l r) = do
-  sl <- asTree l
-  sr <- asTree r
-  pure $ mconcat ["[÷\n", sl, sr, "]\n"]
-asTree (Power l r) = do
-  sl  <- asTree l
-  sr  <- asTree r
-  pow <- asks _displayFloatPow
-  pure $ mconcat ["[", pow, "\n", sl, sr, "]\n"]
-asTree (LogBase l r) = do
-  sl  <- asTree l
-  sr  <- asTree r
-  pure $ mconcat ["[log\n", sl, sr, "]\n"]
-
--- | Converts a tree to a `String` using the specifications given by `DisplayNodes`
-showExpr, showTree :: (Show ix, Show val) => SRTree ix val -> DisplayNodes ix val -> String
-showExpr t = runReader (asExpr t)
-{-# INLINE showExpr #-}
-showTree t = runReader (asTree t)
-{-# INLINE showTree #-}
-
--- | Prints a tree as an expression using the specifications given by `DisplayNodes`
-printExpr :: (Show ix, Show val) => SRTree ix val -> DisplayNodes ix val -> IO ()
-printExpr t = putStrLn . showExpr t
-
--- | Displays a tree as an expression
-showDefault t = showExpr t d
+showExpr :: Fix SRTree -> String
+showExpr = cata alg
   where
-    d = D (\ix -> mconcat ["x", show ix])
-          (\ix -> mconcat ["t", show ix])
-          show
-          show
-          "^"
-          "**"
+    alg (Var ix)     = 'x' : show ix
+    alg (Param ix)   = 't' : show ix
+    alg (Const c)    = show c
+    alg (Bin op l r) = concat ["(", l, " ", showOp op, " ", r, ")"]
+    alg (Uni f t)    = concat [show f, "(", t, ")"]
 
--- | Displays a tree in Tikz format
-showTikz :: (Show ix, Show val, RealFrac val) => SRTree ix val -> String 
-showTikz t = showTree t d
-  where
-    d = D (\ix -> mconcat ["$x_{", show ix, "}$"])
-          (\ix -> mconcat ["$\\theta_{", show ix, "}$"])
-          (\val -> mconcat ["$", show $ (/100) $ fromIntegral $ round $ val*100, "$"])
-          show
-          "\\^{}"
-          "**"
+printExpr :: Fix SRTree -> IO ()
+printExpr = putStrLn . showExpr 
+
+showOp Add   = "+"
+showOp Sub   = "-"
+showOp Mul   = "*"
+showOp Div   = "/"
+showOp Power = "^"
+{-# INLINE showOp #-}
 
 -- | Displays a tree as a numpy compatible expression.
-showPython t = showExpr t d
+showPython :: Fix SRTree -> String
+showPython = cata alg
   where
-    d = D (\ix -> mconcat ["x[:,", show ix, "]"])
-          (\ix -> mconcat ["t[", show ix, "]"])
-          show
-          pyFun
-          "**"
-          "**"
+    alg (Var ix)     = concat ["x[:, ", show ix, "]"]
+    alg (Param ix)   = concat ["t[:, ", show ix, "]"]
+    alg (Const c)    = show c
+    alg (Bin Power l r) = concat [l, " ** ", r]
+    alg (Bin op l r) = concat ["(", l, " ", showOp op, " ", r, ")"]
+    alg (Uni f t)    = concat [pyFun f, "(", t, ")"]
           
     pyFun Id     = ""
     pyFun Abs    = "np.abs"
@@ -190,21 +77,43 @@ showPython t = showExpr t d
     pyFun Log    = "np.log"
     pyFun Exp    = "np.exp"
 
+printPython :: Fix SRTree -> IO ()
+printPython = putStrLn . showPython
+
 -- | Displays a tree as a sympy compatible expression.
-showLatex :: (Show ix, Show val) => SRTree ix val -> String
-showLatex Empty         = ""
-showLatex (Var ix)      = mconcat ["x_{", show ix, "}"]
-showLatex (Param ix)    = mconcat ["\\theta_{", show ix, "}"]
-showLatex (Const val)   = show val
-showLatex (Fun Abs t)   = mconcat ["\\left |", showLatex t, "\\right |"]
-showLatex (Fun f t)     = mconcat [showLatexFun f, "\\left(", showLatex t, "\\right)"]
-showLatex (Pow t ix)    = mconcat ["\\left(", showLatex t, "\\right)^{", show ix, "}"]
-showLatex (Add l r)     = mconcat ["\\left(", showLatex l, "\\right) + \\left(", showLatex r, "\\right)"]
-showLatex (Sub l r)     = mconcat ["\\left(", showLatex l, "\\right) - \\left(", showLatex r, "\\right)"]
-showLatex (Mul l r)     = mconcat ["\\left(", showLatex l, "\\right) \\left(", showLatex r, "\\right)"]
-showLatex (Div l r)     = mconcat ["\\frac{", showLatex l, "}{", showLatex r, "}"]
-showLatex (Power l r)   = mconcat ["\\left(", showLatex l, "\\right)^{", showLatex r, "}"]
-showLatex (LogBase l r) = mconcat ["\\log_{", showLatex r, "}{", showLatex l, "}"]
+showLatex :: Fix SRTree -> String
+showLatex = cata alg
+  where
+    alg (Var ix)     = concat ["x_{, ", show ix, "}"]
+    alg (Param ix)   = concat ["\\theta_{, ", show ix, "}"]
+    alg (Const c)    = show c
+    alg (Bin Power l r) = concat [l, "^{", r, "}"]
+    alg (Bin op l r) = concat ["\\left(", l, " ", showOp op, " ", r, "\\right)"]
+    alg (Uni Abs t)  = concat ["\\left |", t, "\\right |"]
+    alg (Uni f t)    = concat [showLatexFun f, "(", t, ")"]
 
 showLatexFun :: Function -> String
 showLatexFun f = mconcat ["\\operatorname{", map toLower $ show f, "}"]
+{-# INLINE showLatexFun #-}
+
+printLatex :: Fix SRTree -> IO ()
+printLatex = putStrLn . showLatex
+
+-- | Displays a tree in Tikz format
+showTikz :: Fix SRTree -> String
+showTikz = cata alg
+  where
+    roundN n x = let ten = 10^n in (/ ten) . fromIntegral . round $ x*ten
+    alg (Var ix)     = concat ["[$x_{, ", show ix, "}$]\n"]
+    alg (Param ix)   = concat ["[$\\theta_{, ", show ix, "}$]\n"]
+    alg (Const c)    = concat ["[$", show (roundN 2 c), "$]\n"]
+    alg (Bin op l r) = concat ["[", showOpTikz op, l, r, "]\n"]
+    alg (Uni f t)    = concat ["[", map toLower $ show f, t, "]\n"]
+
+    showOpTikz Add = "+\n"
+    showOpTikz Sub = "-\n"
+    showOpTikz Mul = "×\n"
+    showOpTikz Div = "÷\n"
+    showOpTikz Power = "\\^{}\n"
+
+printTikz = putStrLn . showTikz

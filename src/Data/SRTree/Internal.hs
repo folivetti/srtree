@@ -1,5 +1,6 @@
 {-# language FlexibleInstances, DeriveFunctor #-}
 {-# language ScopedTypeVariables #-}
+{-# language RankNTypes #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.Internal 
@@ -13,463 +14,291 @@
 --
 -----------------------------------------------------------------------------
 
-module Data.SRTree.Internal 
+module Data.SRTree.Internal
          ( SRTree(..)
          , Function(..)
-         , OptIntPow(..)
-         , traverseIx
+         , Op(..)
+         , param
+         , var
          , arity
          , getChildren
          , countNodes
          , countVarNodes
+         , countConsts
+         , countParams
          , countOccurrences
          , deriveBy
-         , deriveParamBy
-         , simplify
+         , deriveByVar
+         , deriveByParam
          , derivative
+         , forwardMode
+         , gradParams
          , evalFun
+         , evalOp
          , inverseFunc
          , evalTree
-         , evalTreeMap
-         , evalTreeWithMap
-         , evalTreeWithVector
-         , relabelOccurrences
          , relabelParams
+         , constsToParam
+         , floatConstsToParam
          )
          where
 
-import Data.Bifunctor
+import Data.SRTree.Recursion ( Fix(Fix), cata, mutu, cataM )
 
-import Data.Map.Strict (Map(..), (!), (!?), insert, fromList)
-import qualified Data.Map.Strict as M
 import qualified Data.Vector as V
+import Data.Vector ((!))
 import Control.Monad.State
-import Control.Monad.Reader
-import Control.Applicative hiding (Const)
+
+import Debug.Trace (trace)
 
 -- | Tree structure to be used with Symbolic Regression algorithms.
--- This structure is parametrized by the indexing type to retrieve the values
--- of a variable and the type of the output value.
-data SRTree ix val = 
-   Empty 
- | Var ix
- | Const val
- | Param ix
- | Fun Function (SRTree ix val)
- | Pow (SRTree ix val) Int
- | SRTree ix val `Add`     SRTree ix val
- | SRTree ix val `Sub`     SRTree ix val
- | SRTree ix val `Mul`     SRTree ix val
- | SRTree ix val `Div`     SRTree ix val
- | SRTree ix val `Power`   SRTree ix val
- | SRTree ix val `LogBase` SRTree ix val
-     deriving (Show, Eq, Ord, Functor)
+-- This structure is a fixed point of a n-ary tree. 
+data SRTree val =
+   Var Int     -- ^ index of the variables
+ | Param Int   -- ^ index of the parameter
+ | Const Double -- ^ constant value, can be converted to a parameter
+ | Uni Function val -- ^ univariate function
+ | Bin Op val val -- ^ binary operator
+ deriving (Show, Eq, Ord, Functor)
 
--- | Functions that can be applied to a subtree.
-data Function = 
-    Id 
+-- | Supported operators
+data Op = Add | Sub | Mul | Div | Power
+    deriving (Show, Read, Eq, Ord, Enum)
+
+-- | Supported functions
+data Function =
+    Id
   | Abs
-  | Sin 
-  | Cos 
-  | Tan 
+  | Sin
+  | Cos
+  | Tan
   | Sinh
   | Cosh
-  | Tanh 
-  | ASin 
-  | ACos 
+  | Tanh
+  | ASin
+  | ACos
   | ATan
   | ASinh
-  | ACosh 
-  | ATanh 
-  | Sqrt 
-  | Cbrt 
-  | Square 
-  | Log 
-  | Exp 
+  | ACosh
+  | ATanh
+  | Sqrt
+  | Cbrt
+  | Square
+  | Log
+  | Exp
      deriving (Show, Read, Eq, Ord, Enum)
 
--- | A class for optimized `(^^)` operators for specific types.
--- This was created because the integer power operator for
--- interval arithmetic must be aware of the dependency problem,
--- thus the default `(^)` doesn't work.
-class OptIntPow a where
-  (^.) :: a -> Int -> a
-  infix 8 ^.
-  
-instance OptIntPow Double where
-  (^.) = (^^)
-  {-# INLINE (^.) #-}
-instance OptIntPow Float where
-  (^.) = (^^)
-  {-# INLINE (^.) #-}
-  
- 
-instance (Eq ix, Eq val, Num val, OptIntPow val) => OptIntPow (SRTree ix val) where
-  t ^. 0         = 1
-  t ^. 1         = t
-  (Const c) ^. k = Const $ c ^. k 
-  t ^. k         = Pow t k
-  {-# INLINE (^.) #-}
-       
-instance (Eq ix, Eq val, Num val) => Num (SRTree ix val) where
-  0 + r                   = r
-  l + 0                   = l
-  (Const c1) + (Const c2) = Const $ c1 + c2
-  l + r                   = Add l r
+-- | create a tree with a single node representing a variable
+var :: Int -> Fix SRTree
+var ix = Fix (Var ix)
+
+-- | create a tree with a single node representing a parameter
+param :: Int -> Fix SRTree
+param ix = Fix (Param ix)
+
+instance Num (Fix SRTree) where
+  Fix (Const 0) + r = r
+  l + Fix (Const 0) = l
+  Fix (Const c1) + Fix (Const c2) = Fix . Const $ c1 + c2
+  l + r                   = Fix $ Bin Add l r
   {-# INLINE (+) #-}
 
-  0 - r                   = (-1) * r
-  l - 0                   = l
-  (Const c1) - (Const c2) = Const $ c1 - c2
-  l - r                   = Sub l r
+  l - Fix (Const 0) = l
+  Fix (Const 0) - r = negate r
+  Fix (Const c1) - Fix (Const c2) = Fix . Const $ c1 - c2
+  l - r                   = Fix $ Bin Sub l r
   {-# INLINE (-) #-}
 
-  0 * r                   = 0
-  l * 0                   = 0
-  1 * r                   = r
-  l * 1                   = l 
-  (Const c1) * (Const c2) = Const $ c1 * c2
-  l * r                   = Mul l r
+  Fix (Const 0) * _ = Fix (Const 0)
+  _ * Fix (Const 0) = Fix (Const 0)
+  Fix (Const 1) * r = r
+  l * Fix (Const 1) = l
+  Fix (Const c1) * Fix (Const c2) = Fix . Const $ c1 * c2
+  l * r                   = Fix $ Bin Mul l r
   {-# INLINE (*) #-}
-    
-  abs         = Fun Abs
+
+  abs = Fix . Uni Abs
   {-# INLINE abs #-}
-  
-  negate (Const x) = Const (negate x)
-  negate t         = Const (-1) * t
+
+  negate (Fix (Const x)) = Fix $ Const (negate x)
+  negate t         = Fix (Const (-1)) * t
   {-# INLINE negate #-}
-  
+
   signum t    = case t of
-                  Const x -> Const $ signum x
-                  _       -> Const 0
-  fromInteger x = Const (fromInteger x)
+                  Fix (Const x) -> Fix . Const $ signum x
+                  _       -> Fix (Const 0)
+  fromInteger x = Fix $ Const (fromInteger x)
   {-# INLINE fromInteger #-}
 
-instance (Eq ix, Eq val, Fractional val) => Fractional (SRTree ix val) where
-  0 / r                   = 0
-  l / 1                   = l
-  (Const c1) / (Const c2) = Const $ c1/c2
-  l / r                   = Div l r
+instance Fractional (Fix SRTree) where
+  l / Fix (Const 1) = l
+  Fix (Const c1) / Fix (Const c2) = Fix . Const $ c1/c2
+  l / r                   = Fix $ Bin Div l r
   {-# INLINE (/) #-}
-  
-  fromRational = Const . fromRational
+
+  fromRational = Fix . Const . fromRational
   {-# INLINE fromRational #-}
-  
-instance (Eq ix, Eq val, Floating val) => Floating (SRTree ix val) where  
-  pi      = Const  pi
+
+instance Floating (Fix SRTree) where
+  pi      = Fix $ Const  pi
   {-# INLINE pi #-}
-  exp     = evalToConst . Fun Exp
+  exp     = Fix . Uni Exp
   {-# INLINE exp #-}
-  log     = evalToConst . Fun Log
+  log     = Fix . Uni Log
   {-# INLINE log #-}
-  sqrt    = evalToConst . Fun Sqrt
+  sqrt    = Fix . Uni Sqrt
   {-# INLINE sqrt #-}
-  sin     = evalToConst . Fun Sin
+  sin     = Fix . Uni Sin
   {-# INLINE sin #-}
-  cos     = evalToConst . Fun Cos
+  cos     = Fix . Uni Cos
   {-# INLINE cos #-}
-  tan     = evalToConst . Fun Tan
+  tan     = Fix . Uni Tan
   {-# INLINE tan #-}
-  asin    = evalToConst . Fun ASin
+  asin    = Fix . Uni ASin
   {-# INLINE asin #-}
-  acos    = evalToConst . Fun ACos
+  acos    = Fix . Uni ACos
   {-# INLINE acos #-}
-  atan    = evalToConst . Fun ATan
+  atan    = Fix . Uni ATan
   {-# INLINE atan #-}
-  sinh    = evalToConst . Fun Sinh
+  sinh    = Fix . Uni Sinh
   {-# INLINE sinh #-}
-  cosh    = evalToConst . Fun Cosh
+  cosh    = Fix . Uni Cosh
   {-# INLINE cosh #-}
-  tanh    = evalToConst . Fun Tanh
+  tanh    = Fix . Uni Tanh
   {-# INLINE tanh #-}
-  asinh   = evalToConst . Fun ASinh
+  asinh   = Fix . Uni ASinh
   {-# INLINE asinh #-}
-  acosh   = evalToConst . Fun ACosh
+  acosh   = Fix . Uni ACosh
   {-# INLINE acosh #-}
-  atanh   = evalToConst . Fun ATanh
+  atanh   = Fix . Uni ATanh
   {-# INLINE atanh #-}
 
-  0 ** r  = 0
-  1 ** r  = 1
-  l ** 0  = 1
-  l ** 1  = l
-  l ** r  = evalToConst $ Power l r
+  l ** Fix (Const 1) = l
+  l ** Fix (Const 0) = Fix (Const 1)
+  l ** r  = Fix $ Bin Power l r
   {-# INLINE (**) #-}
 
-  logBase 1 r = 0
-  logBase l r = evalToConst $ LogBase l r
+  logBase l (Fix (Const 1)) = Fix (Const 0)
+  logBase l r = log l / log r
   {-# INLINE logBase #-}
 
-instance Bifunctor SRTree where
-  first f Empty         = Empty
-  first f (Var ix)      = Var $ f ix
-  first f (Param ix)    = Param $ f ix
-  first f (Fun g t)     = Fun g $ first f t
-  first f (Pow t k)     = Pow (first f t) k
-  first f (Add l r)     = Add (first f l) (first f r)
-  first f (Sub l r)     = Sub (first f l) (first f r)
-  first f (Mul l r)     = Mul (first f l) (first f r)
-  first f (Div l r)     = Div (first f l) (first f r)
-  first f (Power l r)   = Power (first f l) (first f r)
-  first f (LogBase l r) = LogBase (first f l) (first f r)
-  {-# INLINE first #-}
-  
-  second                = fmap
-  {-# INLINE second #-}
-
-instance Applicative (SRTree ix) where
-  pure = Const
-
-  Empty         <*> t = Empty
-  Var ix        <*> t = Var ix
-  Param ix      <*> t = Param ix
-  Const f       <*> t = fmap f t
-  Fun g tf      <*> t = Fun g $ tf <*> t
-  Pow tf k      <*> t = Pow (tf <*> t) k
-  Add lf rf     <*> t = Add (lf <*> t) (rf <*> t)
-  Sub lf rf     <*> t = Sub (lf <*> t) (rf <*> t)
-  Mul lf rf     <*> t = Mul (lf <*> t) (rf <*> t)
-  Div lf rf     <*> t = Div (lf <*> t) (rf <*> t)
-  Power lf rf   <*> t = Power (lf <*> t) (rf <*> t)
-  LogBase lf rf <*> t = LogBase (lf <*> t) (rf <*> t)
- 
-instance Foldable (SRTree ix) where
-  foldMap f Empty      = mempty
-  foldMap f (Var ix)   = mempty
-  foldMap f (Param ix) = mempty
-  foldMap f (Const c)  = f c
-  foldMap f t          = mconcat $ map (foldMap f) $ getChildren t
-
-instance Traversable (SRTree ix) where
-  traverse mf Empty         = pure Empty
-  traverse mf (Var ix)      = pure $ Var ix
-  traverse mf (Param ix)    = pure $ Param ix
-  traverse mf (Const c)     = Const <$> mf c
-  traverse mf (Fun g t)     = Fun g <$> traverse mf t
-  traverse mf (Pow t k)     = (`Pow` k) <$> traverse mf t
-  traverse mf (Add l r)     = Add <$> traverse mf l <*> traverse mf r
-  traverse mf (Sub l r)     = Sub <$> traverse mf l <*> traverse mf r
-  traverse mf (Mul l r)     = Mul <$> traverse mf l <*> traverse mf r
-  traverse mf (Div l r)     = Div <$> traverse mf l <*> traverse mf r
-  traverse mf (Power l r)   = Power <$> traverse mf l <*> traverse mf r
-  traverse mf (LogBase l r) = LogBase <$> traverse mf l <*> traverse mf r
-
--- | Same as `traverse` but for the first type parameter.
-traverseIx :: Applicative f => (ixa -> f ixb) -> SRTree ixa val -> f (SRTree ixb val)
-traverseIx mf Empty         = pure Empty
-traverseIx mf (Var ix)      = Var <$> mf ix
-traverseIx mf (Param ix)    = Param <$> mf ix
-traverseIx mf (Const c)     = pure $ Const c
-traverseIx mf (Fun g t)     = Fun g <$> traverseIx mf t
-traverseIx mf (Pow t k)     = (`Pow` k) <$> traverseIx mf t
-traverseIx mf (Add l r)     = Add <$> traverseIx mf l <*> traverseIx mf r
-traverseIx mf (Sub l r)     = Sub <$> traverseIx mf l <*> traverseIx mf r
-traverseIx mf (Mul l r)     = Mul <$> traverseIx mf l <*> traverseIx mf r
-traverseIx mf (Div l r)     = Div <$> traverseIx mf l <*> traverseIx mf r
-traverseIx mf (Power l r)   = Power <$> traverseIx mf l <*> traverseIx mf r
-traverseIx mf (LogBase l r) = LogBase <$> traverseIx mf l <*> traverseIx mf r
-{-# INLINE traverseIx #-}
-
 -- | Arity of the current node
-arity :: SRTree ix val -> Int
-arity Empty     = 0
-arity (Var _)   = 0
-arity (Param _) = 0
-arity (Const _) = 0
-arity (Fun _ _) = 1
-arity (Pow _ _) = 1
-arity _         = 2
+arity :: Fix SRTree -> Int
+arity = cata alg
+  where
+    alg Var {}      = 0
+    alg Param {}    = 0
+    alg Const {}    = 0
+    alg Uni {}      = 1
+    alg Bin {}      = 2
 {-# INLINE arity #-}
 
 -- | Get the children of a node. Returns an empty list in case of a leaf node.
-getChildren :: SRTree ix val -> [SRTree ix val]
-getChildren Empty         = []
-getChildren (Var _)       = []
-getChildren (Param _)     = []
-getChildren (Const _)     = []
-getChildren (Fun _ t)     = [t]
-getChildren (Pow t _)     = [t]
-getChildren (Add l r)     = [l, r]
-getChildren (Sub l r)     = [l, r]
-getChildren (Mul l r)     = [l, r]
-getChildren (Div l r)     = [l, r]
-getChildren (Power l r)   = [l, r]
-getChildren (LogBase l r) = [l, r]
+getChildren :: Fix SRTree -> [Fix SRTree]
+getChildren (Fix (Var {})) = []
+getChildren (Fix (Param {})) = []
+getChildren (Fix (Const {})) = []
+getChildren (Fix (Uni _ t)) = [t]
+getChildren (Fix (Bin _ l r)) = [l, r]
 {-# INLINE getChildren #-}
 
--- Support function to simplify operations applied to const subtrees.
-evalToConst :: Floating val => SRTree ix val -> SRTree ix val  
-evalToConst (Fun g (Const c))               = Const $ evalFun g c
-evalToConst (Power (Const c1) (Const c2))   = Const $ c1**c2
-evalToConst (LogBase (Const c1) (Const c2)) = Const $ logBase c1 c2
-evalToConst t                               = t
-{-# INLINE evalToConst #-}
-
--- Support function to sum the types of nodes specified by `f`.
-sumCounts :: (SRTree ix val -> Int) -> Int -> SRTree ix val -> Int
-sumCounts f val = foldr (\c v -> f c + v) val . getChildren
-{-# INLINE sumCounts #-}
-
 -- | Count the number of nodes in a tree.
-countNodes :: SRTree ix val -> Int
-countNodes Empty = 0
-countNodes t     = sumCounts countNodes 1 t
+countNodes :: Fix SRTree -> Int
+countNodes = cata alg
+  where
+      alg Var {} = 1
+      alg Param {} = 1
+      alg Const {} = 1
+      alg (Uni _ t) = 1 + t
+      alg (Bin _ l r) = 1 + l + r
 {-# INLINE countNodes #-}
 
 -- | Count the number of `Var` nodes
-countVarNodes :: SRTree ix val -> Int
-countVarNodes (Var _) = 1
-countVarNodes t       = sumCounts countVarNodes 0 t
+countVarNodes :: Fix SRTree -> Int
+countVarNodes = cata alg
+  where
+      alg Var {} = 1
+      alg Param {} = 0
+      alg Const {} = 0
+      alg (Uni _ t) = 0 + t
+      alg (Bin _ l r) = 0 + l + r
 {-# INLINE countVarNodes #-}
 
+-- | Count the number of `Param` nodes
+countParams :: Fix SRTree -> Int
+countParams = cata alg
+  where
+      alg Var {} = 0
+      alg Param {} = 1
+      alg Const {} = 0
+      alg (Uni _ t) = 0 + t
+      alg (Bin _ l r) = 0 + l + r
+{-# INLINE countParams #-}
+
+-- | Count the number of const nodes
+countConsts :: Fix SRTree -> Int
+countConsts = cata alg
+  where
+      alg Var {} = 0
+      alg Param {} = 0
+      alg Const {} = 1
+      alg (Uni _ t) = 0 + t
+      alg (Bin _ l r) = 0 + l + r
+{-# INLINE countConsts #-}
+
 -- | Count the occurrences of variable indexed as `ix`
-countOccurrences :: Eq ix => SRTree ix val -> ix -> Int
-countOccurrences (Var ix) iy = if ix==iy then 1 else 0
-countOccurrences t        iy = sumCounts (`countOccurrences` iy) 0 t
+countOccurrences :: Int -> Fix SRTree -> Int
+countOccurrences ix = sum . cata alg
+  where
+      alg (Var iy) = [1 | ix == iy]
+      alg Param {} = []
+      alg Const {} = []
+      alg (Uni _ t) = t
+      alg (Bin _ l r) = l <> r
 {-# INLINE countOccurrences #-}
 
--- | Creates an `SRTree` representing the partial derivative of the input by the variable indexed by `ix`.
-deriveBy :: (Eq ix, Eq val, Floating val, OptIntPow val) => ix -> SRTree ix val -> SRTree ix val
-deriveBy _  Empty    = Empty
-deriveBy dx (Var ix)
-  | dx == ix  = 1
-  | otherwise = 0
-deriveBy dx (Param ix) = 0
-deriveBy dx (Const val) = 0
-deriveBy dx (Fun g t)   =
-  case deriveBy dx t of
-    0  -> 0
-    1  -> derivative g t
-    t' -> derivative g t * t'
-deriveBy dx (Pow t 0)   = 0    
-deriveBy dx (Pow t 1)   = deriveBy dx t
-deriveBy dx (Pow t k)   = 
-  case deriveBy dx t of
-    0 -> 0
-    Const val -> Const (val * fromIntegral k) * (t ^. (k-1))
-    t'        -> fromIntegral k * (t ^. (k-1)) * t'
-deriveBy dx (Add l r)     = deriveBy dx l + deriveBy dx r
-deriveBy dx (Sub l r)     = deriveBy dx l - deriveBy dx r
-deriveBy dx (Mul l r)     = deriveBy dx l * r + l * deriveBy dx r
-deriveBy dx (Div l r)     = (deriveBy dx l * r - l * deriveBy dx r) / r ^. 2
-deriveBy dx (Power l r)   = l ** (r-1) * (r * deriveBy dx l + l * log l * deriveBy dx r)
-deriveBy dx (LogBase l r) = deriveBy dx (log l / log r)
-{-# INLINE deriveBy #-}
+-- | Evaluates the tree given a vector of variable values, a vector of parameter values and a function that takes a Double and change to whatever type the variables have. This is useful when working with datasets of many values per variables.
+evalTree :: (Num a, Floating a) => V.Vector a -> V.Vector Double -> (Double -> a) -> Fix SRTree -> a
+evalTree xss params f = cata alg
+  where
+      alg (Var ix) = xss ! ix
+      alg (Param ix) = f $ params ! ix
+      alg (Const c) = f c
+      alg (Uni g t) = evalFun g t
+      alg (Bin op l r) = evalOp op l r
+{-# INLINE evalTree #-}
 
--- | Creates an `SRTree` representing the partial derivative of the input by the parameter indexed by `ix`.
-deriveParamBy :: (Eq ix, Eq val, Floating val, OptIntPow val) => ix -> SRTree ix val -> SRTree ix val
-deriveParamBy _  Empty    = Empty
-deriveParamBy dx (Var ix) = 0
-deriveParamBy dx (Param ix)
-  | dx == ix  = 1
-  | otherwise = 0
-deriveParamBy dx (Const val) = 0
-deriveParamBy dx (Fun g t)   =
-  case deriveParamBy dx t of
-    0  -> 0
-    1  -> derivative g t
-    t' -> derivative g t * t'
-deriveParamBy dx (Pow t 0)   = 0    
-deriveParamBy dx (Pow t 1)   = deriveParamBy dx t
-deriveParamBy dx (Pow t k)   = 
-  case deriveParamBy dx t of
-    0 -> 0
-    Const val -> Const (val * fromIntegral k) * (t ^. (k-1))
-    t'        -> fromIntegral k * (t ^. (k-1)) * t'
-deriveParamBy dx (Add l r)     = deriveParamBy dx l + deriveParamBy dx r
-deriveParamBy dx (Sub l r)     = deriveParamBy dx l - deriveParamBy dx r
-deriveParamBy dx (Mul l r)     = deriveParamBy dx l * r + l * deriveParamBy dx r
-deriveParamBy dx (Div l r)     = (deriveParamBy dx l * r - l * deriveParamBy dx r) / r ^. 2
-deriveParamBy dx (Power l r)   = l ** (r-1) * (r * deriveParamBy dx l + l * log l * deriveParamBy dx r)
-deriveParamBy dx (LogBase l r) = deriveParamBy dx (log l / log r)
-{-# INLINE deriveParamBy #-}
+evalOp :: Floating a => Op -> a -> a -> a
+evalOp Add = (+)
+evalOp Sub = (-)
+evalOp Mul = (*)
+evalOp Div = (/)
+evalOp Power = (**)
+{-# INLINE evalOp #-}
 
--- | Simplifies the `SRTree`.
-simplify :: (Eq ix, Eq val, Floating val, OptIntPow val) => SRTree ix val -> SRTree ix val
-simplify (Fun g t) = evalToConst . Fun g $ simplify t
-simplify (Pow t 0) = 1    
-simplify (Pow t 1) = simplify t
-simplify (Pow t k) =
-  case simplify t of
-    Const c -> Const $ c ^. k
-    t'      -> Pow t' k
-    
-simplify (Add l r)
-  | l' == r' = 2 * l' 
-  | otherwise = l' + r' 
-  where 
-      l' = simplify l 
-      r' = simplify r
-simplify (Sub l r)
-  | l' == r' = 0
-  | otherwise = l' - r' 
-  where 
-      l' = simplify l 
-      r' = simplify r
-simplify (Mul l r)
-  | l' == r'  = Pow l' 2
-  | otherwise = l' * r' 
-  where 
-      l' = simplify l 
-      r' = simplify r
-simplify (Div l r)
-  | l' == r'  = 1
-  | otherwise = l' / r' 
-  where 
-      l' = simplify l 
-      r' = simplify r
-
-simplify (Power l r)   = simplify l ** simplify r
-simplify (LogBase l r) = logBase (simplify l) (simplify r)
-simplify t             = t
-{-# INLINE simplify #-}
-
--- | Derivative of a Function
-derivative :: (Eq ix, Eq val, Floating val) => Function -> SRTree ix val -> SRTree ix val
-derivative Id      = const 1
-derivative Abs     = \x -> x / abs x
-derivative Sin     = cos
-derivative Cos     = negate.sin
-derivative Tan     = recip . (**2.0) . cos
-derivative Sinh    = cosh
-derivative Cosh    = sinh
-derivative Tanh    = (1-) . (**2.0) . tanh
-derivative ASin    = recip . sqrt . (1-) . (^2)
-derivative ACos    = negate . recip . sqrt . (1-) . (^2)
-derivative ATan    = recip . (1+) . (^2)
-derivative ASinh   = recip . sqrt . (1+) . (^2)
-derivative ACosh   = \x -> 1 / (sqrt (x-1) * sqrt (x+1))
-derivative ATanh   = recip . (1-) . (^2)
-derivative Sqrt    = recip . (2*) . sqrt
-derivative Cbrt    = recip . (3*) . cbrt . (^2)
-derivative Square  = (2*)
-derivative Exp     = exp
-derivative Log     = recip
-{-# INLINE derivative #-}
-
--- | Evaluates a function.
-evalFun :: Floating val => Function -> val -> val
-evalFun Id      = id
-evalFun Abs     = abs
-evalFun Sin     = sin
-evalFun Cos     = cos
-evalFun Tan     = tan
-evalFun Sinh    = sinh
-evalFun Cosh    = cosh
-evalFun Tanh    = tanh
-evalFun ASin    = asin
-evalFun ACos    = acos
-evalFun ATan    = atan
-evalFun ASinh   = asinh
-evalFun ACosh   = acosh
-evalFun ATanh   = atanh
-evalFun Sqrt    = sqrt
-evalFun Cbrt    = cbrt
-evalFun Square  = (^2)
-evalFun Exp     = exp
-evalFun Log     = log
+evalFun :: Floating a => Function -> a -> a
+evalFun Id = id
+evalFun Abs = abs
+evalFun Sin = sin
+evalFun Cos = cos
+evalFun Tan = tan
+evalFun Sinh = sinh
+evalFun Cosh = cosh
+evalFun Tanh = tanh
+evalFun ASin = asin
+evalFun ACos = acos
+evalFun ATan = atan
+evalFun ASinh = asinh
+evalFun ACosh = acosh
+evalFun ATanh = atanh
+evalFun Sqrt = sqrt
+evalFun Cbrt = cbrt
+evalFun Square = (^2)
+evalFun Log = log
+evalFun Exp = exp
 {-# INLINE evalFun #-}
 
+-- | Cubic root
 cbrt :: Floating val => val -> val
 cbrt x = signum x * abs x ** (1/3)
 {-# INLINE cbrt #-}
@@ -492,85 +321,176 @@ inverseFunc Exp    = Log
 inverseFunc x      = error $ show x ++ " has no support for inverse function"
 {-# INLINE inverseFunc #-}
 
--- | Evaluates a tree with the variables stored in a `Reader` monad.
-evalTree :: (Floating val, OptIntPow val) => SRTree ix val -> Reader (ix -> Maybe val) (Maybe val)
-evalTree Empty         = pure Nothing
-evalTree (Const c)     = pure $ Just c
-evalTree (Var ix)      = askAbout ix
-evalTree (Param ix)    = pure $ Just 1.0 -- TODO: askAbout paramIx
-evalTree (Fun f t)     = evalFun f <$$> evalTree t
-evalTree (Pow t k)     = (^. k) <$$> evalTree t
-evalTree (Add l r)     = (+)  <$*> evalTree l <*> evalTree r
-evalTree (Sub l r)     = (-)  <$*> evalTree l <*> evalTree r
-evalTree (Mul l r)     = (*)  <$*> evalTree l <*> evalTree r
-evalTree (Div l r)     = (/)  <$*> evalTree l <*> evalTree r
-evalTree (Power l r)   = (**) <$*> evalTree l <*> evalTree r
-evalTree (LogBase l r) = logBase <$*> evalTree l <*> evalTree r
-
--- | Evaluates a tree with the variables stored in a `Reader` monad while mapping the constant 
--- values to a different type.
-evalTreeMap :: (Floating v1, OptIntPow v1, Floating v2, OptIntPow v2) => (v1 -> v2) -> SRTree ix v1 -> Reader (ix -> Maybe v2) (Maybe v2)
-evalTreeMap f Empty         = pure Nothing
-evalTreeMap f (Const c)     = pure $ Just $ f c
-evalTreeMap f (Var ix)      = askAbout ix
-evalTreeMap f (Param ix)    = pure $ Just $ f 1.0 -- TODO: askAbout paramIx
-evalTreeMap f (Fun g t)     = evalFun g <$$> evalTreeMap f t
-evalTreeMap f (Pow t k)     = (^. k) <$$> evalTreeMap f t
-evalTreeMap f (Add l r)     = (+)  <$*> evalTreeMap f l <*> evalTreeMap f r
-evalTreeMap f (Sub l r)     = (-)  <$*> evalTreeMap f l <*> evalTreeMap f r
-evalTreeMap f (Mul l r)     = (*)  <$*> evalTreeMap f l <*> evalTreeMap f r
-evalTreeMap f (Div l r)     = (/)  <$*> evalTreeMap f l <*> evalTreeMap f r
-evalTreeMap f (Power l r)   = (**) <$*> evalTreeMap f l <*> evalTreeMap f r
-evalTreeMap f (LogBase l r) = logBase <$*> evalTreeMap f l <*> evalTreeMap f r
-
--- lift functions inside nested applicatives.
-(<$$>) :: (Applicative f, Applicative g) => (a -> b) -> f (g a) -> f (g b)
-(<$$>) = fmap . fmap
-{-# INLINE (<$$>) #-}
-(<$*>) :: (Applicative f, Applicative g) => (a -> b -> c) -> f (g a) -> f (g b -> g c)
-op <$*> m = liftA2 op <$> m
-{-# INLINE (<$*>) #-}
-
--- applies the argument `x` in the function carried by the `Reader` monad.
-askAbout :: x -> Reader (x -> a) a
-askAbout x = asks ($ x)
-{-# INLINE askAbout #-}
-
--- | Example of using `evalTree` with a Map.
-evalTreeWithMap :: (Ord ix, Floating val, OptIntPow val) => SRTree ix val -> Map ix val -> Maybe val
-evalTreeWithMap t m = runReader (evalTree t) (m !?)
-{-# INLINE evalTreeWithMap #-}
-
--- | Example of using `evalTree` with a Vector.
-evalTreeWithVector :: (Floating val, OptIntPow val) => SRTree Int val -> V.Vector val -> Maybe val
-evalTreeWithVector t v = runReader (evalTree t) (v V.!?)
-{-# INLINE evalTreeWithVector #-}
-
--- | Relabel occurences of a var into a tuple (ix, Int).
-relabelOccurrences :: forall ix val . Ord ix => SRTree ix val -> SRTree (ix, Int) val
-relabelOccurrences t = traverseIx updVar t `evalState` M.empty 
+-- | Creates the symbolic partial derivative of a tree by variable `dx` (if `p` is `False`)
+-- or parameter `dx` (if `p` is `True`).
+deriveBy :: Bool -> Int -> Fix SRTree -> Fix SRTree
+deriveBy p dx = fst (mutu alg1 alg2)
   where
-    updVar :: ix -> State (Map ix Int) (ix, Int)
-    updVar ix = do
-      s <- get
-      case s !? ix of
-        Nothing -> do put $ insert ix 0 s
-                      pure (ix, 0)
-        Just c  -> do put $ insert ix (c+1) s
-                      pure (ix, c+1)
+      alg1 (Var ix) = if not p && ix == dx then 1 else 0
+      alg1 (Param ix) = if p && ix == dx then 1 else 0
+      alg1 (Const _) = 0
+      alg1 (Uni f t) = derivative f (snd t) * fst t
+      alg1 (Bin Add l r) = fst l + fst r
+      alg1 (Bin Sub l r) = fst l - fst r
+      alg1 (Bin Mul l r) = fst l * snd r + snd l * fst r
+      alg1 (Bin Div l r) = (fst l * snd r - snd l * fst r) / snd r ** 2
+      alg1 (Bin Power l r) = snd l ** (snd r - 1) * (snd r * fst l + snd l * log (snd l) * fst r)
 
--- | Relabel the parameters sequentially starting from 0
-relabelParams :: Num ix => SRTree ix val -> SRTree ix val
-relabelParams t = (toState t) `evalState` 0
+      alg2 (Var ix) = var ix
+      alg2 (Param ix) = param ix
+      alg2 (Const c) = Fix (Const c)
+      alg2 (Uni f t) = Fix (Uni f $ snd t)
+      alg2 (Bin f l r) = Fix (Bin f (snd l) (snd r))
+
+newtype Tape a = Tape { untape :: [a] } deriving (Show, Functor)
+
+instance Num a => Num (Tape a) where
+  (Tape x) + (Tape y) = Tape $ zipWith (+) x y
+  (Tape x) - (Tape y) = Tape $ zipWith (-) x y
+  (Tape x) * (Tape y) = Tape $ zipWith (*) x y
+  abs (Tape x) = Tape (map abs x)
+  signum (Tape x) = Tape (map signum x)
+  fromInteger x = Tape [fromInteger x]
+  negate (Tape x) = Tape $ map (*(-1)) x
+instance Floating a => Floating (Tape a) where
+  pi = Tape [pi]
+  exp (Tape x) = Tape (map exp x)
+  log (Tape x) = Tape (map log x)
+  sqrt (Tape x) = Tape (map sqrt x)
+  sin (Tape x) = Tape (map sin x)
+  cos (Tape x) = Tape (map cos x)
+  tan (Tape x) = Tape (map tan x)
+  asin (Tape x) = Tape (map asin x)
+  acos (Tape x) = Tape (map acos x)
+  atan (Tape x) = Tape (map atan x)
+  sinh (Tape x) = Tape (map sinh x)
+  cosh (Tape x) = Tape (map cosh x)
+  tanh (Tape x) = Tape (map tanh x)
+  asinh (Tape x) = Tape (map asinh x)
+  acosh (Tape x) = Tape (map acosh x)
+  atanh (Tape x) = Tape (map atanh x)
+  (Tape x) ** (Tape y) = Tape $ zipWith (**) x y
+instance Fractional a => Fractional (Tape a) where
+  fromRational x = Tape [fromRational x]
+  (Tape x) / (Tape y) = Tape $ zipWith (/) x y
+  recip (Tape x) = Tape $ map recip x
+
+-- | Calculates the numerical derivative of a tree using forward mode
+-- provided a vector of variable values `xss`, a vector of parameter values `theta` and
+-- a function that changes a Double value to the type of the variable values.
+forwardMode :: (Show a, Num a, Floating a) => V.Vector a -> V.Vector Double -> (Double -> a) -> Fix SRTree -> [a]
+forwardMode xss theta f = untape . fst (mutu alg1 alg2)
   where
-    toState :: Num ix => SRTree ix val -> State ix (SRTree ix val)
-    toState (Param x) = do n <- get; put (n+1); pure (Param n)
-    toState (Add l r) = do l' <- toState l; r' <- toState r; pure (Add l' r')
-    toState (Sub l r) = do l' <- toState l; r' <- toState r; pure (Sub l' r')
-    toState (Mul l r) = do l' <- toState l; r' <- toState r; pure (Mul l' r')
-    toState (Div l r) = do l' <- toState l; r' <- toState r; pure (Div l' r')
-    toState (Power l r) = do l' <- toState l; r' <- toState r; pure (Power l' r')
-    toState (LogBase l r) = do l' <- toState l; r' <- toState r; pure (LogBase l' r')
-    toState (Fun f n) = do n' <- toState n; pure (Fun f n')
-    toState (Pow n i) = do n' <- toState n; pure (Pow n' i)
-    toState n = pure n
+      n = V.length theta
+      repMat v = Tape $ replicate n v
+      zeroes = repMat $ f 0
+      twos  = repMat $ f 2
+      tapeXs = [repMat $ xss ! ix | ix <- [0 .. V.length xss - 1]]
+      tapeTheta = [repMat $ f (theta ! ix) | ix <- [0 .. n - 1]]
+      paramVec = [ Tape [if ix==iy then f 1 else f 0 | iy <- [0 .. n-1]] | ix <- [0 .. n-1] ]
+
+      alg1 (Var ix)        = zeroes
+      alg1 (Param ix)      = paramVec !! ix
+      alg1 (Const _)       = zeroes
+      alg1 (Uni f t)       = derivative f (snd t) * fst t
+      alg1 (Bin Add l r)   = fst l + fst r
+      alg1 (Bin Sub l r)   = fst l - fst r
+      alg1 (Bin Mul l r)   = (fst l * snd r) + (snd l * fst r)
+      alg1 (Bin Div l r)   = ((fst l * snd r) - (snd l * fst r)) / snd r ** twos
+      alg1 (Bin Power l r) = snd l ** (snd r - 1) * ((snd r * fst l) + (snd l * log (snd l) * fst r))
+
+      alg2 (Var ix)     = tapeXs !! ix
+      alg2 (Param ix)   = tapeTheta !! ix
+      alg2 (Const c)    = repMat $ f c
+      alg2 (Uni g t)    = fmap (evalFun g) (snd t)
+      alg2 (Bin op l r) = evalOp op (snd l) (snd r)
+
+-- | The function `gradParams` calculates the numerical gradient of the tree and evaluates the tree at the same time. It assumes that each parameter has a unique occurrence in the expression. This should be significantly faster than `forwardMode`.
+gradParams  :: (Show a, Num a, Floating a) => V.Vector a -> V.Vector Double -> (Double -> a) -> Fix SRTree -> (a, [a])
+gradParams xss theta f = cata alg
+  where
+      n = V.length theta
+
+      alg (Var ix)        = (xss ! ix, [])
+      alg (Param ix)      = (f $ theta ! ix, [1])
+      alg (Const c)       = (f c, [])
+      alg (Uni f (v, gs)) = let v' = evalFun f v in (v', map (* derivative f v) gs)
+      alg (Bin Add (v1, l) (v2, r)) = (v1+v2, l ++ r)
+      alg (Bin Sub (v1, l) (v2, r)) = (v1-v2, l ++ map negate r)
+      alg (Bin Mul (v1, l) (v2, r)) = (v1*v2, map (*v2) l ++ map (*v1) r)
+      alg (Bin Div (v1, l) (v2, r)) = (v1/v2, map (/v2) l ++ map ((/v2^2) . (*v1) . negate) r)
+      alg (Bin Power (v1, l) (v2, r)) = (v1 ** v2, map (* (v1 ** (v2 - 1))) (map (*v2) l ++ map ((*v1).(* log v1)) r))
+
+
+derivative :: Floating a => Function -> a -> a
+derivative Id      = const 1
+derivative Abs     = \x -> x / abs x
+derivative Sin     = cos
+derivative Cos     = negate.sin
+derivative Tan     = recip . (**2.0) . cos
+derivative Sinh    = cosh
+derivative Cosh    = sinh
+derivative Tanh    = (1-) . (**2.0) . tanh
+derivative ASin    = recip . sqrt . (1-) . (^2)
+derivative ACos    = negate . recip . sqrt . (1-) . (^2)
+derivative ATan    = recip . (1+) . (^2)
+derivative ASinh   = recip . sqrt . (1+) . (^2)
+derivative ACosh   = \x -> 1 / (sqrt (x-1) * sqrt (x+1))
+derivative ATanh   = recip . (1-) . (^2)
+derivative Sqrt    = recip . (2*) . sqrt
+derivative Cbrt    = recip . (3*) . cbrt . (^2)
+derivative Square  = (2*)
+derivative Exp     = exp
+derivative Log     = recip
+{-# INLINE derivative #-}
+
+-- | Symbolic derivative by a variable
+deriveByVar :: Int -> Fix SRTree -> Fix SRTree
+deriveByVar = deriveBy False
+
+-- | Symbolic derivative by a parameter
+deriveByParam :: Int -> Fix SRTree -> Fix SRTree
+deriveByParam = deriveBy True
+
+-- | Relabel the parameters incrementaly starting from 0
+relabelParams :: Fix SRTree -> Fix SRTree
+relabelParams t = cataM lTor alg t `evalState` 0
+  where
+      lTor (Uni f mt) = Uni f <$> mt;
+      lTor (Bin f ml mr) = Bin f <$> ml <*> mr
+      lTor (Var ix) = pure (Var ix)
+      lTor (Param ix) = pure (Param ix)
+      lTor (Const c) = pure (Const c)
+
+      alg :: SRTree (Fix SRTree) -> State Int (Fix SRTree)
+      alg (Var ix) = pure $ var ix
+      alg (Param ix) = do iy <- get; modify (+1); pure (param iy)
+      alg (Const c) = pure $ Fix $ Const c
+      alg (Uni f t) = pure $ Fix (Uni f t)
+      alg (Bin f l r) = pure $ Fix (Bin f l r)
+
+-- | Change constant values to a parameter, returning the changed tree and a list
+-- of parameter values
+constsToParam :: Fix SRTree -> (Fix SRTree, [Double])
+constsToParam = first relabelParams . cata alg
+  where
+      first f (x, y) = (f x, y)
+
+      alg (Var ix) = (Fix $ Var ix, [])
+      alg (Param ix) = (Fix $ Param ix, [1.0])
+      alg (Const c) = (Fix $ Param 0, [c])
+      alg (Uni f t) = (Fix $ Uni f (fst t), snd t)
+      alg (Bin f l r) = (Fix (Bin f (fst l) (fst r)), snd l <> snd r)
+
+-- | Same as `constsToParam` but does not change constant values that
+-- can be converted to integer without loss of precision
+floatConstsToParam :: Fix SRTree -> (Fix SRTree, [Double])
+floatConstsToParam = first relabelParams . cata alg
+  where
+      first f (x, y) = (f x, y)
+
+      alg (Var ix) = (Fix $ Var ix, [])
+      alg (Param ix) = (Fix $ Param ix, [1.0])
+      alg (Const c) = if floor c == ceiling c then (Fix $ Const c, []) else (Fix $ Param 0, [c])
+      alg (Uni f t) = (Fix $ Uni f (fst t), snd t)
+      alg (Bin f l r) = (Fix (Bin f (fst l) (fst r)), snd l <> snd r)

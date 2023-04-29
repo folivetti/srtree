@@ -35,6 +35,7 @@ import Control.Monad.Reader
 import Data.Maybe (fromJust)
 
 import Data.SRTree.Internal
+import Data.SRTree.Recursion
 
 -- * Class definition of properties that a certain parameter type has.
 --
@@ -43,19 +44,19 @@ import Data.SRTree.Internal
 -- HasExps: does `p` provides a range for the integral exponentes?
 -- HasFuns: does `p` provides a list of allowed functions?
 class HasVars p where
-  _vars :: p ix val -> [ix]
+  _vars :: p -> [Int]
 class HasVals p where
-  _range :: p ix val -> (val, val)
+  _range :: p -> (Double, Double)
 class HasExps p where
-  _exponents :: p ix val -> (Int, Int)
+  _exponents :: p -> (Int, Int)
 class HasFuns p where
-  _funs :: p ix val -> [Function]
+  _funs :: p -> [Function]
 
 -- | Constraint synonym for all properties.
 type HasEverything p = (HasVars p, HasVals p, HasExps p, HasFuns p)
 
 -- | A structure with every property
-data FullParams ix val = P [ix] (val, val) (Int, Int) [Function]
+data FullParams = P [Int] (Double, Double) (Int, Int) [Function]
 
 instance HasVars FullParams where
   _vars (P ixs _ _ _) = ixs
@@ -83,79 +84,72 @@ randomRange rng = state (randomR rng)
 {-# INLINE randomRange #-}
 
 -- Replace the child of a unary tree.
-replaceChild :: SRTree ix val -> SRTree ix val -> Maybe (SRTree ix val)
-replaceChild (Fun g _) t = Just $ Fun g t
-replaceChild (Pow _ k) t = Just $ Pow t k
+replaceChild :: Fix SRTree -> Fix SRTree -> Maybe (Fix SRTree)
+replaceChild (Fix (Uni f _)) t = Just $ Fix (Uni f t)
 replaceChild _         _ = Nothing 
 {-# INLINE replaceChild #-}
 
 -- Replace the children of a binary tree.
-replaceChildren :: SRTree ix val -> SRTree ix val -> SRTree ix val -> Maybe (SRTree ix val)
-replaceChildren (Add _ _) l r     = Just $ Add l r
-replaceChildren (Sub _ _) l r     = Just $ Sub l r
-replaceChildren (Mul _ _) l r     = Just $ Mul l r
-replaceChildren (Div _ _) l r     = Just $ Div l r
-replaceChildren (Power _ _) l r   = Just $ Power l r
-replaceChildren (LogBase _ _) l r = Just $ LogBase l r
+replaceChildren :: Fix SRTree -> Fix SRTree -> Fix SRTree -> Maybe (Fix SRTree)
+replaceChildren (Fix (Bin f _ _)) l r = Just $ Fix (Bin f l r)
 replaceChildren _             _ _ = Nothing
 {-# INLINE replaceChildren #-}
 
 -- | RndTree is a Monad Transformer to generate random trees of type `SRTree ix val` 
 -- given the parameters `p ix val` using the random number generator `StdGen`.
-type RndTree p ix val = ReaderT (p ix val) (StateT StdGen IO) (SRTree ix val)
+type RndTree p = ReaderT p (StateT StdGen IO) (Fix SRTree)
 
 -- | Returns a random variable, the parameter `p` must have the `HasVars` property
-randomVar :: HasVars p => RndTree p ix val
+randomVar :: HasVars p => RndTree p
 randomVar = do vars <- asks _vars
-               lift $ Var <$> randomFrom vars
+               lift $ Fix . Var <$> randomFrom vars
 
 -- | Returns a random constant, the parameter `p` must have the `HasConst` property
-randomConst :: (Ord val, Random val, HasVals p) => RndTree p ix val
+randomConst :: HasVals p => RndTree p
 randomConst = do rng <- asks _range
-                 lift $ Const <$> randomRange rng
+                 lift $ Fix . Const <$> randomRange rng
 
 -- | Returns a random integer power node, the parameter `p` must have the `HasExps` property
-randomPow :: (Ord val, Random val, HasExps p) => RndTree p ix val
+randomPow :: HasExps p => RndTree p
 randomPow = do rng <- asks _exponents
-               lift $ Pow Empty <$> randomRange rng
+               lift $ Fix . Bin Power 0 . Fix . Const . fromIntegral <$> randomRange rng
 
 -- | Returns a random function, the parameter `p` must have the `HasFuns` property
-randomFunction :: HasFuns p => RndTree p ix val
+randomFunction :: HasFuns p => RndTree p
 randomFunction = do funs <- asks _funs
-                    lift $ (`Fun` Empty) <$> randomFrom funs
+                    f <- lift $ randomFrom funs
+                    lift $ pure $ Fix (Uni f 0)
 
 -- | Returns a random node, the parameter `p` must have every property.
-randomNode :: (Ord val, Random val, HasEverything p) => RndTree p ix val
+randomNode :: HasEverything p => RndTree p
 randomNode = do
-  choice <- lift $ randomRange (0, 9 :: Int)
+  choice <- lift $ randomRange (0, 8 :: Int)
   case choice of
     0 -> randomVar
     1 -> randomConst
     2 -> randomFunction
     3 -> randomPow
-    4 -> pure $ Add Empty Empty
-    5 -> pure $ Sub Empty Empty
-    6 -> pure $ Mul Empty Empty
-    7 -> pure $ Div Empty Empty
-    8 -> pure $ Power Empty Empty
-    9 -> pure $ LogBase Empty Empty
+    4 -> pure . Fix $ Bin Add 0 0
+    5 -> pure . Fix $ Bin Sub 0 0
+    6 -> pure . Fix $ Bin Mul 0 0
+    7 -> pure . Fix $ Bin Div 0 0
+    8 -> pure . Fix $ Bin Power 0 0
 
 -- | Returns a random non-terminal node, the parameter `p` must have every property.
-randomNonTerminal :: (Ord val, Random val, HasEverything p) => RndTree p ix val
+randomNonTerminal :: HasEverything p => RndTree p
 randomNonTerminal = do
-  choice <- lift $ randomRange (0, 7 :: Int)
+  choice <- lift $ randomRange (0, 6 :: Int)
   case choice of
     0 -> randomFunction
     1 -> randomPow
-    2 -> pure $ Add Empty Empty
-    3 -> pure $ Sub Empty Empty
-    4 -> pure $ Mul Empty Empty
-    5 -> pure $ Div Empty Empty
-    6 -> pure $ Power Empty Empty
-    7 -> pure $ LogBase Empty Empty
+    2 -> pure . Fix $ Bin Add 0 0
+    3 -> pure . Fix $ Bin Sub 0 0
+    4 -> pure . Fix $ Bin Mul 0 0
+    5 -> pure . Fix $ Bin Div 0 0
+    6 -> pure . Fix $ Bin Power 0 0
     
 -- | Returns a random tree with a limited budget, the parameter `p` must have every property.
-randomTree :: (Ord val, Random val, HasEverything p) => Int -> RndTree p ix val
+randomTree :: HasEverything p => Int -> RndTree p
 randomTree 0      = do
   coin <- lift toss
   if coin
@@ -169,7 +163,7 @@ randomTree budget = do
     2 -> replaceChildren node <$> randomTree (budget `div` 2) <*> randomTree (budget `div` 2)
     
 -- | Returns a random tree with a approximately a number `n` of nodes, the parameter `p` must have every property.
-randomTreeBalanced :: (Ord val, Random val, HasEverything p) => Int -> RndTree p ix val
+randomTreeBalanced :: HasEverything p => Int -> RndTree p
 randomTreeBalanced n | n <= 1 = do
   coin <- lift toss
   if coin
