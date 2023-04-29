@@ -13,47 +13,56 @@
 module Data.SRTree 
          ( SRTree(..)
          , Function(..)
-         , OptIntPow(..)
-         , traverseIx
+         , Op(..)
+         , param
+         , var
          , arity
          , getChildren
          , countNodes
          , countVarNodes
+         , countConsts
+         , countParams
          , countOccurrences
          , deriveBy
-         , deriveParamBy
-         , simplify
+         , deriveByVar
+         , deriveByParam
          , derivative
+         , forwardMode
+         , gradParams
          , evalFun
+         , evalOp
          , inverseFunc
          , evalTree
-         , evalTreeMap
-         , evalTreeWithMap
-         , evalTreeWithVector
-         , relabelOccurrences
          , relabelParams
+         , constsToParam
+         , floatConstsToParam
          )
          where
          
-import Data.SRTree.Internal ( SRTree(..)
+import Data.SRTree.Internal 
+         ( SRTree(..)
          , Function(..)
-         , OptIntPow(..)
-         , traverseIx
+         , Op(..)
+         , param
+         , var
          , arity
          , getChildren
          , countNodes
          , countVarNodes
+         , countConsts
+         , countParams
          , countOccurrences
          , deriveBy
-         , deriveParamBy
-         , simplify
+         , deriveByVar
+         , deriveByParam
          , derivative
+         , forwardMode
+         , gradParams
          , evalFun
+         , evalOp
          , inverseFunc
          , evalTree
-         , evalTreeMap
-         , evalTreeWithMap
-         , evalTreeWithVector
-         , relabelOccurrences
          , relabelParams
+         , constsToParam
+         , floatConstsToParam
          )
