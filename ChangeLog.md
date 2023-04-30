@@ -1,5 +1,10 @@
 # Changelog for srtree
 
+## 1.0.0.1
+
+- Fix `vector` version bounds
+- Included benchmarking of `ad` package
+
 ## 1.0.0.0
 
 - Complete refactoring of source
