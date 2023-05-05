@@ -33,6 +33,7 @@ module Data.SRTree.Internal
          , derivative
          , forwardMode
          , gradParams
+         , gradParams2
          , evalFun
          , evalOp
          , inverseFunc
@@ -43,11 +44,13 @@ module Data.SRTree.Internal
          )
          where
 
-import Data.SRTree.Recursion ( Fix(Fix), cata, mutu, cataM )
+import Data.SRTree.Recursion ( Fix(Fix), cata, mutu, accu, cataM )
 
 import qualified Data.Vector as V
 import Data.Vector ((!))
 import Control.Monad.State
+import qualified Data.DList as DL
+import Data.Bifunctor (second)
 
 import Debug.Trace (trace)
 
@@ -407,20 +410,130 @@ forwardMode xss theta f = untape . fst (mutu alg1 alg2)
 
 -- | The function `gradParams` calculates the numerical gradient of the tree and evaluates the tree at the same time. It assumes that each parameter has a unique occurrence in the expression. This should be significantly faster than `forwardMode`.
 gradParams  :: (Show a, Num a, Floating a) => V.Vector a -> V.Vector Double -> (Double -> a) -> Fix SRTree -> (a, [a])
-gradParams xss theta f = cata alg
+gradParams xss theta f = second DL.toList . cata alg
   where
       n = V.length theta
 
-      alg (Var ix)        = (xss ! ix, [])
-      alg (Param ix)      = (f $ theta ! ix, [1])
-      alg (Const c)       = (f c, [])
-      alg (Uni f (v, gs)) = let v' = evalFun f v in (v', map (* derivative f v) gs)
-      alg (Bin Add (v1, l) (v2, r)) = (v1+v2, l ++ r)
-      alg (Bin Sub (v1, l) (v2, r)) = (v1-v2, l ++ map negate r)
-      alg (Bin Mul (v1, l) (v2, r)) = (v1*v2, map (*v2) l ++ map (*v1) r)
-      alg (Bin Div (v1, l) (v2, r)) = (v1/v2, map (/v2) l ++ map ((/v2^2) . (*v1) . negate) r)
-      alg (Bin Power (v1, l) (v2, r)) = (v1 ** v2, map (* (v1 ** (v2 - 1))) (map (*v2) l ++ map ((*v1).(* log v1)) r))
+      alg (Var ix)        = (xss ! ix, DL.empty)
+      alg (Param ix)      = (f $ theta ! ix, DL.singleton 1)
+      alg (Const c)       = (f c, DL.empty)
+      alg (Uni f (v, gs)) = let v' = evalFun f v
+                                dv = derivative f v
+                             in (v', DL.map (*dv) gs)
+      alg (Bin Add (v1, l) (v2, r)) = (v1+v2, DL.append l r)
+      alg (Bin Sub (v1, l) (v2, r)) = (v1-v2, DL.append l (DL.map negate r))
+      alg (Bin Mul (v1, l) (v2, r)) = (v1*v2, DL.append (DL.map (*v2) l) (DL.map (*v1) r))
+      alg (Bin Div (v1, l) (v2, r)) = let dv = (-v1/v2^2) 
+                                       in (v1/v2, DL.append (DL.map (/v2) l) (DL.map (*dv) r))
+      alg (Bin Power (v1, l) (v2, r)) = let dv1 = v1 ** (v2 - 1)
+                                            dv2 = v1 * log v1
+                                         in (v1 ** v2, DL.map (*dv1) (DL.append (DL.map (*v2) l) (DL.map (*dv2) r)))
 
+    {-
+gradParams2  :: forall a . (Show a, Num a, Floating a) => V.Vector a -> V.Vector Double -> (Double -> a) -> Fix SRTree -> (a, [a])
+gradParams2 xss theta f t = (getInfo' infoT, DL.toList g)
+  where
+      infoT = cata alg t
+      g = accu st alg2 infoT 1
+
+      getInfo' x = let (v, _, _) = getInfo x in v
+      fstInf (a, _, _) = a
+      sndInf (_, b, _) = b
+      trdInf (_, _, c) = c
+
+      alg :: SRTree (Fix (InfoSRTree (a, a, a))) -> Fix (InfoSRTree (a, a, a))
+      alg (Var ix)     = Fix (VarI (xss ! ix, 0, 0) ix)
+      alg (Param ix)   = Fix (ParamI (f $ theta ! ix, 0, 0) ix)
+      alg (Const c)    = Fix (ConstI (f c, 0, 0) c)
+      alg (Uni f t)    = let v = getInfo' t 
+                          in Fix (UniI f (evalFun f v, v, 0) t)
+      alg (Bin op l r) = let vl = getInfo' l
+                             vr = getInfo' r
+                          in Fix (BinI op (evalOp op vl vr, vl, vr) l r)
+
+      st :: forall x. InfoSRTree (a, a, a) x -> a -> InfoSRTree (a, a, a) (x, a)
+      st (VarI info ix)     s = VarI info ix
+      st (ParamI info ix)   s = ParamI info ix
+      st (ConstI info c)    s = ConstI info c
+      st (UniI f info t)    s = let v = derivative f (sndInf info) in UniI f info (t, s * v)
+      st (BinI Add info l r) s = BinI Add info (l, s) (r, s)
+      st (BinI Sub info l r) s = BinI Sub info (l, s) (r, negate s)
+      st (BinI Mul info l r) s = let vl = sndInf info
+                                     vr = trdInf info
+                                  in BinI Mul info (l, s * vr) (r, s * vl)
+      st (BinI Div info l r) s = let vl = sndInf info
+                                     vr = trdInf info
+                                  in BinI Div info (l, s/vr) (r, s * (-vl/vr^2))
+      st (BinI Power info l r) s = let vl = sndInf info
+                                       vr = trdInf info
+                                       dv1 = vl ** (vr - 1)
+                                       dv2 = vl * log vl
+                                    in BinI Power info (l, s * dv1 * vr) (r, s * dv1 * dv2)
+
+      alg2 (VarI _ ix)    s = DL.empty
+      alg2 (ParamI _ ix)   s = DL.singleton s
+      alg2 (ConstI _ c)    s = DL.empty
+      alg2 (UniI f _ gs)   s = gs
+      alg2 (BinI op _ l r) s = DL.append l r
+-}
+
+data TupleF a b = S a | T a b | B a b b deriving Functor -- hi, I'm a tree
+type Tuple a = Fix (TupleF a)
+
+gradParams2  :: forall a . (Show a, Num a, Floating a) => V.Vector a -> V.Vector Double -> (Double -> a) -> Fix SRTree -> (a, [a])
+gradParams2 xss theta f t = (getTop info, DL.toList g)
+  where
+      info = cata alg t
+      g = accu st alg2 t (1, info)
+
+      oneTpl x  = Fix $ S x
+      tuple x y = Fix $ T x y
+      branch x y z = Fix $ B x y z
+      getTop (Fix (S x)) = x
+      getTop (Fix (T x y)) = x
+      getTop (Fix (B x y z)) = x
+      unCons (Fix (T x y)) = y
+      getBranches (Fix (B x y z)) = (y,z)
+
+      alg :: forall b . SRTree (Tuple a) -> Tuple a
+      alg (Var ix) = oneTpl (xss ! ix)
+      alg (Param ix) = oneTpl (f $ theta ! ix)
+      alg (Const c) = oneTpl (f c)
+      alg (Uni f t) = let v = getTop t
+                       in tuple (evalFun f v) t
+      alg (Bin op l r) = let vl = getTop l
+                             vr = getTop r
+                          in branch (evalOp op vl vr) l r
+
+      st (Var ix)     (dx, info)  = Var ix
+      st (Param ix)   (dx, info)  = Param ix
+      st (Const v)    (dx, info)  = Const v
+      st (Uni f t)    (dx, info)  = let v = derivative f . getTop . unCons $ info -- derivative f (getTop info)
+                                       in Uni f (t, (dx * v, unCons info))
+      st (Bin Add l r) (dx, info) = let (vl, vr) = getBranches info
+                                     in Bin Add (l, (dx, vl)) (r, (dx, vr))
+      st (Bin Sub l r) (dx, info) = let (vl, vr) = getBranches info
+                                     in Bin Sub (l, (dx, vl)) (r, (negate dx, vr))
+      st (Bin Mul l r) (dx, info) = let (vl, vr) = getBranches info
+                                        vl' = getTop vl
+                                        vr' = getTop vr
+                                     in Bin Mul (l, (dx * vr', vl)) (r, (dx * vl', vr))
+      st (Bin Div l r) (dx, info) = let (vl, vr) = getBranches info
+                                        vl' = getTop vl
+                                        vr' = getTop vr
+                                     in Bin Div (l, (dx / vr', vl)) (r, (dx * (-vl'/vr'^2), vr))
+      st (Bin Power l r) (dx, info) = let (vl, vr) = getBranches info
+                                          vl' = getTop vl
+                                          vr' = getTop vr
+                                          dv1 = vl' ** (vr' - 1)
+                                          dv2 = vl' * log vl'
+                                       in Bin Power (l, (dx * dv1 * vr', vl)) (r, (dx * dv1 * dv2, vr))
+
+      alg2 (Var ix)     s = DL.empty
+      alg2 (Param ix)   s = DL.singleton $ fst s
+      alg2 (Const c)    s = DL.empty
+      alg2 (Uni _ gs)   s = gs
+      alg2 (Bin op l r) s = DL.append l r
 
 derivative :: Floating a => Function -> a -> a
 derivative Id      = const 1
