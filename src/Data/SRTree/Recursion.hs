@@ -27,6 +27,9 @@ unOp _ = error "partial function unOp called on Ret"
 cata :: Functor f => (f a -> a) -> Fix f -> a
 cata alg = alg . fmap (cata alg) . unfix
 
+--zigzag :: Functor f => (f a -> a) -> Fix f -> a
+--zigzag alg = 
+
 cataM :: (Functor f, Monad m) => (forall x . f (m x) -> m (f x)) -> (f a -> m a) -> Fix f -> m a
 cataM seq alg = cata (seq >=> alg)
 
