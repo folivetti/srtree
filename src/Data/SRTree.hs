@@ -67,4 +67,6 @@ import Data.SRTree.Internal
          , relabelParams
          , constsToParam
          , floatConstsToParam
+         , paramsToConst
+         , Fix (..)
          )

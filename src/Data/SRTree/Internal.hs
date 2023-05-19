@@ -42,10 +42,12 @@ module Data.SRTree.Internal
          , relabelParams
          , constsToParam
          , floatConstsToParam
+         , paramsToConst
+         , Fix (..)
          )
          where
 
-import Data.SRTree.Recursion ( Fix(Fix), cata, mutu, accu, cataM )
+import Data.SRTree.Recursion ( Fix (..), cata, mutu, accu, cataM )
 
 import qualified Data.Vector as V
 import Data.Vector ((!))
@@ -252,13 +254,13 @@ countConsts = cata alg
 
 -- | Count the occurrences of variable indexed as `ix`
 countOccurrences :: Int -> Fix SRTree -> Int
-countOccurrences ix = sum . cata alg
+countOccurrences ix = cata alg
   where
-      alg (Var iy) = [1 | ix == iy]
-      alg Param {} = []
-      alg Const {} = []
+      alg (Var iy) = if ix == iy then 1 else 0
+      alg Param {} = 0
+      alg Const {} = 0
       alg (Uni _ t) = t
-      alg (Bin _ l r) = l <> r
+      alg (Bin _ l r) = l + r
 {-# INLINE countOccurrences #-}
 
 -- | Evaluates the tree given a vector of variable values, a vector of parameter values and a function that takes a Double and change to whatever type the variables have. This is useful when working with datasets of many values per variables.
@@ -550,3 +552,13 @@ floatConstsToParam = first relabelParams . cata alg
       alg (Const c) = if floor c == ceiling c then (Fix $ Const c, []) else (Fix $ Param 0, [c])
       alg (Uni f t) = (Fix $ Uni f (fst t), snd t)
       alg (Bin f l r) = (Fix (Bin f (fst l) (fst r)), snd l <> snd r)
+
+-- | Convert the parameters into constants in the tree
+paramsToConst :: [Double] -> Fix SRTree -> Fix SRTree
+paramsToConst theta = cata alg
+  where
+      alg (Var ix) = Fix $ Var ix
+      alg (Param ix) = Fix $ Const (theta !! ix)
+      alg (Const c) = Fix $ Const c
+      alg (Uni f t) = Fix $ Uni f t
+      alg (Bin f l r) = Fix $ Bin f l r
