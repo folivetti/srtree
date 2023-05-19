@@ -37,6 +37,8 @@ module Data.SRTree
          , relabelParams
          , constsToParam
          , floatConstsToParam
+         , paramsToConst
+         , Fix (..)
          )
          where
          

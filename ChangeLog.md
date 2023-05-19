@@ -1,5 +1,10 @@
 # Changelog for srtree
 
+## 1.0.0.2
+
+- Export `Fix` from `Data.SRTRee`
+- `paramsToConst` function
+
 ## 1.0.0.1
 
 - Fix `vector` version bounds
