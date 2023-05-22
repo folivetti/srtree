@@ -1,5 +1,9 @@
 # Changelog for srtree
 
+## 1.0.0.3
+
+- Fixed issue with HUnit test
+
 ## 1.0.0.2
 
 - Export `Fix` from `Data.SRTRee`

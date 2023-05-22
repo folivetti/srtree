@@ -52,7 +52,7 @@ forwardVals = map (forwardMode xs thetaMulti id) exprs
 -- values from grad
 -- we must relabel the parameters of the expression to sequence values
 gradVals :: [(Double, [Double])]
-gradVals = map (gradParams xs thetaSingle id . relabelParams) exprs
+gradVals = map (gradParamsFwd xs thetaSingle id . relabelParams) exprs
 
 -- values of the evaluated expressions
 exprVals :: [Double]

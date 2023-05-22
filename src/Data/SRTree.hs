@@ -28,8 +28,8 @@ module Data.SRTree
          , deriveByParam
          , derivative
          , forwardMode
-         , gradParams
-         , gradParams2
+         , gradParamsFwd
+         , gradParamsRev
          , evalFun
          , evalOp
          , inverseFunc
@@ -60,8 +60,8 @@ import Data.SRTree.Internal
          , deriveByParam
          , derivative
          , forwardMode
-         , gradParams
-         , gradParams2
+         , gradParamsFwd
+         , gradParamsRev
          , evalFun
          , evalOp
          , inverseFunc

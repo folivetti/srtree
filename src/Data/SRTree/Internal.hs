@@ -33,8 +33,8 @@ module Data.SRTree.Internal
          , deriveByParam
          , derivative
          , forwardMode
-         , gradParams
-         , gradParams2
+         , gradParamsFwd
+         , gradParamsRev
          , evalFun
          , evalOp
          , inverseFunc
@@ -412,8 +412,8 @@ forwardMode xss theta f = untape . fst (mutu alg1 alg2)
       alg2 (Bin op l r) = evalOp op (snd l) (snd r)
 
 -- | The function `gradParams` calculates the numerical gradient of the tree and evaluates the tree at the same time. It assumes that each parameter has a unique occurrence in the expression. This should be significantly faster than `forwardMode`.
-gradParams  :: (Show a, Num a, Floating a) => V.Vector a -> V.Vector Double -> (Double -> a) -> Fix SRTree -> (a, [a])
-gradParams xss theta f = second DL.toList . cata alg
+gradParamsFwd  :: (Show a, Num a, Floating a) => V.Vector a -> V.Vector Double -> (Double -> a) -> Fix SRTree -> (a, [a])
+gradParamsFwd xss theta f = second DL.toList . cata alg
   where
       n = V.length theta
 
@@ -435,8 +435,8 @@ gradParams xss theta f = second DL.toList . cata alg
 data TupleF a b = S a | T a b | B a b b deriving Functor -- hi, I'm a tree
 type Tuple a = Fix (TupleF a)
 
-gradParams2  :: forall a . (Show a, Num a, Floating a) => V.Vector a -> V.Vector Double -> (Double -> a) -> Fix SRTree -> (a, [a])
-gradParams2 xss theta f t = (getTop fwdMode, DL.toList g)
+gradParamsRev  :: forall a . (Show a, Num a, Floating a) => V.Vector a -> V.Vector Double -> (Double -> a) -> Fix SRTree -> (a, [a])
+gradParamsRev xss theta f t = (getTop fwdMode, DL.toList g)
   where
       fwdMode = cata forward t
       g = accu reverse combine t (1, fwdMode)

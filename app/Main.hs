@@ -79,8 +79,8 @@ main = defaultMain [
        bgroup ("PySR " <> show ix <> " " <> show iy)
          [ bench "warmup" $ whnf (evalTree xs ps id) t
          -- , bench "forwardMode" $ whnf (sum . forwardMode xs ps id) t
-         , bench "grad" $ whnf (sum . snd . gradParams xs ps id) t
-         , bench "grad2" $ whnf (sum . snd . gradParams2 xs ps id) t
+         , bench "grad" $ whnf (sum . snd . gradParamsFwd xs ps id) t
+         , bench "grad2" $ whnf (sum . snd . gradParamsRev xs ps id) t
          , bench "autodiff" $ whnf (sum . (`autograd` (Data.Vector.toList ps))) t
          ] | (ix, iy, t) <- tests
                    ]
