@@ -1,5 +1,9 @@
 # Changelog for srtree
 
+## 1.0.0.4
+
+- Removed benchmarking code that demanded more dependencies
+
 ## 1.0.0.3
 
 - Fixed issue with HUnit test
