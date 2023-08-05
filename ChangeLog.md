@@ -1,5 +1,15 @@
 # Changelog for srtree
 
+## 1.1.0.0
+
+- Reorganization of modules
+- Renaming AD functions
+- Inclusion of reverse mode that calculates the diagonal of and the full Hessian matrices
+
+## 1.0.0.5
+
+- Changed `base` and `mtl` versions
+
 ## 1.0.0.4
 
 - Removed benchmarking code that demanded more dependencies

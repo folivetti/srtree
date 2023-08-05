@@ -16,6 +16,7 @@ module Data.SRTree
          , Op(..)
          , param
          , var
+         , constv
          , arity
          , getChildren
          , countNodes
@@ -23,17 +24,6 @@ module Data.SRTree
          , countConsts
          , countParams
          , countOccurrences
-         , deriveBy
-         , deriveByVar
-         , deriveByParam
-         , derivative
-         , forwardMode
-         , gradParamsFwd
-         , gradParamsRev
-         , evalFun
-         , evalOp
-         , inverseFunc
-         , evalTree
          , relabelParams
          , constsToParam
          , floatConstsToParam
@@ -48,6 +38,7 @@ import Data.SRTree.Internal
          , Op(..)
          , param
          , var
+         , constv
          , arity
          , getChildren
          , countNodes
@@ -55,17 +46,6 @@ import Data.SRTree.Internal
          , countConsts
          , countParams
          , countOccurrences
-         , deriveBy
-         , deriveByVar
-         , deriveByParam
-         , derivative
-         , forwardMode
-         , gradParamsFwd
-         , gradParamsRev
-         , evalFun
-         , evalOp
-         , inverseFunc
-         , evalTree
          , relabelParams
          , constsToParam
          , floatConstsToParam

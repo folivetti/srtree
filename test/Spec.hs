@@ -1,4 +1,7 @@
 import Data.SRTree
+import Data.SRTree.Eval
+import Data.SRTree.Derivative
+import Data.SRTree.AD
 
 import qualified Data.Vector as V
 import Numeric.AD.Double ( grad )
@@ -52,7 +55,7 @@ forwardVals = map (forwardMode xs thetaMulti id) exprs
 -- values from grad
 -- we must relabel the parameters of the expression to sequence values
 gradVals :: [(Double, [Double])]
-gradVals = map (gradParamsFwd xs thetaSingle id . relabelParams) exprs
+gradVals = map (forwardModeUnique xs thetaSingle id . relabelParams) exprs
 
 -- values of the evaluated expressions
 exprVals :: [Double]
