@@ -24,6 +24,9 @@ module Data.SRTree
          , countConsts
          , countParams
          , countOccurrences
+         , countUniqueTokens
+         , numberOfVars
+         , getIntConsts
          , relabelParams
          , constsToParam
          , floatConstsToParam
@@ -46,6 +49,9 @@ import Data.SRTree.Internal
          , countConsts
          , countParams
          , countOccurrences
+         , countUniqueTokens
+         , numberOfVars
+         , getIntConsts
          , relabelParams
          , constsToParam
          , floatConstsToParam
