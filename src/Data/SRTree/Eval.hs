@@ -20,20 +20,21 @@ module Data.SRTree.Eval
         )
         where
 
-import qualified Data.Vector.Storable as V
+import qualified Data.Vector as V
+import qualified Data.Vector.Storable as VS
 import Data.Vector.Storable ((!))
 
 import Data.SRTree.Internal
 import Data.SRTree.Recursion ( Fix (..), cata )
 
 -- | Evaluates the tree given a vector of variable values, a vector of parameter values and a function that takes a Double and change to whatever type the variables have. This is useful when working with datasets of many values per variables.
-evalTree :: (Num a, Floating a, V.Storable a) => V.Vector a -> V.Vector Double -> (Double -> a) -> Fix SRTree -> a
+evalTree :: (Num a, Floating a) => V.Vector a -> VS.Vector Double -> (Double -> a) -> Fix SRTree -> a
 evalTree xss params f = cata alg
   where
-      alg (Var ix) = xss ! ix
-      alg (Param ix) = f $ params ! ix
-      alg (Const c) = f c
-      alg (Uni g t) = evalFun g t
+      alg (Var ix)     = xss V.! ix
+      alg (Param ix)   = f $ params ! ix
+      alg (Const c)    = f c
+      alg (Uni g t)    = evalFun g t
       alg (Bin op l r) = evalOp op l r
 {-# INLINE evalTree #-}
 

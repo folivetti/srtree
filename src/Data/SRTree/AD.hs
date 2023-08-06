@@ -27,7 +27,8 @@ import Data.SRTree.Derivative
 import Data.SRTree.Recursion
 
 import qualified Data.DList as DL
-import qualified Data.Vector.Storable as V
+import qualified Data.Vector as V
+import qualified Data.Vector.Storable as VS
 import Data.Vector.Storable ((!))
 import Data.Bifunctor (second)
 
@@ -67,14 +68,14 @@ instance Fractional a => Fractional (Tape a) where
 -- | Calculates the numerical derivative of a tree using forward mode
 -- provided a vector of variable values `xss`, a vector of parameter values `theta` and
 -- a function that changes a Double value to the type of the variable values.
-forwardMode :: (Show a, Num a, Floating a, V.Storable a) => V.Vector a -> V.Vector Double -> (Double -> a) -> Fix SRTree -> [a]
+forwardMode :: (Show a, Num a, Floating a) => V.Vector a -> VS.Vector Double -> (Double -> a) -> Fix SRTree -> [a]
 forwardMode xss theta f = untape . fst (mutu alg1 alg2)
   where
-      n = V.length theta
+      n = VS.length theta
       repMat v = Tape $ replicate n v
       zeroes = repMat $ f 0
       twos  = repMat $ f 2
-      tapeXs = [repMat $ xss ! ix | ix <- [0 .. V.length xss - 1]]
+      tapeXs = [repMat $ xss V.! ix | ix <- [0 .. V.length xss - 1]]
       tapeTheta = [repMat $ f (theta ! ix) | ix <- [0 .. n - 1]]
       paramVec = [ Tape [if ix==iy then f 1 else f 0 | iy <- [0 .. n-1]] | ix <- [0 .. n-1] ]
 
@@ -95,12 +96,12 @@ forwardMode xss theta f = untape . fst (mutu alg1 alg2)
       alg2 (Bin op l r) = evalOp op (snd l) (snd r)
 
 -- | The function `forwardModeUnique` calculates the numerical gradient of the tree and evaluates the tree at the same time. It assumes that each parameter has a unique occurrence in the expression. This should be significantly faster than `forwardMode`.
-forwardModeUnique  :: (Show a, Num a, Floating a, V.Storable a) => V.Vector a -> V.Vector Double -> (Double -> a) -> Fix SRTree -> (a, [a])
+forwardModeUnique  :: (Show a, Num a, Floating a) => V.Vector a -> VS.Vector Double -> (Double -> a) -> Fix SRTree -> (a, [a])
 forwardModeUnique xss theta f = second DL.toList . cata alg
   where
-      n = V.length theta
+      n = VS.length theta
 
-      alg (Var ix)        = (xss ! ix, DL.empty)
+      alg (Var ix)        = (xss V.! ix, DL.empty)
       alg (Param ix)      = (f $ theta ! ix, DL.singleton 1)
       alg (Const c)       = (f c, DL.empty)
       alg (Uni f (v, gs)) = let v' = evalFun f v
@@ -119,7 +120,7 @@ data TupleF a b = S a | T a b | B a b b deriving Functor -- hi, I'm a tree
 type Tuple a = Fix (TupleF a)
 
 -- | Same as above, but using reverse mode, that is much faster.
-reverseModeUnique  :: forall a . (Show a, Num a, Floating a, V.Storable a) => V.Vector a -> V.Vector Double -> (Double -> a) -> Fix SRTree -> (a, [a])
+reverseModeUnique  :: forall a . (Show a, Num a, Floating a) => V.Vector a -> VS.Vector Double -> (Double -> a) -> Fix SRTree -> (a, [a])
 reverseModeUnique xss theta f t = (getTop fwdMode, DL.toList g)
   where
       fwdMode = cata forward t
@@ -136,7 +137,7 @@ reverseModeUnique xss theta f t = (getTop fwdMode, DL.toList g)
 
       -- forward just creates a new tree with the partial
       -- evaluation of the nodes
-      forward (Var ix)     = oneTpl (xss ! ix)
+      forward (Var ix)     = oneTpl (xss V.! ix)
       forward (Param ix)   = oneTpl (f $ theta ! ix)
       forward (Const c)    = oneTpl (f c)
       forward (Uni f t)    = let v = getTop t
