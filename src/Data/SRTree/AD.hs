@@ -140,8 +140,8 @@ reverseModeUnique xss theta f t = (getTop fwdMode, DL.toList g)
       forward (Var ix)     = oneTpl (xss V.! ix)
       forward (Param ix)   = oneTpl (f $ theta ! ix)
       forward (Const c)    = oneTpl (f c)
-      forward (Uni f t)    = let v = getTop t
-                              in tuple (evalFun f v) t
+      forward (Uni g t)    = let v = getTop t
+                              in tuple (evalFun g v) t
       forward (Bin op l r) = let vl = getTop l
                                  vr = getTop r
                               in branch (evalOp op vl vr) l r
@@ -157,7 +157,7 @@ reverseModeUnique xss theta f t = (getTop fwdMode, DL.toList g)
            in Uni f (t, ( dx*g', v ))
       reverse (Bin op l r) (dx, getBranches -> (vl, vr)) = 
           let (dxl, dxr) = diff op dx (getTop vl) (getTop vr)
-           in Bin op (l, (dx*dxl, vl)) (r, (dx*dxr, vr))
+           in Bin op (l, (dxl, vl)) (r, (dxr, vr))
 
       -- dx is the current derivative so far
       -- fx is the evaluation of the left branch
