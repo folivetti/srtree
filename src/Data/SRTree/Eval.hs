@@ -17,6 +17,9 @@ module Data.SRTree.Eval
         , cbrt
         , inverseFunc
         , invertibles
+        , evalInverse
+        , invright
+        , invleft
         )
         where
 
@@ -79,17 +82,58 @@ inverseFunc Id     = Id
 inverseFunc Sin    = ASin
 inverseFunc Cos    = ACos
 inverseFunc Tan    = ATan
+inverseFunc Sinh   = ASinh
+inverseFunc Cosh   = ACosh
 inverseFunc Tanh   = ATanh
 inverseFunc ASin   = Sin
 inverseFunc ACos   = Cos
 inverseFunc ATan   = Tan
+inverseFunc ASinh  = Sinh
+inverseFunc ACosh  = Cosh
 inverseFunc ATanh  = Tanh
 inverseFunc Sqrt   = Square
 inverseFunc Square = Sqrt
+-- inverseFunc Cbrt   = (^3)
 inverseFunc Log    = Exp
 inverseFunc Exp    = Log
+-- inverseFunc Abs    = Abs -- we assume abs(x) = sqrt(x^2) so y = sqrt(x^2) => x^2 = y^2 => x = sqrt(y^2) = x = abs(y)
 inverseFunc x      = error $ show x ++ " has no support for inverse function"
 {-# INLINE inverseFunc #-}
+
+evalInverse :: Floating a => Function -> a -> a
+evalInverse Id     = id
+evalInverse Sin    = asin
+evalInverse Cos    = acos
+evalInverse Tan    = atan
+evalInverse Sinh   = asinh
+evalInverse Cosh   = acosh
+evalInverse Tanh   = atanh
+evalInverse ASin   = sin
+evalInverse ACos   = cos
+evalInverse ATan   = tan
+evalInverse ASinh  = sinh
+evalInverse ACosh  = cosh
+evalInverse ATanh  = tanh
+evalInverse Sqrt   = (^2)
+evalInverse Square = sqrt
+evalInverse Cbrt   = (^3)
+evalInverse Log    = exp
+evalInverse Exp    = log
+evalInverse Abs    = abs -- we assume abs(x) = sqrt(x^2) so y = sqrt(x^2) => x^2 = y^2 => x = sqrt(y^2) = x = abs(y)
+
+invright :: Floating a => Op -> a -> (a -> a)
+invright Add v   = (subtract v)
+invright Sub v   = (+v)
+invright Mul v   = (/v)
+invright Div v   = (*v)
+invright Power v = (**(1/v))
+
+invleft :: Floating a => Op -> a -> (a -> a)
+invleft Add v   = (subtract v)
+invleft Sub v   = (+v) . negate -- y = v - r => r = v - y
+invleft Mul v   = (/v)
+invleft Div v   = (v/) -- y = v / r => r = v/y
+invleft Power v = (/(log v)) . log -- y = v ^ r  log y = r log v r = log y / log v
 
 -- | List of invertible functions
 invertibles :: [Function]
