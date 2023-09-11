@@ -74,6 +74,7 @@ forwardMode xss theta f = untape . fst (mutu alg1 alg2)
       n = VS.length theta
       repMat v = Tape $ replicate n v
       zeroes = repMat $ f 0
+      ones = repMat $ f 1
       twos  = repMat $ f 2
       tapeXs = [repMat $ xss V.! ix | ix <- [0 .. V.length xss - 1]]
       tapeTheta = [repMat $ f (theta ! ix) | ix <- [0 .. n - 1]]
@@ -87,7 +88,7 @@ forwardMode xss theta f = untape . fst (mutu alg1 alg2)
       alg1 (Bin Sub l r)   = fst l - fst r
       alg1 (Bin Mul l r)   = (fst l * snd r) + (snd l * fst r)
       alg1 (Bin Div l r)   = ((fst l * snd r) - (snd l * fst r)) / snd r ** twos
-      alg1 (Bin Power l r) = snd l ** (snd r - 1) * ((snd r * fst l) + (snd l * log (snd l) * fst r))
+      alg1 (Bin Power l r) = snd l ** (snd r - ones) * ((snd r * fst l) + (snd l * log (snd l) * fst r))
 
       alg2 (Var ix)     = tapeXs !! ix
       alg2 (Param ix)   = tapeTheta !! ix
