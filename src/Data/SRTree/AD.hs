@@ -32,7 +32,7 @@ import qualified Data.Vector.Storable as VS
 import Data.Vector.Storable ((!))
 import Data.Bifunctor (second)
 
-newtype Tape a = Tape { untape :: [a] } deriving (Show, Functor)
+newtype Tape a = Tape { untape :: [a] } deriving (Show, Functor, Eq)
 
 instance Num a => Num (Tape a) where
   (Tape x) + (Tape y) = Tape $ zipWith (+) x y
@@ -83,7 +83,7 @@ forwardMode xss theta f = untape . fst (mutu alg1 alg2)
       alg1 (Var ix)        = zeroes
       alg1 (Param ix)      = paramVec !! ix
       alg1 (Const _)       = zeroes
-      alg1 (Uni f t)       = fmap (derivative f) (snd t) * fst t
+      alg1 (Uni f t)       = if fst t == zeroes then fst t else fmap (derivative f) (snd t) * fst t
       alg1 (Bin Add l r)   = fst l + fst r
       alg1 (Bin Sub l r)   = fst l - fst r
       alg1 (Bin Mul l r)   = (fst l * snd r) + (snd l * fst r)
