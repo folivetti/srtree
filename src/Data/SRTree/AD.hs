@@ -68,7 +68,7 @@ instance Fractional a => Fractional (Tape a) where
 -- | Calculates the numerical derivative of a tree using forward mode
 -- provided a vector of variable values `xss`, a vector of parameter values `theta` and
 -- a function that changes a Double value to the type of the variable values.
-forwardMode :: (Show a, Num a, Floating a) => V.Vector a -> VS.Vector Double -> (Double -> a) -> Fix SRTree -> [a]
+forwardMode :: (Show a, Num a, Floating a, Eq a) => V.Vector a -> VS.Vector Double -> (Double -> a) -> Fix SRTree -> [a]
 forwardMode xss theta f = untape . fst (mutu alg1 alg2)
   where
       n = VS.length theta
