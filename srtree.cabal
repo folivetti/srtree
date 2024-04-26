@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.35.2.
+-- This file has been generated from package.yaml by hpack version 0.36.0.
 --
 -- see: https://github.com/sol/hpack
 
@@ -43,6 +43,7 @@ library
       base >=4.16 && <5
     , containers ==0.6.*
     , dlist ==1.0.*
+    , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , random ==1.2.*
     , vector >=0.12 && <0.14
@@ -62,6 +63,7 @@ test-suite srtree-test
     , base >=4.16 && <5
     , containers ==0.6.*
     , dlist ==1.0.*
+    , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , random ==1.2.*
     , srtree

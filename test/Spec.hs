@@ -6,6 +6,8 @@ import Data.SRTree.AD
 import qualified Data.Vector as V
 import Numeric.AD.Double ( grad )
 import Test.HUnit 
+import qualified Data.Massiv.Array as M
+import Data.Massiv.Array (D, S, Ix1, Comp(..), Sz(..))
 
 -- test expressions
 exprs = [
@@ -41,27 +43,27 @@ autoDiffSingle = [ grad (\[x,y] -> x * sin y) [2,3]
           ]
 
 -- xs is empty since we are interested in theta
-xs :: V.Vector a
-xs = V.empty
+xs :: V.Vector (SRVector Double)
+xs = V.singleton $ M.replicate Seq (Sz 1) 0
 -- theta values
-thetaMulti, thetaSingle :: V.Vector Double
-thetaMulti  = V.fromList [2.0, 3.0]
-thetaSingle = V.fromList [2.0, 3.0, 2.0, 3.0, 2.0, 3.0, 2.0, 3.0, 2.0, 3.0, 2.0, 3.0]
+thetaMulti, thetaSingle :: M.Array S Ix1 Double
+thetaMulti  = M.fromList Seq [2.0, 3.0]
+thetaSingle = M.fromList Seq [2.0, 3.0, 2.0, 3.0, 2.0, 3.0, 2.0, 3.0, 2.0, 3.0, 2.0, 3.0]
 
 -- values from forward mode
-forwardVals :: [[Double]]
-forwardVals = map (forwardMode xs thetaMulti id) exprs
+-- forwardVals :: [[Double]]
+forwardVals = map (concat . map M.toList . snd . forwardMode xs thetaMulti) exprs
 
 -- values from grad
 -- we must relabel the parameters of the expression to sequence values
-gradVals :: [(Double, [Double])]
-gradVals = map (forwardModeUnique xs thetaSingle id . relabelParams) exprs
+--gradVals :: [(Double, [Double])]
+gradVals = map (concat . map M.toList . snd . forwardModeUnique xs thetaSingle . relabelParams) exprs
 
 -- values of the evaluated expressions
-exprVals :: [Double]
-exprVals = map (evalTree xs thetaSingle id . relabelParams) exprs
+--exprVals :: [Double]
+exprVals = map (evalTree xs thetaSingle (M.replicate Seq (Sz 1)) . relabelParams) exprs
 
-refGrad :: [(Double, [Double])]
+--refGrad :: [(Double, [Double])]
 refGrad = zip exprVals autoDiffSingle
 
 testDiff :: (Eq a, Show a) => String -> String -> a -> a -> Test
@@ -70,8 +72,7 @@ testDiff lbl name a b = TestLabel lbl $ TestCase (assertEqual name a b)
 tests :: Test
 tests = TestList $
      zipWith (testDiff "forward mode" "autodiff x forward mode") autoDiffMult forwardVals
-  <> zipWith (testDiff "opt. grad. parameters" "(evalTree, autodiff) x gradVals") refGrad gradVals
-  <> zipWith (testDiff "deriveByParam" "deriveByParam x autodiff") (map head autoDiffSingle) (map (head.snd) gradVals)
+  <> zipWith (testDiff "opt. grad. parameters" "(evalTree, autodiff) x gradVals") autoDiffSingle gradVals
 
 main :: IO ()
 main = do

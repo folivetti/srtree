@@ -10,6 +10,7 @@
 -- Evaluation of SRTree expressions
 --
 -----------------------------------------------------------------------------
+{-# LANGUAGE FlexibleInstances #-}
 module Data.SRTree.Eval
         ( evalTree
         , evalOp
@@ -20,18 +21,56 @@ module Data.SRTree.Eval
         , evalInverse
         , invright
         , invleft
+        , SRVector, PVector, SRMatrix
         )
         where
 
-import qualified Data.Vector as V
-import qualified Data.Vector.Storable as VS
-import Data.Vector.Storable ((!))
+import qualified Data.Massiv.Array as M
+import Data.Massiv.Array 
+import qualified Data.Vector as V 
 
 import Data.SRTree.Internal
 import Data.SRTree.Recursion ( Fix (..), cata )
+import GHC.Generics (M1)
+
+type SRVector a = M.Array D Ix1 a 
+type PVector    = M.Array S Ix1 Double
+type SRMatrix a = V.Vector a
+
+instance Num a => Num (SRVector a) where 
+    (+) = (!+!)
+    (-) = (!-!)
+    (*) = (!*!)
+    abs = absA
+    signum = signumA 
+    fromInteger = fromInteger
+    negate = negateA
+
+instance Floating a => Floating (SRVector a) where
+    pi = pi 
+    exp = expA 
+    log = logA 
+    sqrt = sqrtA 
+    sin = sinA 
+    cos = cosA
+    tan = tanA 
+    asin = asinA 
+    acos = acosA 
+    atan = atanA 
+    sinh = sinhA 
+    cosh = coshA
+    tanh = tanhA 
+    asinh = asinhA 
+    acosh = acoshA 
+    atanh = atanhA 
+    (**) = (.**)
+instance (Floating a, Fractional a) => Fractional (SRVector a) where
+    fromRational = fromRational
+    (/) = (!/!)
+    recip = recipA
 
 -- | Evaluates the tree given a vector of variable values, a vector of parameter values and a function that takes a Double and change to whatever type the variables have. This is useful when working with datasets of many values per variables.
-evalTree :: (Num a, Floating a) => V.Vector a -> VS.Vector Double -> (Double -> a) -> Fix SRTree -> a
+evalTree :: (Num a, Floating a) => SRMatrix a -> PVector -> (Double -> a) -> Fix SRTree -> a
 evalTree xss params f = cata alg
   where
       alg (Var ix)     = xss V.! ix
@@ -72,7 +111,7 @@ evalFun Exp = exp
 {-# INLINE evalFun #-}
 
 -- | Cubic root
-cbrt :: Floating val => val -> val
+cbrt :: Floating a => a -> a
 cbrt x = signum x * abs x ** (1/3)
 {-# INLINE cbrt #-}
 
