@@ -1,13 +1,15 @@
 import Data.SRTree
 import Data.SRTree.Eval
 import Data.SRTree.Derivative
-import Data.SRTree.AD
+import Data.SRTree.Datasets
+import Algorithm.SRTree.AD
 
 import qualified Data.Vector as V
 import Numeric.AD.Double ( grad )
 import Test.HUnit 
 import qualified Data.Massiv.Array as M
-import Data.Massiv.Array (D, S, Ix1, Comp(..), Sz(..))
+import Data.Massiv.Array (D, S, Ix1, Ix2, Comp(..), Sz(..))
+import qualified Foreign as M
 
 -- test expressions
 exprs = [
@@ -45,6 +47,10 @@ autoDiffSingle = [ grad (\[x,y] -> x * sin y) [2,3]
 -- xs is empty since we are interested in theta
 xs :: V.Vector (SRVector Double)
 xs = V.singleton $ M.replicate Seq (Sz 1) 0
+
+xs' :: M.Array S Ix2 Double 
+xs' = M.singleton 0 
+
 -- theta values
 thetaMulti, thetaSingle :: M.Array S Ix1 Double
 thetaMulti  = M.fromList Seq [2.0, 3.0]
@@ -52,7 +58,7 @@ thetaSingle = M.fromList Seq [2.0, 3.0, 2.0, 3.0, 2.0, 3.0, 2.0, 3.0, 2.0, 3.0, 
 
 -- values from forward mode
 -- forwardVals :: [[Double]]
-forwardVals = map (concat . map M.toList . snd . forwardMode xs thetaMulti) exprs
+forwardVals = map (concat . M.toLists . snd . forwardMode xs' thetaMulti) exprs
 
 -- values from grad
 -- we must relabel the parameters of the expression to sequence values
@@ -78,3 +84,5 @@ main :: IO ()
 main = do
     result <- runTestTT tests
     putStrLn $ showCounts result
+    ds <- loadDataset "test/wine.csv:3:10:alcohol:liver,deaths,heart" True 
+    print ds

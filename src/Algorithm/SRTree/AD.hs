@@ -2,7 +2,7 @@
 {-# language ScopedTypeVariables #-}
 {-# language RankNTypes #-}
 {-# language ViewPatterns #-}
-{-# language TupleSections #-}
+{-# language FlexibleContexts #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.AD 
@@ -16,7 +16,7 @@
 --
 -----------------------------------------------------------------------------
 
-module Data.SRTree.AD
+module Algorithm.SRTree.AD
          ( forwardMode
          , forwardModeUnique
          , reverseModeUnique
@@ -28,95 +28,82 @@ import Data.SRTree.Derivative
 import Data.SRTree.Recursion
 
 import qualified Data.Massiv.Array as M
-import Data.Massiv.Array hiding (map, zipWith, replicate)
+import qualified Data.Massiv.Array.Unsafe as UMA
+import Data.Massiv.Array hiding (map, zipWith, replicate, forM_)
 import qualified Data.Vector as V 
 
 import qualified Data.DList as DL
 import Data.Bifunctor (bimap, first, second)
+import Control.Monad ( forM_ )
 import Debug.Trace ( traceShow ) 
+import GHC.IO (unsafePerformIO)
 
-type Jacob = [SRVector Double]
-
-newtype Tape a = Tape { untape :: [a] } deriving (Show, Functor, Eq)
-
-instance Num a => Num (Tape a) where
-  (Tape x) + (Tape y) = Tape $ zipWith (+) x y
-  (Tape x) - (Tape y) = Tape $ zipWith (-) x y
-  (Tape x) * (Tape y) = Tape $ zipWith (*) x y
-  abs (Tape x) = Tape (map abs x)
-  signum (Tape x) = Tape (map signum x)
-  fromInteger x = Tape [fromInteger x]
-  negate (Tape x) = Tape $ map (*(-1)) x
-instance Floating a => Floating (Tape a) where
-  pi = Tape [pi]
-  exp (Tape x) = Tape (map exp x)
-  log (Tape x) = Tape (map log x)
-  sqrt (Tape x) = Tape (map sqrt x)
-  sin (Tape x) = Tape (map sin x)
-  cos (Tape x) = Tape (map cos x)
-  tan (Tape x) = Tape (map tan x)
-  asin (Tape x) = Tape (map asin x)
-  acos (Tape x) = Tape (map acos x)
-  atan (Tape x) = Tape (map atan x)
-  sinh (Tape x) = Tape (map sinh x)
-  cosh (Tape x) = Tape (map cosh x)
-  tanh (Tape x) = Tape (map tanh x)
-  asinh (Tape x) = Tape (map asinh x)
-  acosh (Tape x) = Tape (map acosh x)
-  atanh (Tape x) = Tape (map atanh x)
-  (Tape x) ** (Tape y) = Tape $ zipWith (**) x y
-instance Fractional a => Fractional (Tape a) where
-  fromRational x = Tape [fromRational x]
-  (Tape x) / (Tape y) = Tape $ zipWith (/) x y
-  recip (Tape x) = Tape $ map recip x
-      
 -- | Calculates the numerical derivative of a tree using forward mode
 -- provided a vector of variable values `xss`, a vector of parameter values `theta` and
 -- a function that changes a Double value to the type of the variable values.
-forwardMode :: SRMatrix (SRVector Double) -> PVector -> Fix SRTree -> (SRVector Double, Jacob)
-forwardMode xss theta tree = bimap (head.untape) untape (cata alg tree)
-  where
-      (Sz p)         = M.size theta
-      cmp            = getComp $ V.head xss
-      (Sz n)         = M.size $ V.head xss
-      f              = M.replicate cmp (Sz n)
-      repMat v       = Tape $ replicate p v
-      zeroes         = repMat $ f 0
-      ones           = repMat $ f 1
-      twos           = repMat $ f 2
-      tapeXs         = [repMat $ xss V.! ix | ix <- [0 .. V.length xss - 1]]
-      tapeTheta      = [repMat $ f (theta ! ix) | ix <- [0 .. p - 1]]
-      paramVec       = [ Tape [if ix==iy then f 1 else f 0 | iy <- [0 .. p-1]] | ix <- [0 .. p-1] ]
+-- uses unsafe operations to use mutable array instead of a tape
+forwardMode :: Array S Ix2 Double -> Array S Ix1 Double -> Fix SRTree -> (Array S Ix1 Double, Array S Ix2 Double)
+forwardMode xss theta tree = (yhat, jacob)
+  where 
+    (yhat, mJacob) = unsafePerformIO $ cataM lToR alg tree
+    jacob          = unsafePerformIO $ M.freeze cmp mJacob
+    (Sz p)         = M.size theta
+    (Sz (m :. n))  = M.size xss
+    cmp            = getComp xss
+    f              = M.replicate cmp (Sz m)
 
-      alg (Var ix)        = (tapeXs !! ix, zeroes)
-      alg (Param ix)      = (tapeTheta !! ix, paramVec !! ix)
-      alg (Const c)       = (repMat (f c), zeroes)
-      alg (Uni f t)       = (fmap (evalFun f) (fst t), fmap (derivative f) (fst t) * snd t)
-      alg (Bin Add l r)   = (fst l + fst r, snd l + snd r)
-      alg (Bin Sub l r)   = (fst l - fst r, snd l - snd r)
-      alg (Bin Mul l r)   = (fst l * fst r, (snd l * fst r) + (fst l * snd r))
-      alg (Bin Div l r)   = (fst l / fst r, ((snd l * fst r) - (fst l * snd r)) / fst r ** twos)
-      alg (Bin Power l r) = (fst l ** fst r, fst l ** (fst r - ones) * ((fst r * snd l) + (fst l * log (fst l) * snd r)))
+    alg (Var ix) = do tape <- M.newMArray (Sz2 m p) 0 
+                      pure (computeAs S (xss <! ix), tape)
+    alg (Const c) = do tape <- M.newMArray (Sz2 m p) 0
+                       pure (f c, tape)
+    alg (Param ix) = do tape <- M.newMArray (Sz2 m p) 0
+                        forM_ [0 .. m-1] $ \i -> UMA.unsafeWrite tape (i :. ix) 1
+                        pure (f (theta ! ix), tape)
+    alg (Uni f (t, tape)) = do let y = computeAs S $ M.map (derivative f) t 
+                               forM_ [0 .. m-1] $ \i -> do 
+                                   let yi = y ! i 
+                                   forM_ [0 .. p-1] $ \j -> do 
+                                       v <- UMA.unsafeRead tape (i :. j) 
+                                       UMA.unsafeWrite tape (i :. j) (yi * v)
+                               pure (computeAs S $ M.map (evalFun f) $ delay t, tape)
+    alg (Bin op (l, tl) (r, tr)) = do 
+        let y = computeAs S $ evalOp op (delay l) (delay r) 
+        forM_ [0 .. m-1] $ \i -> do 
+            let li = l ! i
+                ri = r ! i
+            forM_ [0 .. p-1] $ \j -> do 
+                vl <- UMA.unsafeRead tl (i :. j)
+                vr <- UMA.unsafeRead tr (i :. j)
+                case op of 
+                  Add -> UMA.unsafeWrite tl (i :. j) (vl+vr)
+                  Sub -> UMA.unsafeWrite tl (i :. j) (vl-vr)
+                  Mul -> UMA.unsafeWrite tl (i :. j) (vl * ri + vr * li)
+                  Div -> UMA.unsafeWrite tl (i :. j) ((vl * ri - vr * li) / ri^2)
+                  Power -> UMA.unsafeWrite tl (i :. j) (li ** (ri - 1) * ((ri - vl) + li * log li * vr))
+        pure (y, tl)
+
+    lToR (Var ix) = pure (Var ix)
+    lToR (Param ix) = pure (Param ix)
+    lToR (Const c) = pure (Const c)
+    lToR (Uni f mt) = Uni f <$> mt
+    lToR (Bin op ml mr) = Bin op <$> ml <*> mr
 
 -- | The function `forwardModeUnique` calculates the numerical gradient of the tree and evaluates the tree at the same time. It assumes that each parameter has a unique occurrence in the expression. This should be significantly faster than `forwardMode`.
-forwardModeUnique  :: SRMatrix (SRVector Double) -> PVector -> Fix SRTree -> (SRVector Double, [SRVector Double])
+forwardModeUnique  :: SRMatrix -> PVector -> Fix SRTree -> (SRVector, [SRVector])
 forwardModeUnique xss theta = second DL.toList . cata alg
   where
       (Sz n) = M.size theta
-      (Sz m) = M.size (V.head xss)
-      cmp = getComp (V.head xss)
-      f = M.replicate cmp (Sz m) -- (m :. n))
 
-      alg (Var ix)        = (xss V.! ix, DL.empty)
-      alg (Param ix)      = (f $ theta ! ix, DL.singleton $ f 1)
-      alg (Const c)       = (f c, DL.empty)
+      alg (Var ix)        = (xss <! ix, DL.empty)
+      alg (Param ix)      = (replicateAs xss $ theta ! ix, DL.singleton $ replicateAs xss 1)
+      alg (Const c)       = (replicateAs xss c, DL.empty)
       alg (Uni f (v, gs)) = let v' = evalFun f v
                                 dv = derivative f v
                              in (v', DL.map (*dv) gs)
       alg (Bin Add (v1, l) (v2, r)) = (v1+v2, DL.append l r)
       alg (Bin Sub (v1, l) (v2, r)) = (v1-v2, DL.append l (DL.map negate r))
       alg (Bin Mul (v1, l) (v2, r)) = (v1*v2, DL.append (DL.map (*v2) l) (DL.map (*v1) r))
-      alg (Bin Div (v1, l) (v2, r)) = let dv = (-v1/v2^2) 
+      alg (Bin Div (v1, l) (v2, r)) = let dv = ((-v1)/v2^2) 
                                        in (v1/v2, DL.append (DL.map (/v2) l) (DL.map (*dv) r))
       alg (Bin Power (v1, l) (v2, r)) = let dv1 = v1 ** (v2 - 1)
                                             dv2 = v1 * log v1
@@ -127,14 +114,11 @@ data TupleF a b = Single a | T a b | Branch a b b deriving Functor -- hi, I'm a 
 type Tuple a = Fix (TupleF a)
 
 -- | Same as above, but using reverse mode, that is much faster.
-reverseModeUnique  :: SRMatrix (SRVector Double) -> PVector -> Fix SRTree -> (SRVector Double, [SRVector Double])
+reverseModeUnique  :: SRMatrix -> PVector -> Fix SRTree -> (SRVector, [SRVector])
 reverseModeUnique xss theta t = (getTop fwdMode, DL.toList g)
   where
       fwdMode = cata forward t
       g = accu reverse combine t (1, fwdMode)
-      (Sz m) = M.size (V.head xss)
-      cmp = getComp (V.head xss)
-      f = M.replicate cmp (Sz m) -- (m :. n))
 
       oneTpl x  = Fix $ Single x
       tuple x y = Fix $ T x y
@@ -147,9 +131,9 @@ reverseModeUnique xss theta t = (getTop fwdMode, DL.toList g)
 
       -- forward just creates a new tree with the partial
       -- evaluation of the nodes
-      forward (Var ix)     = oneTpl (xss V.! ix)
-      forward (Param ix)   = oneTpl (f $ theta ! ix)
-      forward (Const c)    = oneTpl (f c)
+      forward (Var ix)     = oneTpl (xss <! ix)
+      forward (Param ix)   = oneTpl (replicateAs xss $ theta ! ix)
+      forward (Const c)    = oneTpl (replicateAs xss c)
       forward (Uni g t)    = let v = getTop t
                               in tuple (evalFun g v) t
       forward (Bin op l r) = let vl = getTop l
@@ -175,7 +159,7 @@ reverseModeUnique xss theta t = (getTop fwdMode, DL.toList g)
       diff Add dx fx gy = (dx, dx)
       diff Sub dx fx gy = (dx, negate dx)
       diff Mul dx fx gy = (dx * gy, dx * fx)
-      diff Div dx fx gy = (dx / gy, dx * (-fx/gy^2))
+      diff Div dx fx gy = (dx / gy, dx * ((-fx)/gy^2))
       diff Power dx fx gy = let dxl = dx * fx ** (gy - 1)
                                 dv2 = fx * log fx
                              in (dxl * gy, dxl * dv2)

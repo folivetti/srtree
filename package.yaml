@@ -29,6 +29,10 @@ dependencies:
 - vector >= 0.12 && < 0.14
 - dlist >= 1.0 && < 1.1
 - massiv >= 1.0.4.0 && < 1.1
+- filepath 
+- split 
+- zlib 
+- bytestring >= 0.11 && < 0.12
 
 library:
   source-dirs: src

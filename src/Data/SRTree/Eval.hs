@@ -21,6 +21,7 @@ module Data.SRTree.Eval
         , evalInverse
         , invright
         , invleft
+        , replicateAs
         , SRVector, PVector, SRMatrix
         )
         where
@@ -33,11 +34,12 @@ import Data.SRTree.Internal
 import Data.SRTree.Recursion ( Fix (..), cata )
 import GHC.Generics (M1)
 
-type SRVector a = M.Array D Ix1 a 
-type PVector    = M.Array S Ix1 Double
-type SRMatrix a = V.Vector a
+type SRVector = M.Array D Ix1 Double
+type PVector  = M.Array S Ix1 Double
+type SRMatrix = M.Array S Ix2 Double 
 
-instance Num a => Num (SRVector a) where 
+
+instance Num SRVector where 
     (+) = (!+!)
     (-) = (!-!)
     (*) = (!*!)
@@ -46,7 +48,7 @@ instance Num a => Num (SRVector a) where
     fromInteger = fromInteger
     negate = negateA
 
-instance Floating a => Floating (SRVector a) where
+instance Floating SRVector where
     pi = pi 
     exp = expA 
     log = logA 
@@ -64,18 +66,21 @@ instance Floating a => Floating (SRVector a) where
     acosh = acoshA 
     atanh = atanhA 
     (**) = (.**)
-instance (Floating a, Fractional a) => Fractional (SRVector a) where
+instance Fractional SRVector where
     fromRational = fromRational
     (/) = (!/!)
     recip = recipA
 
+replicateAs :: SRMatrix -> Double -> SRVector
+replicateAs xss c = let (Sz (m :. _)) = M.size xss in M.replicate (getComp xss) (Sz m) c
+
 -- | Evaluates the tree given a vector of variable values, a vector of parameter values and a function that takes a Double and change to whatever type the variables have. This is useful when working with datasets of many values per variables.
-evalTree :: (Num a, Floating a) => SRMatrix a -> PVector -> (Double -> a) -> Fix SRTree -> a
-evalTree xss params f = cata alg
+evalTree :: SRMatrix -> PVector -> Fix SRTree -> SRVector
+evalTree xss params = cata alg
   where
-      alg (Var ix)     = xss V.! ix
-      alg (Param ix)   = f $ params ! ix
-      alg (Const c)    = f c
+      alg (Var ix)     = xss <! ix
+      alg (Param ix)   = replicateAs xss $ params ! ix
+      alg (Const c)    = replicateAs xss c
       alg (Uni g t)    = evalFun g t
       alg (Bin op l r) = evalOp op l r
 {-# INLINE evalTree #-}
@@ -161,18 +166,18 @@ evalInverse Exp    = log
 evalInverse Abs    = abs -- we assume abs(x) = sqrt(x^2) so y = sqrt(x^2) => x^2 = y^2 => x = sqrt(y^2) = x = abs(y)
 
 invright :: Floating a => Op -> a -> (a -> a)
-invright Add v   = (subtract v)
+invright Add v   = subtract v
 invright Sub v   = (+v)
 invright Mul v   = (/v)
 invright Div v   = (*v)
 invright Power v = (**(1/v))
 
 invleft :: Floating a => Op -> a -> (a -> a)
-invleft Add v   = (subtract v)
+invleft Add v   = subtract v
 invleft Sub v   = (+v) . negate -- y = v - r => r = v - y
 invleft Mul v   = (/v)
 invleft Div v   = (v/) -- y = v / r => r = v/y
-invleft Power v = (/(log v)) . log -- y = v ^ r  log y = r log v r = log y / log v
+invleft Power v = logBase v -- (/(log v)) . log -- y = v ^ r  log y = r log v r = log y / log v
 
 -- | List of invertible functions
 invertibles :: [Function]
