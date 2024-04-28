@@ -117,10 +117,8 @@ minimizeBFGS :: (MA.PrimMonad m, MA.MonadThrow m)
              -> PVector
              -> m (PVector, Int)
 minimizeBFGS funAndGrad hessian nIters tol theta0 =
-    do let h1 = hessian theta0 
-           !_ = unsafePerformIO $ print h1
-       h <- invChol (hessian theta0)
-       traceShow h $ go theta0 fk0 dfk0 h a0 nIters
+    do h <- invChol (hessian theta0)
+       go theta0 fk0 dfk0 h a0 nIters
   where
     (fk0, dfk0)  = funAndGrad theta0
     a0         = 1.0
@@ -130,7 +128,9 @@ minimizeBFGS funAndGrad hessian nIters tol theta0 =
     runLS f    = f `evalStateT` M.empty
 
     go theta _  _   _ _ 0      = pure (theta, nIters)
-    go theta fk dfk h a it = do
+    go theta fk dfk h a it 
+      | isNaN a = pure (theta, nIters - it)
+      | otherwise = do
         gnorm <- dotM dfk dfk
         if gnorm < tol
            then pure (theta, nIters - it)
