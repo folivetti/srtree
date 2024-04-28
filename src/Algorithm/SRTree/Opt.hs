@@ -23,11 +23,13 @@ minimizeNLL dist msErr niter xss ys tree t0
   | niter == 0 = (t0, 0)
   | n == 0     = (t0, 0)
   | n > m      = (t0, 0)
-  | otherwise  = unsafePerformIO $ minimizeCG funAndGrad niter 1e-6 t0
+  | otherwise  = unsafePerformIO $ minimizeBFGS funAndGrad hessian niter 1e-5 t0
+  -- | otherwise  = unsafePerformIO $ minimizeCG funAndGrad niter 1e-6 t0 
   where
     (Sz n)     = size t0
     (Sz m)     = size ys
     funAndGrad = second (computeAs S). gradNLL dist msErr xss ys tree
+    hessian = hessianNLL dist msErr xss ys tree
 
     {-
 minimizeNLLWithFixedParam :: Distribution -> Maybe Double -> Int -> SRMatrix -> PVector -> Fix SRTree -> Int -> VS.Vector Double -> (VS.Vector Double, Int)
