@@ -116,11 +116,13 @@ minimizeBFGS :: (MA.PrimMonad m, MA.MonadThrow m)
              -> PVector
              -> m (PVector, Int)
 minimizeBFGS funAndGrad hessian nIters tol theta0 =
-    do h <- invChol (hessian theta0)
+    do --h <- invChol (hessian theta0)
+       let h = MA.computeAs MA.S $ MA.identityMatrix (MA.Sz p) 
        traceShow h $ go theta0 fk0 dfk0 h a0 nIters
   where
     (fk0, dfk0)  = funAndGrad theta0
     a0         = 1.0
+    (MA.Sz p) = MA.size theta0
     i_mtx      = MA.computeAs MA.S $ MA.identityMatrix (MA.size theta0)
     m !>.< v   = MA.computeAs MA.S $ m !>< v
     runLS f    = f `evalStateT` M.empty
