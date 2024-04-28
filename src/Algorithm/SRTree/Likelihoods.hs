@@ -186,7 +186,7 @@ hessianNLL dist msErr xss ys tree theta = makeArray cmp (Sz (p :. p)) build
                            fy      = eval dtdiy 
                            fxy     = eval d2tdixy 
                            e       = (/sErr^2) . M.sum $ phi' * fx * fy - res * fxy
-                        in traceShow e e
+                        in traceShow fxy e
     cmp    = getComp xss
     (Sz m) = M.size ys
     (Sz p) = M.size theta
@@ -199,7 +199,7 @@ hessianNLL dist msErr xss ys tree theta = makeArray cmp (Sz (p :. p)) build
     res    = delay ys - phi
 
     (phi, phi') = case dist of
-                    Gaussian  -> (yhat, 1)
-                    Bernoulli -> (logistic yhat, phi*(1 - phi))
+                    Gaussian  -> (yhat, M.replicate cmp (Sz m) 1)
+                    Bernoulli -> (logistic yhat, phi*(M.replicate cmp (Sz m) 1 - phi))
                     Poisson   -> (exp yhat, phi)
 
