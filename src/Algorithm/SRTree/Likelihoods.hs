@@ -15,7 +15,7 @@ module Algorithm.SRTree.Likelihoods
   )
     where
 
-import Data.SRTree (SRTree (..), Fix(..), floatConstsToParam)
+import Data.SRTree (SRTree (..), Fix(..), floatConstsToParam, relabelParams)
 import Algorithm.SRTree.AD -- ( reverseModeUnique )
 import Data.SRTree.Eval ( evalTree, PVector, SRVector, SRMatrix, SRMatrix, PVector )
 import Data.SRTree.Derivative ( deriveByParam )
@@ -24,7 +24,7 @@ import Data.Maybe ( fromMaybe )
 import qualified Data.Massiv.Array as M 
 import Data.Massiv.Array hiding (map, read, all, take, replicate, zip, tail)
 
-import Debug.Trace ( trace )
+import Debug.Trace ( trace, traceShow )
 
 -- | Supported distributions for negative log-likelihood
 data Distribution = Gaussian | Bernoulli | Poisson
@@ -185,11 +185,11 @@ hessianNLL dist msErr xss ys tree theta = makeArray cmp (Sz (p :. p)) build
                            fx      = eval dtdix 
                            fy      = eval dtdiy 
                            fxy     = eval d2tdixy 
-                        in (/sErr^2) . M.sum $ phi' * fx * fy - res * fxy
+                        in traceShow fx $ (/sErr^2) . M.sum $ phi' * fx * fy - res * fxy
     cmp    = getComp xss
     (Sz m) = M.size ys
     (Sz p) = M.size theta
-    t'     = fst $ floatConstsToParam tree
+    t'     = relabelParams tree -- $ floatConstsToParam tree
     eval   = evalTree xss theta
     ssr    = sse xss ys tree theta
     sErr   = getSErr dist est msErr
