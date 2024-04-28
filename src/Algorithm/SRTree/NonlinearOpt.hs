@@ -105,6 +105,8 @@ getPhi' :: Monad m => Double -> MSTLS m Double
 getPhi' a = gets (_phi' . (M.! a))
 {-# INLINE getPhi' #-}
 
+m !. x = if M.member x m then m M.! x else error $ "not found: " <> show (m, x)
+
 minimizeBFGS :: (MA.PrimMonad m, MA.MonadThrow m)
              => (PVector -> (Double, PVector))
              -> (PVector -> SRMatrix)
