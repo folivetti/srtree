@@ -116,7 +116,7 @@ minimizeBFGS :: (MA.PrimMonad m, MA.MonadThrow m)
              -> PVector
              -> m (PVector, Int)
 minimizeBFGS funAndGrad hessian nIters tol theta0 =
-    do h <- invChol (hessian theta0)
+    do let h = (hessian theta0)
        traceShow h $ go theta0 fk0 dfk0 h a0 nIters
   where
     (fk0, dfk0)  = funAndGrad theta0
