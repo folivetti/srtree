@@ -14,6 +14,7 @@ import Data.SRTree.Eval ( SRMatrix, PVector )
 import Control.Monad.State 
 import qualified Data.Map as M
 import Debug.Trace ( traceShow )
+import System.IO.Unsafe ( unsafePerformIO )
 
 type MMassArray m = MMA.MArray (MA.PrimState m) S Ix2 Double
 
@@ -116,7 +117,9 @@ minimizeBFGS :: (MA.PrimMonad m, MA.MonadThrow m)
              -> PVector
              -> m (PVector, Int)
 minimizeBFGS funAndGrad hessian nIters tol theta0 =
-    do let h = (hessian theta0)
+    do let h1 = hessian theta0 
+       unsafePerformIO $ print h1
+       h <- invChol (hessian theta0)
        traceShow h $ go theta0 fk0 dfk0 h a0 nIters
   where
     (fk0, dfk0)  = funAndGrad theta0
