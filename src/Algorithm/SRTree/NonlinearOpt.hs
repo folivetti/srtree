@@ -105,7 +105,7 @@ getPhi' :: Monad m => Double -> MSTLS m Double
 getPhi' a = gets (_phi' . (!. a))
 {-# INLINE getPhi' #-}
 
-m !. x = if M.member x m then m M.! x else error $ "not found: " <> show (m, x)
+m !. x = if isNaN x then LSData x x x else if M.member x m then m M.! x else error $ "not found: " <> show (m, x)
 
 minimizeBFGS :: (MA.PrimMonad m, MA.MonadThrow m)
              => (PVector -> (Double, PVector))
