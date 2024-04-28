@@ -117,7 +117,8 @@ minimizeBFGS :: (MA.PrimMonad m, MA.MonadThrow m)
              -> PVector
              -> m (PVector, Int)
 minimizeBFGS funAndGrad hessian nIters tol theta0 =
-    do h <- invChol (hessian theta0)
+    do -- h <- invChol (hessian theta0)
+       let h = hessian theta0
        go theta0 fk0 dfk0 h a0 nIters
   where
     (fk0, dfk0)  = funAndGrad theta0
@@ -153,7 +154,6 @@ minimizeBFGS funAndGrad hessian nIters tol theta0 =
                               a1ha2 <- a1 .><. ha2
                               h_nxt <-  a1ha2 .+. (rhok *. ss)
                               go theta_k fk_nxt dfk_nxt h_nxt 1.0 (it-1)
-{-# INLINE minimizeBFGS #-}
 
 minimizeCG :: (MA.PrimMonad m, MA.MonadThrow m)
            => (PVector -> (Double, PVector)) 
@@ -184,7 +184,6 @@ minimizeCG funAndGrad nIters tol theta0 = go theta0 pk0 fk0 dfk0 a0 nIters
                    if abs (fk - fk_nxt) < tol
                       then pure (theta, nIters - it)
                       else go theta_k pk_nxt fk_nxt dfk_nxt a_nxt (it-1)
-{-# INLINE minimizeCG #-}
 
 -- line_search_wolfe2 based on https://github.com/scipy/scipy/blob/main/scipy/optimize/_linesearch.py
 lineSearchWolfe :: MA.PrimMonad m
