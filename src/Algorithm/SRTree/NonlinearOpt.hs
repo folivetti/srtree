@@ -98,11 +98,11 @@ data LSData = LSData
 type MSTLS m a = StateT (M.Map Double LSData) m a
 
 getPhi :: Monad m => Double -> MSTLS m Double
-getPhi a = gets (_phi . (M.! a))
+getPhi a = gets (_phi . (!. a))
 {-# INLINE getPhi #-}
 
 getPhi' :: Monad m => Double -> MSTLS m Double
-getPhi' a = gets (_phi' . (M.! a))
+getPhi' a = gets (_phi' . (!. a))
 {-# INLINE getPhi' #-}
 
 m !. x = if M.member x m then m M.! x else error $ "not found: " <> show (m, x)
@@ -194,7 +194,7 @@ lineSearchWolfe :: MA.PrimMonad m
 lineSearchWolfe funAndGrad x0 p0 c1 c2 alpha nIter = do
     insertIfMissing 0
     insertIfMissing alpha
-    (LSData _ phi_0 derphi_0) <- gets (M.! 0)
+    (LSData _ phi_0 derphi_0) <- gets (!. 0)
     let wolfe alpha_i phi_i = phi_i > phi_0 + c1 * alpha_i * derphi_0
         curvature derphi_i  = abs derphi_i <= -c2 * derphi_0
     go nIter alpha 0 wolfe curvature
