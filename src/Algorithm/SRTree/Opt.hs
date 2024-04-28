@@ -29,7 +29,7 @@ minimizeNLL dist msErr niter xss ys tree t0
     (Sz n)     = size t0
     (Sz m)     = size ys
     funAndGrad = second (computeAs S). gradNLL dist msErr xss ys tree
-    hessian = hessianNLL dist msErr xss ys tree
+    hessian    = hessianNLL dist msErr xss ys tree
 
     {-
 minimizeNLLWithFixedParam :: Distribution -> Maybe Double -> Int -> SRMatrix -> PVector -> Fix SRTree -> Int -> VS.Vector Double -> (VS.Vector Double, Int)

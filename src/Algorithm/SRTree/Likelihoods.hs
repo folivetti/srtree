@@ -185,7 +185,8 @@ hessianNLL dist msErr xss ys tree theta = makeArray cmp (Sz (p :. p)) build
                            fx      = eval dtdix 
                            fy      = eval dtdiy 
                            fxy     = eval d2tdixy 
-                        in (/sErr^2) . M.sum $ phi' * fx * fy - res * fxy
+                           e       = (/sErr^2) . M.sum $ phi' * fx * fy - res * fxy
+                        in traceShow e e
     cmp    = getComp xss
     (Sz m) = M.size ys
     (Sz p) = M.size theta
