@@ -118,7 +118,7 @@ minimizeBFGS :: (MA.PrimMonad m, MA.MonadThrow m)
              -> m (PVector, Int)
 minimizeBFGS funAndGrad hessian nIters tol theta0 =
     do -- h <- invChol (hessian theta0)
-       let h = hessian theta0
+       let h = MA.computeAs MA.S $ MA.identityMatrix (MA.Sz p) -- hessian theta0
        go theta0 fk0 dfk0 h a0 nIters
   where
     (fk0, dfk0)  = funAndGrad theta0
@@ -128,9 +128,9 @@ minimizeBFGS funAndGrad hessian nIters tol theta0 =
     m !>.< v   = MA.computeAs MA.S $ m !>< v
     runLS f    = f `evalStateT` M.empty
 
-    go theta _  _   _ _ 0      = pure (theta, nIters)
+    go theta _  _   _ _ 0   = pure (theta, nIters)
     go theta fk dfk h a it 
-      | isNaN a = pure (theta, nIters - it)
+      | isNaN a || isNaN fk = pure (theta, nIters - it)
       | otherwise = do
         gnorm <- dotM dfk dfk
         if gnorm < tol
@@ -170,7 +170,9 @@ minimizeCG funAndGrad nIters tol theta0 = go theta0 pk0 fk0 dfk0 a0 nIters
     runLS f   = f `evalStateT` M.empty
 
     go !theta _  _  _   _ 0  = pure (theta, nIters)
-    go !theta pk fk dfk a it = do
+    go !theta pk fk dfk a it
+      | isNaN a || isNaN fk = pure (theta, nIters - it) 
+      | otherwise = do
         if almost0 dfk
            then pure (theta, nIters - it)
            else do ak      <- runLS $ lineSearchWolfe funAndGrad theta pk 0.01 0.1 a 100 -- adjust parameters
