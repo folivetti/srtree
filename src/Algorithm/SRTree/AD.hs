@@ -104,7 +104,7 @@ forwardModeUnique xss theta = second (M.computeAs S . throwEither . M.stackSlice
       alg (Bin Add (v1, l) (v2, r)) = (v1+v2, DL.append l r)
       alg (Bin Sub (v1, l) (v2, r)) = (v1-v2, DL.append l (DL.map negate r))
       alg (Bin Mul (v1, l) (v2, r)) = (v1*v2, DL.append (DL.map (*v2) l) (DL.map (*v1) r))
-      alg (Bin Div (v1, l) (v2, r)) = let dv = ((-v1)/v2^2) 
+      alg (Bin Div (v1, l) (v2, r)) = let dv = ((-v1)/(v2*v2)) 
                                        in (v1/v2, DL.append (DL.map (/v2) l) (DL.map (*dv) r))
       alg (Bin Power (v1, l) (v2, r)) = let dv1 = v1 ** (v2 - one)
                                             dv2 = v1 * log v1
@@ -161,7 +161,7 @@ reverseModeUnique xss theta t = (getTop fwdMode, computeAs S $ throwEither $ sta
       diff Add dx fx gy = (dx, dx)
       diff Sub dx fx gy = (dx, negate dx)
       diff Mul dx fx gy = (dx * gy, dx * fx)
-      diff Div dx fx gy = (dx / gy, dx * ((-fx)/gy^2))
+      diff Div dx fx gy = (dx / gy, dx * ((-fx)/(gy*gy)))
       diff Power dx fx gy = let dxl = dx * fx ** (gy - one)
                                 dv2 = fx * log fx
                              in (dxl * gy, dxl * dv2)
