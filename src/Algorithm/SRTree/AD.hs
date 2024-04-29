@@ -118,7 +118,7 @@ reverseModeUnique  :: SRMatrix -> PVector -> Fix SRTree -> (SRVector, SRMatrix)
 reverseModeUnique xss theta t = (getTop fwdMode, computeAs S $ throwEither $ stackSlicesM 1 $ DL.toList g)
   where
       fwdMode = cata forward t
-      g = accu reverse combine t (1, fwdMode)
+      g       = accu reverse combine t (1, fwdMode)
 
       oneTpl x  = Fix $ Single x
       tuple x y = Fix $ T x y

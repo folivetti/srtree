@@ -122,7 +122,7 @@ gradNLL Gaussian msErr xss ys tree theta = (nll' Gaussian sErr yhat (delay ys), 
   where
     (Sz m)                = M.size ys
     (Sz p)                = M.size theta
-    (delay -> yhat, grad) = reverseModeUnique xss theta tree
+    (delay -> yhat, grad) = forwardModeUnique xss theta tree
     err                   = delay yhat - delay ys
     ssr                   = sse xss ys tree theta
     est                   = sqrt $ ssr / fromIntegral (m - p)
