@@ -93,9 +93,10 @@ forwardModeUnique  :: SRMatrix -> PVector -> Fix SRTree -> (SRVector, SRMatrix)
 forwardModeUnique xss theta = second (M.computeAs S . throwEither . M.stackSlicesM 1 . DL.toList) . cata alg
   where
       (Sz n) = M.size theta
+      one    = replicateAs xss 1
 
       alg (Var ix)        = (xss <! ix, DL.empty)
-      alg (Param ix)      = (replicateAs xss $ theta ! ix, DL.singleton $ replicateAs xss 1)
+      alg (Param ix)      = (replicateAs xss $ theta ! ix, DL.singleton one)
       alg (Const c)       = (replicateAs xss c, DL.empty)
       alg (Uni f (v, gs)) = let v' = evalFun f v
                                 dv = derivative f v
@@ -105,7 +106,7 @@ forwardModeUnique xss theta = second (M.computeAs S . throwEither . M.stackSlice
       alg (Bin Mul (v1, l) (v2, r)) = (v1*v2, DL.append (DL.map (*v2) l) (DL.map (*v1) r))
       alg (Bin Div (v1, l) (v2, r)) = let dv = ((-v1)/v2^2) 
                                        in (v1/v2, DL.append (DL.map (/v2) l) (DL.map (*dv) r))
-      alg (Bin Power (v1, l) (v2, r)) = let dv1 = v1 ** (v2 - 1)
+      alg (Bin Power (v1, l) (v2, r)) = let dv1 = v1 ** (v2 - one)
                                             dv2 = v1 * log v1
                                          in (v1 ** v2, DL.map (*dv1) (DL.append (DL.map (*v2) l) (DL.map (*dv2) r)))
 
@@ -119,6 +120,7 @@ reverseModeUnique xss theta t = (getTop fwdMode, computeAs S $ throwEither $ sta
   where
       fwdMode = cata forward t
       g       = accu reverse combine t (1, fwdMode)
+      one     = replicateAs xss 1
 
       oneTpl x  = Fix $ Single x
       tuple x y = Fix $ T x y
@@ -160,7 +162,7 @@ reverseModeUnique xss theta t = (getTop fwdMode, computeAs S $ throwEither $ sta
       diff Sub dx fx gy = (dx, negate dx)
       diff Mul dx fx gy = (dx * gy, dx * fx)
       diff Div dx fx gy = (dx / gy, dx * ((-fx)/gy^2))
-      diff Power dx fx gy = let dxl = dx * fx ** (gy - 1)
+      diff Power dx fx gy = let dxl = dx * fx ** (gy - one)
                                 dv2 = fx * log fx
                              in (dxl * gy, dxl * dv2)
 
