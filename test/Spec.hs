@@ -45,8 +45,8 @@ autoDiffSingle = [ grad (\[x,y] -> x * sin y) [2,3]
           ]
 
 -- xs is empty since we are interested in theta
-xs :: V.Vector (SRVector Double)
-xs = V.singleton $ M.replicate Seq (Sz 1) 0
+xs :: M.Array S Ix2 Double
+xs = M.singleton 0
 
 xs' :: M.Array S Ix2 Double 
 xs' = M.singleton 0 
@@ -63,11 +63,11 @@ forwardVals = map (concat . M.toLists . snd . forwardMode xs' thetaMulti) exprs
 -- values from grad
 -- we must relabel the parameters of the expression to sequence values
 --gradVals :: [(Double, [Double])]
-gradVals = map (concat . map M.toList . snd . forwardModeUnique xs thetaSingle . relabelParams) exprs
+gradVals = map (concat . M.toLists . snd . forwardModeUnique xs' thetaSingle . relabelParams) exprs
 
 -- values of the evaluated expressions
 --exprVals :: [Double]
-exprVals = map (evalTree xs thetaSingle (M.replicate Seq (Sz 1)) . relabelParams) exprs
+exprVals = map (evalTree xs' thetaSingle . relabelParams) exprs
 
 --refGrad :: [(Double, [Double])]
 refGrad = zip exprVals autoDiffSingle

@@ -89,8 +89,8 @@ forwardMode xss theta tree = (yhat, jacob)
     lToR (Bin op ml mr) = Bin op <$> ml <*> mr
 
 -- | The function `forwardModeUnique` calculates the numerical gradient of the tree and evaluates the tree at the same time. It assumes that each parameter has a unique occurrence in the expression. This should be significantly faster than `forwardMode`.
-forwardModeUnique  :: SRMatrix -> PVector -> Fix SRTree -> (SRVector, [SRVector])
-forwardModeUnique xss theta = second DL.toList . cata alg
+forwardModeUnique  :: SRMatrix -> PVector -> Fix SRTree -> (SRVector, SRMatrix)
+forwardModeUnique xss theta = second (M.computeAs S . throwEither . M.stackSlicesM 1 . DL.toList) . cata alg
   where
       (Sz n) = M.size theta
 
@@ -114,8 +114,8 @@ data TupleF a b = Single a | T a b | Branch a b b deriving Functor -- hi, I'm a 
 type Tuple a = Fix (TupleF a)
 
 -- | Same as above, but using reverse mode, that is much faster.
-reverseModeUnique  :: SRMatrix -> PVector -> Fix SRTree -> (SRVector, [SRVector])
-reverseModeUnique xss theta t = (getTop fwdMode, DL.toList g)
+reverseModeUnique  :: SRMatrix -> PVector -> Fix SRTree -> (SRVector, SRMatrix)
+reverseModeUnique xss theta t = (getTop fwdMode, computeAs S $ throwEither $ stackSlicesM 1 $ DL.toList g)
   where
       fwdMode = cata forward t
       g = accu reverse combine t (1, fwdMode)
