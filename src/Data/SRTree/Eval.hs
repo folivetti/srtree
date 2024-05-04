@@ -39,7 +39,7 @@ type PVector  = M.Array S Ix1 Double
 type SRMatrix = M.Array S Ix2 Double 
 
 
-instance Num SRVector where 
+instance Index ix => Num (M.Array D ix Double) where
     (+) = (!+!)
     (-) = (!-!)
     (*) = (!*!)
@@ -48,7 +48,7 @@ instance Num SRVector where
     fromInteger = fromInteger
     negate = negateA
 
-instance Floating SRVector where
+instance Index ix => Floating (M.Array D ix Double) where
     pi = pi 
     exp = expA 
     log = logA 
@@ -66,7 +66,7 @@ instance Floating SRVector where
     acosh = acoshA 
     atanh = atanhA 
     (**) = (.**)
-instance Fractional SRVector where
+instance Index ix => Fractional (M.Array D ix Double) where
     fromRational = fromRational
     (/) = (!/!)
     recip = recipA

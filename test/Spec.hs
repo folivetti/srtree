@@ -20,6 +20,7 @@ exprs = [
   , 1 / param 0 * param 1
   , param 0 + param 1 + param 0 * param 1 + sin (param 0) + sin (param 1) + cos (param 0) + cos (param 1) + sin (param 0 * param 1) + cos (param 0 * param 1)
   , sin (exp (param 0) + param 1)
+  , param 0 ** param 1
   ]
 
 -- autodiff with multiple occurrences of vars
@@ -31,6 +32,7 @@ autoDiffMult =  [ grad (\[x,y] -> x * sin y) [2,3]
           , grad (\[x,y] -> 1 / x * y) [2,3]
           , grad (\[x,y] -> x + y + x * y + sin x + sin y + cos x + cos y + sin (x * y) + cos (x * y)) [2,3]
           , grad (\[x,y] -> sin (exp x + y)) [2,3]
+          , grad (\[x,y] -> x ** y) [2,3]
           ]
 
 -- autodiff with single occurrences of vars
@@ -42,6 +44,7 @@ autoDiffSingle = [ grad (\[x,y] -> x * sin y) [2,3]
           , grad (\[x,y] -> 1 / x * y) [2,3]
           , grad (\[a,b,c,d,e,f,g,h,i,j,k,l] -> a + b + c * d + sin e + sin f + cos g + cos h + sin (i * j) + cos (k * l)) [2,3,2,3,2,3,2,3,2,3,2,3]
           , grad (\[x,y] -> sin (exp x + y)) [2,3]
+          , grad (\[x,y] -> x ** y) [2,3]
           ]
 
 -- xs is empty since we are interested in theta
