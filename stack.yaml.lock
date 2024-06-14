@@ -3,10 +3,17 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/lock_files
 
-packages: []
+packages:
+- completed:
+    hackage: nlopt-haskell-0.1.3.0@sha256:12f18996ab8933a94b5e9b94b30cb3a4c3a845b32c9173a13407c8cd605c04ec,1592
+    pantry-tree:
+      sha256: f76e44273f47583343deb7e6c70db3e143e583abfdb47aa90fa6f8bd3635dfdc
+      size: 350
+  original:
+    hackage: nlopt-haskell-0.1.3.0@sha256:12f18996ab8933a94b5e9b94b30cb3a4c3a845b32c9173a13407c8cd605c04ec,1592
 snapshots:
 - completed:
-    sha256: 9bebedd3de0195aa01fd55de7f6d4446667440297a7315e69cd72c2610af265f
-    size: 713338
-    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/22/18.yaml
-  original: lts-22.18
+    sha256: 9b43e51f2c54211993d5954da8b49604704d8288103b8d9150a19a703f4e55e7
+    size: 719126
+    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/22/25.yaml
+  original: lts-22.25

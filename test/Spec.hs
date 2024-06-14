@@ -20,6 +20,7 @@ exprs = [
   , 1 / param 0 * param 1
   , param 0 + param 1 + param 0 * param 1 + sin (param 0) + sin (param 1) + cos (param 0) + cos (param 1) + sin (param 0 * param 1) + cos (param 0 * param 1)
   , sin (exp (param 0) + param 1)
+  , param 0 / param 1
   , param 0 ** param 1
   ]
 
@@ -32,6 +33,7 @@ autoDiffMult =  [ grad (\[x,y] -> x * sin y) [2,3]
           , grad (\[x,y] -> 1 / x * y) [2,3]
           , grad (\[x,y] -> x + y + x * y + sin x + sin y + cos x + cos y + sin (x * y) + cos (x * y)) [2,3]
           , grad (\[x,y] -> sin (exp x + y)) [2,3]
+          , grad (\[x,y] -> x/y) [2,3]
           , grad (\[x,y] -> x ** y) [2,3]
           ]
 
@@ -44,6 +46,7 @@ autoDiffSingle = [ grad (\[x,y] -> x * sin y) [2,3]
           , grad (\[x,y] -> 1 / x * y) [2,3]
           , grad (\[a,b,c,d,e,f,g,h,i,j,k,l] -> a + b + c * d + sin e + sin f + cos g + cos h + sin (i * j) + cos (k * l)) [2,3,2,3,2,3,2,3,2,3,2,3]
           , grad (\[x,y] -> sin (exp x + y)) [2,3]
+          , grad (\[x,y] -> x/y) [2,3]
           , grad (\[x,y] -> x ** y) [2,3]
           ]
 
@@ -54,6 +57,8 @@ xs = M.singleton 0
 xs' :: M.Array S Ix2 Double 
 xs' = M.singleton 0 
 
+err = M.singleton 1
+
 -- theta values
 thetaMulti, thetaSingle :: M.Array S Ix1 Double
 thetaMulti  = M.fromList Seq [2.0, 3.0]
@@ -61,12 +66,13 @@ thetaSingle = M.fromList Seq [2.0, 3.0, 2.0, 3.0, 2.0, 3.0, 2.0, 3.0, 2.0, 3.0, 
 
 -- values from forward mode
 -- forwardVals :: [[Double]]
-forwardVals = map (concat . M.toLists . snd . forwardMode xs' thetaMulti) exprs
+forwardVals = map (M.toList . snd . forwardMode xs' thetaMulti err) exprs
 
 -- values from grad
 -- we must relabel the parameters of the expression to sequence values
 --gradVals :: [(Double, [Double])]
-gradVals = map (concat . M.toLists . snd . forwardModeUnique xs' thetaSingle . relabelParams) exprs
+gradVals = map (M.toList . snd . forwardModeUnique xs' thetaSingle err . relabelParams) exprs
+gradVals' = map (M.toList . snd . reverseModeUnique xs' thetaSingle err . relabelParams) exprs
 
 -- values of the evaluated expressions
 --exprVals :: [Double]
@@ -81,11 +87,12 @@ testDiff lbl name a b = TestLabel lbl $ TestCase (assertEqual name a b)
 tests :: Test
 tests = TestList $
      zipWith (testDiff "forward mode" "autodiff x forward mode") autoDiffMult forwardVals
-  <> zipWith (testDiff "opt. grad. parameters" "(evalTree, autodiff) x gradVals") autoDiffSingle gradVals
+  <> zipWith (testDiff "forward mode" "autodiff x forward mode unique") autoDiffSingle gradVals
+  <> zipWith (testDiff "reverse mode" "autodiff x reverse mode unique") autoDiffSingle gradVals'
 
 main :: IO ()
 main = do
     result <- runTestTT tests
     putStrLn $ showCounts result
-    ds <- loadDataset "test/wine.csv:3:10:alcohol:liver,deaths,heart" True 
-    print ds
+    --ds <- loadDataset "test/wine.csv:3:10:alcohol:liver,deaths,heart" True
+    --print ds

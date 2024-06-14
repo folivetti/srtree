@@ -96,10 +96,12 @@ data HyperParams =
 
 tournament :: HyperParams -> V.Vector Individual -> Rng Individual
 tournament hp pop = do
-  selection <- replicateM (_tournSize hp) (randomFromV pop)
+  selection <- replicateM (_tournSize hp) (randomFromV $ V.filter (not.isNaN._fit) pop)
   let maxFitness = maximum (fmap _fit selection)
-      champions = V.filter ((== maxFitness) . _fit) pop 
-  randomFromV champions
+      champions = V.filter ((== maxFitness) . _fit) pop
+  if null selection
+     then randomFromV pop
+     else randomFromV champions
 {-# INLINE tournament #-}
 
 randomIndividual :: HyperParams -> FitFun -> Bool -> Rng Individual
@@ -127,11 +129,15 @@ initialPop hyperparams fitFun = do
 fitness :: SRMatrix -> PVector -> Individual -> Individual
 fitness x y ind =
     let 
-        --(theta, _) = minimizeNLL Gaussian Nothing 10 x y (relabelParams $ _tree ind) (_params ind)
-        theta = _params ind
-        --fit = negate $ nll Gaussian Nothing x y (_tree ind) theta
-        (fit, g) = gradNLL Gaussian Nothing x y (_tree ind) theta
-    in if M.isNull (_params ind) then ind else ind{_fit = fit + M.sum g} --, _params = theta}
+        tree = relabelParams $ _tree ind
+        thetaOrig = _params ind
+        (theta, fit, it) = minimizeNLL Gaussian (Just 1) 10 x y tree thetaOrig
+        --theta = _params ind
+        fit' = negate $ mse x y tree thetaOrig -- nll Gaussian (Just 1) x y (relabelParams $ _tree ind) (_params ind)
+       -- (fit, g) = gradNLL Gaussian Nothing x y (_tree ind) (_params ind)
+    in if M.isNull (_params ind)
+          then ind{_fit=fit'}
+          else ind{_fit = negate (mse x y tree theta), _params = theta}
     --in ind{_fit = fit, _params = theta}
 {-# INLINE fitness #-}
 
@@ -186,18 +192,18 @@ crossover :: HyperParams -> Individual -> Individual -> Rng Individual
 crossover hp ind1 ind2 = pure ind1
 
 evolve :: HyperParams -> FitFun -> V.Vector Individual -> Rng Individual
-evolve hp fitFun pop =  randomIndividual hp fitFun True
+--evolve hp fitFun pop =  randomIndividual hp fitFun True
 {-# INLINE evolve #-}
-{-
+
 evolve hp fitFun pop = do 
     parent1 <- tournament hp pop
     parent2 <- tournament hp pop 
     child <- crossover hp parent1 parent2
     child' <- mutate hp child
     let p = countParams (_tree child')
-    theta' <- replicateM p (state normal)
+    theta' <- M.fromList M.Seq <$> replicateM p (randomRange (-1,1))
     pure $ fitFun child'{_params = theta'}
--}
+
 report :: Int -> V.Vector Individual -> IO ()
 report gen = mapM_ reportOne
   where reportOne ind = do putStr (show gen)
@@ -217,7 +223,7 @@ evolution gen hp fitFun = do
         where 
             go 0 pop = pure pop 
             go n pop = do 
-                let best = V.maximumOn _fit pop
+                let best = V.maximumOn _fit $ V.filter (not.isNaN._fit) pop
                 pop' <- V.cons best <$> V.replicateM (_popSize hp - 1) (evolve hp fitFun pop)
                 liftIO $ report (gen-n) pop'
                 go (n-1) pop'

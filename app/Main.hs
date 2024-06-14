@@ -16,7 +16,7 @@ nonterms = [Right (+), Right (-), Right (*), Right (/), Right (\l r -> abs l ** 
 main :: IO ()
 main = do g <- getStdGen 
           ((x, y, _, _), _) <- loadDataset "nikuradse_2.csv" True
-          let hp = HP 2 4 10 200 2 0.3 0.25 terms nonterms
+          let hp = HP 2 4 10 200 4 0.3 0.25 terms nonterms
           pop <- evalStateT (evolution 500 hp (fitness x y)) g
           --print (fmap _fit pop)
           putStrLn "Fin"

@@ -29,6 +29,7 @@ library
   exposed-modules:
       Algorithm.SRTree.AD
       Algorithm.SRTree.Likelihoods
+      Algorithm.SRTree.NLOPT
       Algorithm.SRTree.NonlinearOpt
       Algorithm.SRTree.Opt
       Data.SRTree
@@ -52,6 +53,7 @@ library
     , filepath
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
+    , nlopt-haskell
     , random ==1.2.*
     , split
     , vector >=0.12 && <0.14
@@ -73,6 +75,7 @@ executable srtree-exe
     , filepath
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
+    , nlopt-haskell
     , random ==1.2.*
     , split
     , srtree
@@ -98,6 +101,7 @@ test-suite srtree-test
     , filepath
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
+    , nlopt-haskell
     , random ==1.2.*
     , split
     , srtree

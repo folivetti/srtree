@@ -119,37 +119,34 @@ predict Poisson   tree theta xss = exp $ evalTree xss theta tree
 
 -- | Gradient of the negative log-likelihood
 gradNLL :: Distribution -> Maybe Double -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (Double, SRVector)
---gradNLL Gaussian msErr xss ys tree theta = (nll' Gaussian sErr yhat (delay ys), delay ( (computeAs S err ><! grad) ./ (sErr * sErr)))
---gradNLL Gaussian msErr xss ys tree theta = (nll' Gaussian sErr yhat (delay ys), delay $ M.fromList @S (getComp xss) [g !.! err / sErr2| g <- grad])
-gradNLL Gaussian msErr xss ys tree theta = (nll' Gaussian sErr yhat (delay ys), delay grad ./ (sErr * sErr))
+gradNLL Gaussian msErr xss ys tree theta =
+  (nll' Gaussian sErr yhat ys', delay grad ./ (sErr * sErr))
   where
-    (Sz m)                = M.size ys
-    (Sz p)                = M.size theta
-    (delay -> yhat, grad) = forwardMode xss theta err tree
-    err                   = yhat - delay ys
-    ssr                   = sse xss ys tree theta
-    est                   = sqrt $ ssr / fromIntegral (m - p)
-    sErr                  = getSErr Gaussian est msErr
-    sErr2                 = sErr * sErr
+    (Sz m)       = M.size ys
+    (Sz p)       = M.size theta
+    ys'          = delay ys
+    (yhat, grad) = reverseModeUnique xss theta ys' id tree
+    -- err          = yhat - delay ys
+    ssr          = sse xss ys tree theta
+    est          = sqrt $ ssr / fromIntegral (m - p)
+    sErr         = getSErr Gaussian est msErr
 
 gradNLL Bernoulli _ xss (delay -> ys) tree theta
-  | notValid ys = error "For Bernoulli distribution the output must be either 0 or 1."
-  | otherwise   = (nll' Bernoulli 1.0 yhat ys, delay grad)
+  | M.any (\x -> x /= 0 && x /= 1) ys = error "For Bernoulli distribution the output must be either 0 or 1."
+  | otherwise                         = (nll' Bernoulli 1.0 yhat ys, delay grad)
   where
-    (delay -> yhat, grad) = forwardMode xss theta err tree
-    notValid              = M.any (\x -> x /= 0 && x /= 1)
-    grad'                 = M.map nanTo0 grad
-    err                   = logistic yhat - ys
-    nanTo0 x              = if isNaN x then 0 else x
+    (yhat, grad) = reverseModeUnique xss theta ys logistic tree
+    grad'        = M.map nanTo0 grad
+    --err          = logistic yhat - ys
+    nanTo0 x     = if isNaN x then 0 else x
 
 gradNLL Poisson _ xss (delay -> ys) tree theta
-  | notValid ys      = error "For Poisson distribution the output must be non-negative."
+  | M.any (<0) ys    = error "For Poisson distribution the output must be non-negative."
   | M.any isNaN grad = error $ "NaN gradient " <> show grad
   | otherwise        = (nll' Poisson 1.0 yhat ys, delay grad)
   where
-    (delay -> yhat, grad) = forwardMode xss theta err tree
-    err                   = exp yhat - ys
-    notValid              = M.any (<0)
+    (yhat, grad) = reverseModeUnique xss theta ys exp tree
+    --err          = exp yhat - ys
 
 -- | Fisher information of negative log-likelihood
 fisherNLL :: Distribution -> Maybe Double -> SRMatrix -> PVector -> Fix SRTree -> PVector -> SRVector

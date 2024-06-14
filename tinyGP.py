@@ -272,7 +272,7 @@ def optimize(individual, ds):
 
     sol = minimize(fun, t0, options = {'maxiter' : 10})
     individual.set_params(sol.x)
-    print("NIT: ", sol.nit)
+    #print("NIT: ", sol.nit)
     return sol.x
 
 def fitness(individual, ds):
@@ -282,12 +282,12 @@ def fitness(individual, ds):
 
     if individual.size() > MAX_SIZE:
         return -np.inf
-    #t = optimize(individual, ds)
-    t = individual.get_params()
+    t = optimize(individual, ds)
+    #t = individual.get_params()
     yhat = individual.compute_tree(ds[:,0], t)[0]
     neg_mse = -np.mean((yhat - ds[:,-1])**2)
     j = approx_fprime(t, fun)
-    print(j)
+    #print(j)
 
     if np.isnan(neg_mse):
         return -np.inf
@@ -350,10 +350,10 @@ def main():
             best_of_run_f = max(fitnesses)
             best_of_run_gen = gen
             best_of_run = deepcopy(population[fitnesses.index(max(fitnesses))])
-        else:
+        #else:
             #worst = min(enumerate(fitnesses), key = lambda x: x[1])[0]
-            population.append(deepcopy(best_of_run))
-            fitnesses.append(best_of_run_f)
+        population.append(deepcopy(best_of_run))
+        fitnesses.append(best_of_run_f)
 
     report(population, fitnesses, dataset, gen)
 

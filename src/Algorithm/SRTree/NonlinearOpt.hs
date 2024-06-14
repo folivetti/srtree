@@ -43,7 +43,7 @@ outer arr1 arr2
       MA.Sz1 m2 = MA.size arr2
 {-# INLINE outer #-}
 
-cholesky :: (MA.PrimMonad m, MA.MonadThrow m)
+cholesky :: (MA.PrimMonad m, MA.MonadThrow m, MonadIO m)
   => SRMatrix
   -> m SRMatrix
 cholesky arr
@@ -53,7 +53,7 @@ cholesky arr
   where
     comp         = MA.getComp arr
     (MA.Sz2 m n) = MA.size arr
-    create l     = mapM_ (update l) [i :. j | i <- [0..m], j <- [0..m]]
+    create l     = mapM_ (update l) [i :. j | i <- [0..m-1], j <- [0..m-1]]
 
     update l ix@(i :. j)
       | i < j     = UMA.unsafeWrite l ix 0
@@ -62,12 +62,14 @@ cholesky arr
                            rowJ = j*m
                        xjj <- UMA.unsafeLinearRead l (rowJ + j)
                        tot <- rangedLinearDotProd rowI rowJ j l
+                       --liftIO $ print (i,j,cur,tot)
                        if i == j
                           then UMA.unsafeLinearWrite l (rowI + j) (sqrt (cur - tot))
                           else UMA.unsafeLinearWrite l (rowI + j) ((cur - tot) / xjj)
 {-# INLINE cholesky #-}
-invChol :: (MA.PrimMonad m, MA.MonadThrow m) => SRMatrix -> m SRMatrix
+invChol :: (MA.PrimMonad m, MA.MonadThrow m, MonadIO m) => SRMatrix -> m SRMatrix
 invChol arr = do l <- cholesky arr -- lower diag
+                 --liftIO $ putStr "chol: " >> print l
                  mtx <- MA.thawS l
                  forM_ [0 .. m-1] $ \i -> do
                      lII <- UMA.unsafeRead mtx (i :. i)
@@ -109,38 +111,50 @@ getPhi' a = gets (_phi' . (!. a))
 
 m !. x = if isNaN x then LSData x x x else if M.member x m then m M.! x else error $ "not found: " <> show (m, x)
 
-minimizeBFGS :: (MA.PrimMonad m, MA.MonadThrow m)
+minimizeBFGS :: (MA.PrimMonad m, MA.MonadThrow m, MonadIO m)
              => (PVector -> (Double, PVector))
              -> (PVector -> SRMatrix)
              -> Int
              -> Double 
              -> PVector
-             -> m (PVector, Int)
+             -> m (PVector, Double, Int)
 minimizeBFGS funAndGrad hessian nIters tol theta0 =
-    do -- h <- invChol (hessian theta0)
-       let h = MA.computeAs MA.S $ MA.identityMatrix (MA.Sz p) -- hessian theta0
+    do let hess = hessian theta0
+       h <- pure ident
+       {-
+         if MA.any (\x -> isNaN x || isInfinite x || abs x > 1e10 || abs x < 1e-10) hess || negDiag hess
+               then pure ident
+               else do --liftIO $ print hess
+                       h' <- invChol hess
+                       if MA.any isNaN h'
+                          then pure ident
+                          else pure h'
+                          -}
+       -- let h = MA.computeAs MA.S $ MA.identityMatrix (MA.Sz p) -- hessian theta0
        go theta0 fk0 dfk0 h a0 nIters
   where
+    negDiag h    = MA.ifoldrS (\(i :. j) v acc -> if i==j then (v<0) || acc else acc) False h
     (fk0, dfk0)  = funAndGrad theta0
+    ident      = MA.computeAs MA.S $ MA.identityMatrix (MA.Sz p)
     a0         = 1.0
     (MA.Sz p) = MA.size theta0
     i_mtx      = MA.computeAs MA.S $ MA.identityMatrix (MA.size theta0)
     m !>.< v   = MA.computeAs MA.S $ m !>< v
     runLS f    = f `evalStateT` M.empty
 
-    go theta _  _   _ _ 0   = pure (theta, nIters)
+    go theta fk  _   _ _ 0   = pure (theta, fk, nIters)
     go theta fk dfk h a it 
-      | isNaN a || isNaN fk = pure (theta, nIters - it)
+      | isNaN a || isNaN fk = pure (theta, fk, nIters - it)
       | otherwise = do
         gnorm <- dotM dfk dfk
         if gnorm < tol
-           then pure (theta, nIters - it)
+           then pure (theta, fk, nIters - it)
            else do let pk = MA.negateA h !>.< dfk
-                   ak      <- runLS $ lineSearchWolfe funAndGrad theta pk 0.01 0.1 a 10 -- adjust parameters
+                   ak      <- runLS $ lineSearchWolfe funAndGrad theta pk 0.01 0.1 a 5 -- adjust parameters
                    theta_k <- theta .+. (ak *. pk)
                    let (fk_nxt, dfk_nxt) = funAndGrad theta_k
-                   if abs (fk_nxt - fk) < tol
-                      then pure (theta_k, nIters - it)
+                   if isNaN fk_nxt || abs (fk_nxt - fk) < tol
+                      then pure (theta_k, fk, nIters - it)
                       else do yk <- dfk_nxt .-. dfk
                               let sk   = ak *. pk
                                   ysk  = UMA.unsafeDotProduct yk sk
@@ -160,7 +174,7 @@ minimizeCG :: (MA.PrimMonad m, MA.MonadThrow m)
            -> Int 
            -> Double
            -> PVector 
-           -> m (PVector, Int)
+           -> m (PVector, Double, Int)
 minimizeCG funAndGrad nIters tol theta0 = go theta0 pk0 fk0 dfk0 a0 nIters
   where
     (fk0, dfk0) = funAndGrad theta0
@@ -169,13 +183,13 @@ minimizeCG funAndGrad nIters tol theta0 = go theta0 pk0 fk0 dfk0 a0 nIters
     almost0   = MA.all (\d -> abs d <= tol)
     runLS f   = f `evalStateT` M.empty
 
-    go !theta _  _  _   _ 0  = pure (theta, nIters)
+    go !theta _  fk  _   _ 0  = pure (theta, fk, nIters)
     go !theta pk fk dfk a it
-      | isNaN a || isNaN fk = pure (theta, nIters - it) 
+      | isNaN a || isNaN fk = pure (theta, fk, nIters - it)
       | otherwise = do
         if almost0 dfk
-           then pure (theta, nIters - it)
-           else do ak      <- runLS $ lineSearchWolfe funAndGrad theta pk 0.01 0.1 a 100 -- adjust parameters
+           then pure (theta, fk, nIters - it)
+           else do ak      <- runLS $ lineSearchWolfe funAndGrad theta pk 0.01 0.1 a 5 -- adjust parameters
                    theta_k <- theta .+. (ak *. pk)
                    let (fk_nxt, dfk_nxt) = funAndGrad theta_k
                        beta              = max 0 $ MA.sum $ MA.zipWith (\dk dkn -> dkn * (dkn - dk) / (dk * dk)) dfk dfk_nxt
@@ -183,8 +197,8 @@ minimizeCG funAndGrad nIters tol theta0 = go theta0 pk0 fk0 dfk0 a0 nIters
                    let dfkpk  = UMA.unsafeDotProduct dfk_nxt pk_nxt
                        a_nxt' = min 1 $ abs $ 2.02 * (fk - fk_nxt) / dfkpk
                        a_nxt  = if a_nxt' <= 0 then 1 else a_nxt'
-                   if abs (fk - fk_nxt) < tol
-                      then pure (theta, nIters - it)
+                   if isNaN fk_nxt || abs (fk - fk_nxt) < tol
+                      then pure (theta, fk, nIters - it)
                       else go theta_k pk_nxt fk_nxt dfk_nxt a_nxt (it-1)
 
 -- line_search_wolfe2 based on https://github.com/scipy/scipy/blob/main/scipy/optimize/_linesearch.py
@@ -217,7 +231,8 @@ lineSearchWolfe funAndGrad x0 p0 c1 c2 alpha nIter = do
         phi_cur  <- getPhi alpha_cur
         phi_prev <- getPhi alpha_prev
         phi_cur' <- getPhi' alpha_cur
-        if | wolfe alpha_cur phi_cur           -> zoom alpha_prev alpha_cur phi wolfe curvature nIter
+        if | isNaN phi_cur                     -> pure alpha_prev
+           | wolfe alpha_cur phi_cur           -> zoom alpha_prev alpha_cur phi wolfe curvature nIter
            | phi_cur >= phi_prev && it < nIter -> zoom alpha_prev alpha_cur phi wolfe curvature nIter
            | curvature phi_cur'                -> pure alpha_cur
            | phi_cur' >= 0                     -> zoom alpha_cur alpha_prev phi wolfe curvature nIter
@@ -260,7 +275,7 @@ zoom aLo aHi phi wolfe curvature nIter = go nIter aLo aHi 0
             delta       = alphaHi - alphaLo
             cchk a      = it < nIter && (a > alphaHi - 0.2 * delta || a < alphaLo + 0.2 * delta)
             qchk a      = a > alphaHi - 0.1 * delta || a < alphaLo + 0.1 * delta
-            alpha_i     = getAlpha (getAlpha alpha_dflt alpha_quad qchk) alpha_cubic cchk
+            alpha_i     = alpha_dflt -- getAlpha (getAlpha alpha_dflt alpha_quad qchk) alpha_cubic cchk
         (phi_i, phi_i') <- lift $ phi alpha_i
         modify (M.insert alpha_i (LSData alpha_i phi_i phi_i'))
         if | wolfe alpha_i phi_i || phi_i >= phiLo -> go (it-1) alphaLo alpha_i alphaHi
@@ -288,8 +303,8 @@ cubicMin a fa fa' b fb c fc
 
 quadMin :: Double -> Double -> Double -> Double -> Double -> Maybe Double
 quadMin a fa fa' b fb
-  | b' ==0 || isNaN quad || isInfinite quad = Nothing
-  | otherwise                     = Just quad
+  | b' == 0 || isNaN quad || isInfinite quad = Nothing
+  | otherwise                                = Just quad
   where
     quad   = a - fa' / (2 * b')
     deltaB = b - a
