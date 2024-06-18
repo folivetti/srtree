@@ -11,6 +11,13 @@ packages:
       size: 350
   original:
     hackage: nlopt-haskell-0.1.3.0@sha256:12f18996ab8933a94b5e9b94b30cb3a4c3a845b32c9173a13407c8cd605c04ec,1592
+- completed:
+    hackage: ieee-0.7@sha256:4f444419a7861f04fb64502d14688c80e8293a86a608f6d14c3010c9bd96b6d1,1327
+    pantry-tree:
+      sha256: eefc5e89d3e348ce5e2bb078096e8e9c6288037dcd21317e291c550ab98ee294
+      size: 638
+  original:
+    hackage: ieee-0.7@sha256:4f444419a7861f04fb64502d14688c80e8293a86a608f6d14c3010c9bd96b6d1,1327
 snapshots:
 - completed:
     sha256: 9b43e51f2c54211993d5954da8b49604704d8288103b8d9150a19a703f4e55e7

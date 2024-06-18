@@ -1,313 +1,975 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE FlexibleContexts #-}
-module Algorithm.SRTree.NonlinearOpt where 
+{-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeApplications #-}
 
-import qualified Data.Massiv.Array as MA
-import qualified Data.Massiv.Array.Unsafe as UMA
-import qualified Data.Massiv.Array.Mutable as MMA
-import Data.Massiv.Array ( Array, S, Ix2(..), Ix1, dotM, (*.), (.*), (!.!), (!><), (.+.), (.-.), (.><.) )
-import qualified Data.Massiv.Array.Unsafe as MA
-import qualified Data.Massiv.Core.Operations as UMA
-import Control.Monad ( forM_, when )
-import Data.SRTree.Eval ( SRMatrix, PVector ) 
-import Control.Monad.State 
-import qualified Data.Map as M
-import Debug.Trace ( traceShow )
+{- |
+Module      :  Numeric.NLOPT
+Copyright   :  (c) Matthew Peddie 2017
+License     :  BSD3
+Maintainer  :  Matthew Peddie <mpeddie@gmail.com>
+Stability   :  provisional
+Portability :  GHC
+
+This module provides a high-level, @hmatrix@-compatible interface to
+the <http://ab-initio.mit.edu/wiki/index.php/NLopt NLOPT> library by
+Steven G. Johnson.
+
+NOTE: This is an adaptation from https://hackage.haskell.org/package/hmatrix-nlopt-0.2.0.0
+that removes the dependency to hmatrix and support any Vector Storage.
+
+= Documentation
+
+Most non-numerical details are documented, but for specific
+information on what the optimization methods do, how constraints are
+handled, etc., you should consult:
+
+  * The <http://ab-initio.mit.edu/wiki/index.php/NLopt_Introduction NLOPT introduction>
+
+  * The <http://ab-initio.mit.edu/wiki/index.php/NLopt_Reference NLOPT reference manual>
+
+  * The <http://ab-initio.mit.edu/wiki/index.php/NLopt_Algorithms NLOPT algorithm manual>
+
+= Example program
+
+The following interactive session example uses the Nelder-Mead simplex
+algorithm, a derivative-free local optimizer, to minimize a trivial
+function with a minimum of 22.0 at @(0, 0)@.
+
+>>> import Numeric.LinearAlgebra ( dot, fromList )
+>>> let objf x = x `dot` x + 22                         -- define objective
+>>> let stop = ObjectiveRelativeTolerance 1e-6 :| []    -- define stopping criterion
+>>> let algorithm = NELDERMEAD objf [] Nothing          -- specify algorithm
+>>> let problem = LocalProblem 2 stop algorithm         -- specify problem
+>>> let x0 = fromList [5, 10]                           -- specify initial guess
+>>> minimizeLocal problem x0
+Right (Solution {solutionCost = 22.0, solutionParams = [0.0,0.0], solutionResult = FTOL_REACHED})
+
+-}
+
+module Algorithm.SRTree.NonlinearOpt (
+  -- * Specifying the objective function
+  Objective
+  , ObjectiveD
+  , Preconditioner
+  -- * Specifying the constraints
+  -- ** Bound constraints
+  , Bounds(..)
+  -- ** Nonlinear constraints
+  --
+  -- $nonlinearconstraints
+
+  -- *** Constraint functions
+  , ScalarConstraint
+  , ScalarConstraintD
+  , VectorConstraint
+  , VectorConstraintD
+  -- *** Constraint types
+  , Constraint(..)
+  , EqualityConstraint(..)
+  , InequalityConstraint(..)
+  -- *** Collections of constraints
+  , EqualityConstraints
+  , EqualityConstraintsD
+  , InequalityConstraints
+  , InequalityConstraintsD
+  -- * Stopping conditions
+  --
+  -- $nonempty
+  , StoppingCondition(..)
+  , NonEmpty(..)
+  -- * Additional configuration
+  , RandomSeed(..)
+  , Population(..)
+  , VectorStorage(..)
+  , InitialStep(..)
+  -- * Minimization problems
+  -- ** Local minimization
+  , LocalAlgorithm(..)
+  , LocalProblem(..)
+  , minimizeLocal
+  -- ** Global minimization
+  , GlobalAlgorithm(..)
+  , GlobalProblem(..)
+  , minimizeGlobal
+  -- ** Minimization by augmented Lagrangian
+  , AugLagAlgorithm(..)
+  , AugLagProblem(..)
+  , minimizeAugLag
+  -- ** Results
+  , Solution(..)
+  , N.Result(..)
+  ) where
+
+import qualified Numeric.Optimization.NLOPT.Bindings as N
+
+import Data.Bifunctor ( first )
+import Data.List.NonEmpty (NonEmpty(..))
+
+import qualified Data.Vector.Storable as V
+import Data.Vector.Storable ( Vector )
+
+import Control.Exception ( Exception )
+import qualified Control.Exception as Ex
+import Data.Typeable ( Typeable )
+import Data.Foldable ( traverse_ )
+
 import System.IO.Unsafe ( unsafePerformIO )
 
-type MMassArray m = MMA.MArray (MA.PrimState m) S Ix2 Double
+-- each element i contains a row vec 
+type Matrix a = [Vector a]
 
-rangedLinearDotProd :: MA.PrimMonad m => Int -> Int -> Int -> MMassArray m -> m Double
-rangedLinearDotProd r1 r2 len arr = go 0 0
+flatten :: V.Storable a => Matrix a -> Vector a 
+flatten = V.concat
+{-# INLINE flatten #-}
+
+{- Function wrapping for the immutable HMatrix interface -}
+wrapScalarFunction :: (Vector Double -> Double) -> N.ScalarFunction ()
+wrapScalarFunction f params _ _ = return $ f params
+
+wrapScalarFunctionD :: (Vector Double -> (Double, Vector Double))
+                    -> N.ScalarFunction ()
+wrapScalarFunctionD f params grad _ = do
+  case grad of
+    Nothing -> return ()
+    Just g  -> V.copy g usergrad
+  return result
   where
-    go !acc k
-      | k < len   = do x <- UMA.unsafeLinearRead arr (r1 + k)
-                       y <- UMA.unsafeLinearRead arr (r2 + k)
-                       go (acc + x*y) (k + 1)
-      | otherwise = pure acc
-{-# INLINE rangedLinearDotProd #-}
+    (result, usergrad) = f params
 
-outer :: (MA.MonadThrow m)
-  => PVector
-  -> PVector
-  -> m SRMatrix
-outer arr1 arr2
-  | MA.isEmpty arr1 || MA.isEmpty arr2 = pure $ MA.setComp comp MA.empty
-  | otherwise =
-      pure $ MA.makeArray comp (MA.Sz2 m1 m2) $ \(i :. j) ->
-          UMA.unsafeIndex arr1 i * UMA.unsafeIndex arr2 j
+wrapVectorFunction :: (Vector Double -> Word -> Vector Double)
+                   -> Word -> N.VectorFunction ()
+wrapVectorFunction f n params vout _ _ = V.copy vout $ f params n
+
+wrapVectorFunctionD :: (Vector Double -> Word -> (Vector Double, Matrix Double))
+                    -> Word -> N.VectorFunction ()
+wrapVectorFunctionD f n params vout jac _ = do
+  V.copy vout result
+  case jac of
+    Nothing -> return ()
+    Just j -> V.copy j (flatten userjac)
   where
-      comp = MA.getComp arr1 <> MA.getComp arr2
-      MA.Sz1 m1 = MA.size arr1
-      MA.Sz1 m2 = MA.size arr2
-{-# INLINE outer #-}
+    (result, userjac) = f params n
 
-cholesky :: (MA.PrimMonad m, MA.MonadThrow m, MonadIO m)
-  => SRMatrix
-  -> m SRMatrix
-cholesky arr
-  | m /= n          = MA.throwM $ MA.SizeMismatchException (MA.size arr) (MA.size arr)
-  | MA.isEmpty arr  = pure $ MA.setComp comp MA.empty
-  | otherwise       = MMA.createArrayS_ (MA.size arr) create
+wrapPreconditionerFunction :: (Vector Double -> Vector Double -> Vector Double)
+                           -> N.PreconditionerFunction ()
+wrapPreconditionerFunction f params v vpre _ = V.copy vpre (f params v)
+
+{- Objective functions -}
+-- | An objective function that calculates the objective value at the
+-- given parameter vector.
+type Objective
+  = Vector Double  -- ^ Parameter vector
+ -> Double  -- ^ Objective function value
+
+-- | An objective function that calculates both the objective value
+-- and the gradient of the objective with respect to the input
+-- parameter vector, at the given parameter vector.
+type ObjectiveD
+  = Vector Double -- ^ Parameter vector
+ -> (Double, Vector Double)  -- ^ (Objective function value, gradient)
+
+-- | A preconditioner function, which computes @vpre = H(x) v@, where
+-- @H@ is the Hessian matrix: the positive semi-definite second
+-- derivative at the given parameter vector @x@, or an approximation
+-- thereof.
+type Preconditioner
+  = Vector Double  -- ^ Parameter vector @x@
+ -> Vector Double  -- ^ Vector @v@ to precondition at @x@
+ -> Vector Double  -- ^ Preconditioned vector @vpre@
+
+data ObjectiveFunction f
+ = MinimumObjective f
+ | PreconditionedMinimumObjective Preconditioner f
+
+applyObjective :: N.Opt -> ObjectiveFunction Objective -> IO N.Result
+applyObjective opt (MinimumObjective f) =
+  N.set_min_objective opt (wrapScalarFunction f) ()
+applyObjective opt (PreconditionedMinimumObjective p f) =
+  N.set_precond_min_objective opt (wrapScalarFunction f)
+  (wrapPreconditionerFunction p) ()
+
+applyObjectiveD :: N.Opt -> ObjectiveFunction ObjectiveD -> IO N.Result
+applyObjectiveD opt (MinimumObjective f) =
+  N.set_min_objective opt (wrapScalarFunctionD f) ()
+applyObjectiveD opt (PreconditionedMinimumObjective p f) =
+  N.set_precond_min_objective opt (wrapScalarFunctionD f)
+  (wrapPreconditionerFunction p) ()
+
+{- Constraint functions -}
+-- | A constraint function which returns @c(x)@ given the parameter
+-- vector @x@.  The constraint will enforce that @c(x) == 0@ (equality
+-- constraint) or @c(x) <= 0@ (inequality constraint).
+type ScalarConstraint
+  = Vector Double  -- ^ Parameter vector @x@
+ -> Double  -- ^ Constraint violation (deviation from 0)
+
+-- | A constraint function which returns @c(x)@ given the parameter
+-- vector @x@ along with the gradient of @c(x)@ with respect to @x@ at
+-- that point.  The constraint will enforce that @c(x) == 0@ (equality
+-- constraint) or @c(x) <= 0@ (inequality constraint).
+type ScalarConstraintD
+  = Vector Double  -- ^ Parameter vector
+ -> (Double, Vector Double)  -- ^ (Constraint violation, constraint gradient)
+
+-- | A constraint function which returns a vector @c(x)@ given the
+-- parameter vector @x@.  The constraint will enforce that @c(x) == 0@
+-- (equality constraint) or @c(x) <= 0@ (inequality constraint).
+type VectorConstraint
+  = Vector Double  -- ^ Parameter vector
+  -> Word           -- ^ Constraint Vectorize
+  -> Vector Double  -- ^ Constraint violation vector
+
+-- | A constraint function which returns @c(x)@ given the parameter
+-- vector @x@ along with the Jacobian (first derivative) matrix of
+-- @c(x)@ with respect to @x@ at that point.  The constraint will
+-- enforce that @c(x) == 0@ (equality constraint) or @c(x) <= 0@
+-- (inequality constraint).
+type VectorConstraintD
+  = Vector Double  -- ^ Parameter vector
+  -> Word  -- ^ Constraint Vectorize
+  -> (Vector Double, Matrix Double)  -- ^ (Constraint violation vector,
+                                     -- constraint Jacobian)
+
+-- $nonlinearconstraints
+--
+-- Note that most NLOPT algorithms do not support nonlinear
+-- constraints natively; if you need to enforce nonlinear constraints,
+-- you may want to use the 'AugLagAlgorithm' family of solvers, which
+-- can add nonlinear constraints to some algorithm that does not
+-- support them by a principled modification of the objective
+-- function.
+--
+-- == Example program
+--
+-- The following interactive session example enforces a scalar
+-- constraint on the problem given in the beginning of the module: the
+-- parameters must always sum to 1.  The minimizer finds a constrained
+-- minimum of 22.5 at @(0.5, 0.5)@.
+--
+-- >>> import Numeric.LinearAlgebra ( dot, fromList, toList )
+-- >>> let objf x = x `dot` x + 22
+-- >>> let stop = ObjectiveRelativeTolerance 1e-9 :| []
+-- >>>          -- define constraint function:
+-- >>> let constraintf x = sum (toList x) - 1.0
+-- >>>          -- define constraint object to pass to the algorithm:
+-- >>> let constraint = EqualityConstraint (Scalar constraintf) 1e-6
+-- >>> let algorithm = COBYLA objf [] [] [constraint] Nothing
+-- >>> let problem = LocalProblem 2 stop algorithm
+-- >>> let x0 = fromList [5, 10]
+-- >>> minimizeLocal problem x0
+-- Right (Solution {solutionCost = 22.500000000013028, solutionParams = [0.5000025521533521,0.49999744784664796], solutionResult = FTOL_REACHED})
+
+
+data Constraint s v
+  -- | A scalar constraint.
+  = Scalar s
+  -- | A vector constraint.
+  | Vector Word v
+  -- | A scalar constraint with an attached preconditioning function.
+  | Preconditioned Preconditioner s
+
+-- | An equality constraint, comprised of both the constraint function
+-- (or functions, if a preconditioner is used) along with the desired
+-- tolerance.
+data EqualityConstraint s v = EqualityConstraint
+  { eqConstraintFunctions :: Constraint s v
+  , eqConstraintTolerance :: Double
+  }
+
+-- | An inequality constraint, comprised of both the constraint
+-- function (or functions, if a preconditioner is used) along with the
+-- desired tolerance.
+data InequalityConstraint s v = InequalityConstraint
+  { ineqConstraintFunctions :: Constraint s v
+  , ineqConstraintTolerance :: Double
+  }
+
+-- | A collection of equality constraints that do not supply
+-- constraint derivatives.
+type EqualityConstraints =
+  [EqualityConstraint ScalarConstraint VectorConstraint]
+
+-- | A collection of inequality constraints that do not supply
+-- constraint derivatives.
+type InequalityConstraints =
+  [InequalityConstraint ScalarConstraint VectorConstraint]
+
+-- | A collection of equality constraints that supply constraint
+-- derivatives.
+type EqualityConstraintsD = [EqualityConstraint ScalarConstraintD VectorConstraintD]
+
+-- | A collection of inequality constraints that supply constraint
+-- derivatives.
+type InequalityConstraintsD = [InequalityConstraint ScalarConstraintD VectorConstraintD]
+
+class ApplyConstraint constraint where
+  applyConstraint :: N.Opt -> constraint -> IO N.Result
+
+instance ApplyConstraint (EqualityConstraint ScalarConstraint VectorConstraint) where
+  applyConstraint opt (EqualityConstraint ty tol) = case ty of
+    Scalar s           ->
+      N.add_equality_constraint opt (wrapScalarFunction s) () tol
+    Vector n v         ->
+      N.add_equality_mconstraint opt n (wrapVectorFunction v n) () tol
+    Preconditioned p s ->
+      N.add_precond_equality_constraint opt (wrapScalarFunction s)
+      (wrapPreconditionerFunction p) () tol
+
+instance ApplyConstraint (InequalityConstraint ScalarConstraint VectorConstraint) where
+  applyConstraint opt (InequalityConstraint ty tol) = case ty of
+    Scalar s           ->
+      N.add_inequality_constraint opt (wrapScalarFunction s) () tol
+    Vector n v         ->
+      N.add_inequality_mconstraint opt n (wrapVectorFunction v n) () tol
+    Preconditioned p s ->
+      N.add_precond_inequality_constraint opt (wrapScalarFunction s)
+      (wrapPreconditionerFunction p) () tol
+
+instance ApplyConstraint (EqualityConstraint ScalarConstraintD VectorConstraintD) where
+  applyConstraint opt (EqualityConstraint ty tol) = case ty of
+    Scalar s           ->
+      N.add_equality_constraint opt (wrapScalarFunctionD s) () tol
+    Vector n v         ->
+      N.add_equality_mconstraint opt n (wrapVectorFunctionD v n) () tol
+    Preconditioned p s ->
+      N.add_precond_equality_constraint opt (wrapScalarFunctionD s)
+      (wrapPreconditionerFunction p) () tol
+
+instance ApplyConstraint (InequalityConstraint ScalarConstraintD VectorConstraintD) where
+  applyConstraint opt (InequalityConstraint ty tol) = case ty of
+    Scalar s           ->
+      N.add_inequality_constraint opt (wrapScalarFunctionD s) () tol
+    Vector n v         ->
+      N.add_inequality_mconstraint opt n (wrapVectorFunctionD v n) () tol
+    Preconditioned p s ->
+      N.add_precond_inequality_constraint opt (wrapScalarFunctionD s)
+      (wrapPreconditionerFunction p) () tol
+
+{- Bounds -}
+
+-- | Bound constraints are specified by vectors of the same dimension
+-- as the parameter space.
+--
+-- == Example program
+--
+-- The following interactive session example enforces lower bounds on
+-- the example from the beginning of the module.  This prevents the
+-- optimizer from locating the true minimum at @(0, 0)@; a slightly
+-- higher constrained minimum at @(1, 1)@ is found.  Note that the
+-- optimizer returns 'N.XTOL_REACHED' rather than 'N.FTOL_REACHED',
+-- because the bound constraint is active at the final minimum.
+--
+-- >>> import Numeric.LinearAlgebra ( dot, fromList )
+-- >>> let objf x = x `dot` x + 22                           -- define objective
+-- >>> let stop = ObjectiveRelativeTolerance 1e-6 :| []      -- define stopping criterion
+-- >>> let lowerbound = LowerBounds $ fromList [1, 1]        -- specify bounds
+-- >>> let algorithm = NELDERMEAD objf [lowerbound] Nothing  -- specify algorithm
+-- >>> let problem = LocalProblem 2 stop algorithm           -- specify problem
+-- >>> let x0 = fromList [5, 10]                             -- specify initial guess
+-- >>> minimizeLocal problem x0
+-- Right (Solution {solutionCost = 24.0, solutionParams = [1.0,1.0], solutionResult = XTOL_REACHED})
+data Bounds
+  -- | Lower bound vector @v@ means we want @x >= v@.
+ = LowerBounds (Vector Double)
+ -- | Upper bound vector @u@ means we want @x <= u@.
+ | UpperBounds (Vector Double)
+ deriving (Eq, Show, Read)
+
+applyBounds :: N.Opt -> Bounds -> IO N.Result
+applyBounds opt (LowerBounds lbvec) = N.set_lower_bounds opt lbvec
+applyBounds opt (UpperBounds ubvec) = N.set_upper_bounds opt ubvec
+
+{- Stopping conditions -}
+
+-- | A 'StoppingCondition' tells NLOPT when to stop working on a
+-- minimization problem.  When multiple 'StoppingCondition's are
+-- provided, the problem will stop when any one condition is met.
+data StoppingCondition
+  -- | Stop minimizing when an objective value @J@ less than or equal
+  -- to the provided value is found.
+  = MinimumValue Double
+  -- | Stop minimizing when an optimization step changes the objective
+  -- value @J@ by less than the provided tolerance multiplied by @|J|@.
+  | ObjectiveRelativeTolerance Double
+  -- | Stop minimizing when an optimization step changes the objective
+  -- value by less than the provided tolerance.
+  | ObjectiveAbsoluteTolerance Double
+  -- | Stop when an optimization step changes /every element/ of the
+  -- parameter vector @x@ by less than @x@ scaled by the provided
+  -- tolerance.
+  | ParameterRelativeTolerance Double
+  -- | Stop when an optimization step changes /every element/ of the
+  -- parameter vector @x@ by less than the corresponding element in
+  -- the provided vector of tolerances values.
+  | ParameterAbsoluteTolerance (Vector Double)
+  -- | Stop when the number of evaluations of the objective function
+  -- exceeds the provided count.
+  | MaximumEvaluations Word
+  -- | Stop when the optimization time exceeds the provided time (in
+  -- seconds).  This is not a precise limit.
+  | MaximumTime Double
+  deriving (Eq, Show, Read)
+
+-- $nonempty
+--
+-- The 'NonEmpty' data type from 'Data.List.NonEmpty' is re-exported
+-- here, because it is used to ensure that you always specify at least
+-- one stopping condition.
+
+applyStoppingCondition :: N.Opt -> StoppingCondition -> IO N.Result
+applyStoppingCondition opt (MinimumValue x) = N.set_stopval opt x
+applyStoppingCondition opt (ObjectiveRelativeTolerance x) = N.set_ftol_rel opt x
+applyStoppingCondition opt (ObjectiveAbsoluteTolerance x) = N.set_ftol_abs opt x
+applyStoppingCondition opt (ParameterRelativeTolerance x) = N.set_xtol_rel opt x
+applyStoppingCondition opt (ParameterAbsoluteTolerance v) = N.set_xtol_abs opt v
+applyStoppingCondition opt (MaximumEvaluations n) = N.set_maxeval opt n
+applyStoppingCondition opt (MaximumTime deltat) = N.set_maxtime opt deltat
+
+{- Random seed control -}
+
+-- | This specifies how to initialize the random number generator for
+-- stochastic algorithms.
+data RandomSeed
+  -- | Seed the RNG with the provided value.
+  = SeedValue Word
+  -- | Seed the RNG using the system clock.
+  | SeedFromTime
+  -- | Don't perform any explicit initialization of the RNG.
+  | Don'tSeed
+  deriving (Eq, Show, Read)
+
+applyRandomSeed :: RandomSeed -> IO ()
+applyRandomSeed Don'tSeed = return ()
+applyRandomSeed (SeedValue n) = N.srand n
+applyRandomSeed SeedFromTime = N.srand_time
+
+{- Random stuff -}
+
+-- | This specifies the population size for algorithms that use a pool
+-- of solutions.
+newtype Population = Population Word deriving (Eq, Show, Read)
+
+applyPopulation :: N.Opt -> Population -> IO N.Result
+applyPopulation opt (Population n) = N.set_population opt n
+
+-- | This specifies the memory size to be used by algorithms like
+-- 'LBFGS' which store approximate Hessian or Jacobian matrices.
+newtype VectorStorage = VectorStorage Word deriving (Eq, Show, Read)
+
+applyVectorStorage :: N.Opt -> VectorStorage -> IO N.Result
+applyVectorStorage opt (VectorStorage n) = N.set_vector_storage opt n
+
+-- | This vector with the same dimension as the parameter vector @x@
+-- specifies the initial step for the optimizer to take.  (This
+-- applies to local gradient-free algorithms, which cannot use
+-- gradients to estimate how big a step to take.)
+newtype InitialStep = InitialStep (Vector Double) deriving (Eq, Show, Read)
+
+applyInitialStep :: N.Opt -> InitialStep -> IO N.Result
+applyInitialStep opt (InitialStep v) = N.set_initial_step opt v
+
+{- Algorithms -}
+
+data GlobalProblem = GlobalProblem
+  { lowerBounds :: Vector Double        -- ^ Lower bounds for @x@
+  , upperBounds :: Vector Double        -- ^ Upper bounds for @x@
+  , gstop :: NonEmpty StoppingCondition -- ^ At least one stopping
+                                        -- condition
+  , galgorithm :: GlobalAlgorithm       -- ^ Algorithm specification
+  }
+
+-- | These are the global minimization algorithms provided by NLOPT.  Please see
+-- <http://ab-initio.mit.edu/wiki/index.php/NLopt_Algorithms the NLOPT algorithm manual>
+-- for more details on how the methods work and how they relate to one another.
+--
+-- Optional parameters are wrapped in a 'Maybe'; for example, if you
+-- see 'Maybe' 'Population', you can simply specify 'Nothing' to use
+-- the default behavior.
+data GlobalAlgorithm
+    -- | DIviding RECTangles
+  = DIRECT Objective
+    -- | DIviding RECTangles, locally-biased variant
+  | DIRECT_L Objective
+    -- | DIviding RECTangles, "slightly randomized"
+  | DIRECT_L_RAND Objective RandomSeed
+    -- | DIviding RECTangles, unscaled version
+  | DIRECT_NOSCAL Objective
+    -- | DIviding RECTangles, locally-biased and unscaled
+  | DIRECT_L_NOSCAL Objective
+    -- | DIviding RECTangles, locally-biased, unscaled and "slightly
+    -- randomized"
+  | DIRECT_L_RAND_NOSCAL Objective RandomSeed
+    -- | DIviding RECTangles, original FORTRAN implementation
+  | ORIG_DIRECT Objective InequalityConstraints
+    -- | DIviding RECTangles, locally-biased, original FORTRAN
+    -- implementation
+  | ORIG_DIRECT_L Objective InequalityConstraints
+    -- | Stochastic Global Optimization.
+    -- __This algorithm is only available if you have linked with @libnlopt_cxx@.__
+  | STOGO ObjectiveD
+    -- | Stochastic Global Optimization, randomized variant.
+    -- __This algorithm is only available if you have linked with @libnlopt_cxx@.__
+  | STOGO_RAND ObjectiveD RandomSeed
+    -- | Controlled Random Search with Local Mutation
+  | CRS2_LM Objective RandomSeed (Maybe Population)
+    -- | Improved Stochastic Ranking Evolution Strategy
+  | ISRES Objective InequalityConstraints EqualityConstraints RandomSeed (Maybe Population)
+    -- | Evolutionary Algorithm
+  | ESCH Objective
+    -- | Original Multi-Level Single-Linkage
+  | MLSL Objective LocalProblem (Maybe Population)
+    -- | Multi-Level Single-Linkage with Sobol Low-Discrepancy
+    -- Sequence for starting points
+  | MLSL_LDS Objective LocalProblem (Maybe Population)
+
+algorithmEnumOfGlobal :: GlobalAlgorithm -> N.Algorithm
+algorithmEnumOfGlobal (DIRECT _)                 = N.GN_DIRECT
+algorithmEnumOfGlobal (DIRECT_L _)               = N.GN_DIRECT_L
+algorithmEnumOfGlobal (DIRECT_L_RAND _ _)        = N.GN_DIRECT_L_RAND
+algorithmEnumOfGlobal (DIRECT_NOSCAL _)          = N.GN_DIRECT_NOSCAL
+algorithmEnumOfGlobal (DIRECT_L_NOSCAL _)        = N.GN_DIRECT_L_NOSCAL
+algorithmEnumOfGlobal (DIRECT_L_RAND_NOSCAL _ _) = N.GN_DIRECT_L_RAND_NOSCAL
+algorithmEnumOfGlobal (ORIG_DIRECT _ _)          = N.GN_ORIG_DIRECT
+algorithmEnumOfGlobal (ORIG_DIRECT_L _ _)        = N.GN_ORIG_DIRECT_L
+algorithmEnumOfGlobal (STOGO _)                  = N.GD_STOGO
+algorithmEnumOfGlobal (STOGO_RAND _ _)           = N.GD_STOGO_RAND
+algorithmEnumOfGlobal (CRS2_LM _ _ _)            = N.GN_CRS2_LM
+algorithmEnumOfGlobal (ISRES _ _ _ _ _)          = N.GN_ISRES
+algorithmEnumOfGlobal (ESCH _)                   = N.GN_ESCH
+algorithmEnumOfGlobal (MLSL _ _ _)               = N.G_MLSL
+algorithmEnumOfGlobal (MLSL_LDS _ _ _)           = N.G_MLSL_LDS
+
+applyGlobalObjective :: N.Opt -> GlobalAlgorithm -> IO ()
+applyGlobalObjective opt alg = go alg
   where
-    comp         = MA.getComp arr
-    (MA.Sz2 m n) = MA.size arr
-    create l     = mapM_ (update l) [i :. j | i <- [0..m-1], j <- [0..m-1]]
+    obj = tryTo . applyObjective opt . MinimumObjective
+    objD = tryTo . applyObjectiveD opt . MinimumObjective
 
-    update l ix@(i :. j)
-      | i < j     = UMA.unsafeWrite l ix 0
-      | otherwise = do let cur  = UMA.unsafeIndex arr ix
-                           rowI = i*m
-                           rowJ = j*m
-                       xjj <- UMA.unsafeLinearRead l (rowJ + j)
-                       tot <- rangedLinearDotProd rowI rowJ j l
-                       --liftIO $ print (i,j,cur,tot)
-                       if i == j
-                          then UMA.unsafeLinearWrite l (rowI + j) (sqrt (cur - tot))
-                          else UMA.unsafeLinearWrite l (rowI + j) ((cur - tot) / xjj)
-{-# INLINE cholesky #-}
-invChol :: (MA.PrimMonad m, MA.MonadThrow m, MonadIO m) => SRMatrix -> m SRMatrix
-invChol arr = do l <- cholesky arr -- lower diag
-                 --liftIO $ putStr "chol: " >> print l
-                 mtx <- MA.thawS l
-                 forM_ [0 .. m-1] $ \i -> do
-                     lII <- UMA.unsafeRead mtx (i :. i)
-                     UMA.unsafeWrite mtx (i :. i) (1 / lII)
-                     forM_ [0 .. i-1] $ \j -> do
-                         tot <- rangedLinearDotProd (i*m + j) (j*m + j) (i-j) mtx
-                         UMA.unsafeWrite mtx (j :. i) ((-tot)/lII)
-                         UMA.unsafeWrite mtx (i :. j) 0
-                 mm <- MA.newMArray (MA.Sz2 m m) 0
-                 forM_ [0 .. m-1] $ \i -> do
-                     dii <- rangedLinearDotProd (i*m + i) (i*m + i) (m - i) mtx
-                     UMA.unsafeWrite mm (i :. i) dii
-                     forM_ [i+1 .. m-1] $ \j -> do
-                          dij <- rangedLinearDotProd (i*m + j) (j*m + j) (m - j) mtx
-                          UMA.unsafeWrite mm (i :. j) dij
-                          UMA.unsafeWrite mm (j :. i) dij
-                 MA.freezeS mm
+    go (DIRECT o)                 = obj o
+    go (DIRECT_L o)               = obj o
+    go (DIRECT_NOSCAL o)          = obj o
+    go (DIRECT_L_NOSCAL o)        = obj o
+    go (ESCH o)                   = obj o
+    go (STOGO o)                  = objD o
+    go (DIRECT_L_RAND o _)        = obj o
+    go (DIRECT_L_RAND_NOSCAL o _) = obj o
+    go (ORIG_DIRECT o _)          = obj o
+    go (ORIG_DIRECT_L o _)        = obj o
+    go (STOGO_RAND o _)           = objD o
+    go (CRS2_LM o _ _)            = obj o
+    go (ISRES o _ _ _ _)          = obj o
+    go (MLSL o _ _)               = obj o
+    go (MLSL_LDS o _ _)           = obj o
 
+applyGlobalAlgorithm :: N.Opt -> GlobalAlgorithm -> IO ()
+applyGlobalAlgorithm opt alg = do
+  applyGlobalObjective opt alg
+  go alg
   where
-    MA.Sz2 m _ = MA.size arr
-{-# INLINE invChol #-}
+    seed = applyRandomSeed
+    pop = maybe (return ()) (tryTo . applyPopulation opt)
+    ic = traverse_ (tryTo . applyConstraint opt)
+    ec = traverse_ (tryTo . applyConstraint opt)
 
+    local lp = setupLocalProblem lp >>= N.set_local_optimizer opt
 
-data LSData = LSData
-    { _alpha :: Double
-    , _phi   :: Double
-    , _phi'  :: Double
-    } deriving (Ord, Eq, Show)
+    go (DIRECT_L_RAND _ s)        = seed s
+    go (DIRECT_L_RAND_NOSCAL _ s) = seed s
+    go (ORIG_DIRECT _ ineq)       = ic ineq
+    go (ORIG_DIRECT_L _ ineq)     = ic ineq
+    go (STOGO_RAND _ s)           = seed s
+    go (CRS2_LM _ s p)            = seed s *> pop p
+    go (ISRES _ ineq eq s p)      = ic ineq *> ec eq *> seed s *> pop p
+    go (MLSL _ lp p)              = local lp *> pop p
+    go (MLSL_LDS _ lp p)          = local lp *> pop p
+    go _                          = return ()
 
-type MSTLS m a = StateT (M.Map Double LSData) m a
+tryTo :: IO N.Result -> IO ()
+tryTo act = do
+  result <- act
+  if (N.isSuccess result)
+    then return ()
+    else Ex.throw $ NloptException result
 
-getPhi :: Monad m => Double -> MSTLS m Double
-getPhi a = gets (_phi . (!. a))
-{-# INLINE getPhi #-}
+data NloptException = NloptException N.Result deriving (Show, Typeable)
+instance Exception NloptException
 
-getPhi' :: Monad m => Double -> MSTLS m Double
-getPhi' a = gets (_phi' . (!. a))
-{-# INLINE getPhi' #-}
-
-m !. x = if isNaN x then LSData x x x else if M.member x m then m M.! x else error $ "not found: " <> show (m, x)
-
-minimizeBFGS :: (MA.PrimMonad m, MA.MonadThrow m, MonadIO m)
-             => (PVector -> (Double, PVector))
-             -> (PVector -> SRMatrix)
-             -> Int
-             -> Double 
-             -> PVector
-             -> m (PVector, Double, Int)
-minimizeBFGS funAndGrad hessian nIters tol theta0 =
-    do let hess = hessian theta0
-       h <- pure ident
-       {-
-         if MA.any (\x -> isNaN x || isInfinite x || abs x > 1e10 || abs x < 1e-10) hess || negDiag hess
-               then pure ident
-               else do --liftIO $ print hess
-                       h' <- invChol hess
-                       if MA.any isNaN h'
-                          then pure ident
-                          else pure h'
-                          -}
-       -- let h = MA.computeAs MA.S $ MA.identityMatrix (MA.Sz p) -- hessian theta0
-       go theta0 fk0 dfk0 h a0 nIters
+-- | Solve the specified global optimization problem.
+--
+-- = Example program
+--
+-- The following interactive session example uses the 'ISRES'
+-- algorithm, a stochastic, derivative-free global optimizer, to
+-- minimize a trivial function with a minimum of 22.0 at @(0, 0)@.
+-- The search is conducted within a box from -10 to 10 in each
+-- dimension.
+--
+-- >>> import Numeric.LinearAlgebra ( dot, fromList )
+-- >>> let objf x = x `dot` x + 22                              -- define objective
+-- >>> let stop = ObjectiveRelativeTolerance 1e-12 :| []        -- define stopping criterion
+-- >>> let algorithm = ISRES objf [] [] (SeedValue 22) Nothing  -- specify algorithm
+-- >>> let lowerbounds = fromList [-10, -10]                    -- specify bounds
+-- >>> let upperbounds = fromList [10, 10]                      -- specify bounds
+-- >>> let problem = GlobalProblem lowerbounds upperbounds stop algorithm
+-- >>> let x0 = fromList [5, 8]                                 -- specify initial guess
+-- >>> minimizeGlobal problem x0
+-- Right (Solution {solutionCost = 22.000000000002807, solutionParams = [-1.660591102367038e-6,2.2407062393213684e-7], solutionResult = FTOL_REACHED})
+minimizeGlobal :: GlobalProblem  -- ^ Problem specification
+               -> Vector Double  -- ^ Initial parameter guess
+               -> Either N.Result Solution  -- ^ Optimization results
+minimizeGlobal prob x0 =
+  unsafePerformIO $ (Right <$> minimizeGlobal' prob x0) `Ex.catch` handler
   where
-    negDiag h    = MA.ifoldrS (\(i :. j) v acc -> if i==j then (v<0) || acc else acc) False h
-    (fk0, dfk0)  = funAndGrad theta0
-    ident      = MA.computeAs MA.S $ MA.identityMatrix (MA.Sz p)
-    a0         = 1.0
-    (MA.Sz p) = MA.size theta0
-    i_mtx      = MA.computeAs MA.S $ MA.identityMatrix (MA.size theta0)
-    m !>.< v   = MA.computeAs MA.S $ m !>< v
-    runLS f    = f `evalStateT` M.empty
+    handler :: NloptException -> IO (Either N.Result a)
+    handler (NloptException retcode) = return $ Left retcode
 
-    go theta fk  _   _ _ 0   = pure (theta, fk, nIters)
-    go theta fk dfk h a it 
-      | isNaN a || isNaN fk = pure (theta, fk, nIters - it)
-      | otherwise = do
-        gnorm <- dotM dfk dfk
-        if gnorm < tol
-           then pure (theta, fk, nIters - it)
-           else do let pk = MA.negateA h !>.< dfk
-                   ak      <- runLS $ lineSearchWolfe funAndGrad theta pk 0.01 0.1 a 5 -- adjust parameters
-                   theta_k <- theta .+. (ak *. pk)
-                   let (fk_nxt, dfk_nxt) = funAndGrad theta_k
-                   if isNaN fk_nxt || abs (fk_nxt - fk) < tol
-                      then pure (theta_k, fk, nIters - it)
-                      else do yk <- dfk_nxt .-. dfk
-                              let sk   = ak *. pk
-                                  ysk  = UMA.unsafeDotProduct yk sk
-                                  rhok = 1 / max 10000 ysk 
-                              sy    <- outer sk yk
-                              ys    <- outer yk sk
-                              ss    <- outer sk sk
-                              a1    <- i_mtx .-. (sy .* rhok)
-                              a2    <- i_mtx .-. (ys .* rhok)
-                              ha2   <- h .><. a2
-                              a1ha2 <- a1 .><. ha2
-                              h_nxt <-  a1ha2 .+. (rhok *. ss)
-                              go theta_k fk_nxt dfk_nxt h_nxt 1.0 (it-1)
+applyGlobalProblem :: N.Opt -> GlobalProblem -> IO ()
+applyGlobalProblem opt (GlobalProblem lb ub stop alg) = do
+  tryTo $ applyBounds opt (LowerBounds lb)
+  tryTo $ applyBounds opt (UpperBounds ub)
+  traverse_ (tryTo . applyStoppingCondition opt) stop
+  applyGlobalAlgorithm opt alg
 
-minimizeCG :: (MA.PrimMonad m, MA.MonadThrow m)
-           => (PVector -> (Double, PVector)) 
-           -> Int 
-           -> Double
-           -> PVector 
-           -> m (PVector, Double, Int)
-minimizeCG funAndGrad nIters tol theta0 = go theta0 pk0 fk0 dfk0 a0 nIters
+newOpt :: N.Algorithm -> Word -> IO N.Opt
+newOpt alg sz = do
+  opt' <- N.create alg sz
+  case opt' of
+    Nothing -> Ex.throw $ NloptException N.FAILURE
+    Just opt -> return opt
+
+setupGlobalProblem :: GlobalProblem -> IO N.Opt
+setupGlobalProblem gp@(GlobalProblem _ _ _ alg) = do
+  opt <- newOpt (algorithmEnumOfGlobal alg) (problemSize gp)
+  applyGlobalProblem opt gp
+  return opt
+
+solveProblem :: N.Opt -> Vector Double -> IO Solution
+solveProblem opt x0 = do
+  (N.Output outret outcost outx) <- N.optimize opt x0
+  if (N.isSuccess outret)
+    then return $ Solution outcost outx outret
+    else Ex.throw $ NloptException outret
+
+minimizeGlobal' :: GlobalProblem -> Vector Double -> IO Solution
+minimizeGlobal' gp x0 = do
+  opt <- setupGlobalProblem gp
+  solveProblem opt x0
+
+data LocalProblem = LocalProblem
+  { lsize :: Word                       -- ^ The dimension of the
+                                        -- parameter vector.
+  , lstop :: NonEmpty StoppingCondition -- ^ At least one stopping
+                                        -- condition
+  , lalgorithm :: LocalAlgorithm        -- ^ Algorithm specification
+  }
+
+-- | These are the local minimization algorithms provided by NLOPT.  Please see
+-- <http://ab-initio.mit.edu/wiki/index.php/NLopt_Algorithms the NLOPT algorithm manual>
+-- for more details on how the methods work and how they relate to one
+-- another.  Note that some local methods require you provide
+-- derivatives (gradients or Jacobians) for your objective function
+-- and constraint functions.
+--
+-- Optional parameters are wrapped in a 'Maybe'; for example, if you
+-- see 'Maybe' 'VectorStorage', you can simply specify 'Nothing' to
+-- use the default behavior.
+data LocalAlgorithm
+    -- | Limited-memory BFGS
+  = LBFGS_NOCEDAL ObjectiveD (Maybe VectorStorage)
+    -- | Limited-memory BFGS
+  | LBFGS ObjectiveD (Maybe VectorStorage)
+    -- | Shifted limited-memory variable-metric, rank-2
+  | VAR2 ObjectiveD (Maybe VectorStorage)
+    -- | Shifted limited-memory variable-metric, rank-1
+  | VAR1 ObjectiveD (Maybe VectorStorage)
+    -- | Truncated Newton's method
+  | TNEWTON ObjectiveD (Maybe VectorStorage)
+    -- | Truncated Newton's method with automatic restarting
+  | TNEWTON_RESTART ObjectiveD (Maybe VectorStorage)
+    -- | Preconditioned truncated Newton's method
+  | TNEWTON_PRECOND ObjectiveD (Maybe VectorStorage)
+    -- | Preconditioned truncated Newton's method with automatic
+    -- restarting
+  | TNEWTON_PRECOND_RESTART ObjectiveD (Maybe VectorStorage)
+    -- | Method of moving averages
+  | MMA ObjectiveD InequalityConstraintsD
+    -- | Sequential Least-Squares Quadratic Programming
+  | SLSQP ObjectiveD [Bounds] InequalityConstraintsD EqualityConstraintsD
+    -- | Conservative Convex Separable Approximation
+  | CCSAQ ObjectiveD Preconditioner
+    -- | PRincipal AXIS gradient-free local optimization
+  | PRAXIS Objective [Bounds] (Maybe InitialStep)
+    -- | Constrained Optimization BY Linear Approximations
+  | COBYLA Objective [Bounds] InequalityConstraints EqualityConstraints
+    (Maybe InitialStep)
+    -- | Powell's NEWUOA algorithm
+  | NEWUOA Objective (Maybe InitialStep)
+    -- | Powell's NEWUOA algorithm with bounds by SGJ
+  | NEWUOA_BOUND Objective [Bounds] (Maybe InitialStep)
+    -- | Nelder-Mead Simplex gradient-free method
+  | NELDERMEAD Objective [Bounds] (Maybe InitialStep)
+    -- | NLOPT implementation of Rowan's Subplex algorithm
+  | SBPLX Objective [Bounds] (Maybe InitialStep)
+    -- | Bounded Optimization BY Quadratic Approximations
+  | BOBYQA Objective [Bounds] (Maybe InitialStep)
+
+algorithmEnumOfLocal :: LocalAlgorithm -> N.Algorithm
+algorithmEnumOfLocal (LBFGS_NOCEDAL _ _)           = N.LD_LBFGS_NOCEDAL
+algorithmEnumOfLocal (LBFGS _ _)                   = N.LD_LBFGS
+algorithmEnumOfLocal (VAR2 _ _)                    = N.LD_VAR2
+algorithmEnumOfLocal (VAR1 _ _)                    = N.LD_VAR1
+algorithmEnumOfLocal (TNEWTON _ _)                 = N.LD_TNEWTON
+algorithmEnumOfLocal (TNEWTON_RESTART _ _)         = N.LD_TNEWTON_RESTART
+algorithmEnumOfLocal (TNEWTON_PRECOND _ _)         = N.LD_TNEWTON_PRECOND
+algorithmEnumOfLocal (TNEWTON_PRECOND_RESTART _ _) = N.LD_TNEWTON_PRECOND_RESTART
+algorithmEnumOfLocal (MMA _ _)                     = N.LD_MMA
+algorithmEnumOfLocal (SLSQP _ _ _ _)               = N.LD_SLSQP
+algorithmEnumOfLocal (CCSAQ _ _)                   = N.LD_CCSAQ
+algorithmEnumOfLocal (PRAXIS _ _ _)                = N.LN_PRAXIS
+algorithmEnumOfLocal (COBYLA _ _ _ _ _)            = N.LN_COBYLA
+algorithmEnumOfLocal (NEWUOA _ _)                  = N.LN_NEWUOA
+algorithmEnumOfLocal (NEWUOA_BOUND _ _ _)          = N.LN_NEWUOA
+algorithmEnumOfLocal (NELDERMEAD _ _ _)            = N.LN_NELDERMEAD
+algorithmEnumOfLocal (SBPLX _ _ _)                 = N.LN_SBPLX
+algorithmEnumOfLocal (BOBYQA _ _ _)                = N.LN_BOBYQA
+
+applyLocalObjective :: N.Opt -> LocalAlgorithm -> IO ()
+applyLocalObjective opt alg = go alg
   where
-    (fk0, dfk0) = funAndGrad theta0
-    pk0       = MA.negateA dfk0
-    a0        = 1.0
-    almost0   = MA.all (\d -> abs d <= tol)
-    runLS f   = f `evalStateT` M.empty
+    obj = tryTo . applyObjective opt . MinimumObjective
+    objD = tryTo . applyObjectiveD opt . MinimumObjective
+    precond p = tryTo . applyObjectiveD opt . PreconditionedMinimumObjective p
 
-    go !theta _  fk  _   _ 0  = pure (theta, fk, nIters)
-    go !theta pk fk dfk a it
-      | isNaN a || isNaN fk = pure (theta, fk, nIters - it)
-      | otherwise = do
-        if almost0 dfk
-           then pure (theta, fk, nIters - it)
-           else do ak      <- runLS $ lineSearchWolfe funAndGrad theta pk 0.01 0.1 a 5 -- adjust parameters
-                   theta_k <- theta .+. (ak *. pk)
-                   let (fk_nxt, dfk_nxt) = funAndGrad theta_k
-                       beta              = max 0 $ MA.sum $ MA.zipWith (\dk dkn -> dkn * (dkn - dk) / (dk * dk)) dfk dfk_nxt
-                   pk_nxt <- beta *. pk .-. dfk_nxt
-                   let dfkpk  = UMA.unsafeDotProduct dfk_nxt pk_nxt
-                       a_nxt' = min 1 $ abs $ 2.02 * (fk - fk_nxt) / dfkpk
-                       a_nxt  = if a_nxt' <= 0 then 1 else a_nxt'
-                   if isNaN fk_nxt || abs (fk - fk_nxt) < tol
-                      then pure (theta, fk, nIters - it)
-                      else go theta_k pk_nxt fk_nxt dfk_nxt a_nxt (it-1)
+    go (LBFGS_NOCEDAL o _)           = objD o
+    go (LBFGS o _)                   = objD o
+    go (VAR2 o _)                    = objD o
+    go (VAR1 o _)                    = objD o
+    go (TNEWTON o _)                 = objD o
+    go (TNEWTON_RESTART o _)         = objD o
+    go (TNEWTON_PRECOND o _)         = objD o
+    go (TNEWTON_PRECOND_RESTART o _) = objD o
+    go (MMA o _)                     = objD o
+    go (SLSQP o _ _ _)               = objD o
+    go (CCSAQ o prec)                = precond prec o
+    go (PRAXIS o _ _)                = obj o
+    go (COBYLA o _ _ _ _)            = obj o
+    go (NEWUOA o _)                  = obj o
+    go (NEWUOA_BOUND o _ _)          = obj o
+    go (NELDERMEAD o _ _)            = obj o
+    go (SBPLX o _ _)                 = obj o
+    go (BOBYQA o _ _)                = obj o
 
--- line_search_wolfe2 based on https://github.com/scipy/scipy/blob/main/scipy/optimize/_linesearch.py
-lineSearchWolfe :: MA.PrimMonad m
-                => (PVector -> (Double, PVector))
-                -> PVector
-                -> PVector
-                -> Double
-                -> Double
-                -> Double
-                -> Int
-                -> MSTLS m Double
-lineSearchWolfe funAndGrad x0 p0 c1 c2 alpha nIter = do
-    insertIfMissing 0
-    insertIfMissing alpha
-    (LSData _ phi_0 derphi_0) <- gets (!. 0)
-    let wolfe alpha_i phi_i = phi_i > phi_0 + c1 * alpha_i * derphi_0
-        curvature derphi_i  = abs derphi_i <= -c2 * derphi_0
-    go nIter alpha 0 wolfe curvature
+applyLocalAlgorithm :: N.Opt -> LocalAlgorithm -> IO ()
+applyLocalAlgorithm opt alg = do
+  applyLocalObjective opt alg
+  go alg
   where
-    insertAlpha a     = do (phi_i, phi_i') <- phi a
-                           modify (M.insert a (LSData a phi_i phi_i'))
-    insertIfMissing a = do hasNoA <- gets (not . M.member a)
-                           when hasNoA (insertAlpha a)
+    ic = traverse_ (tryTo . applyConstraint opt)
+    icd = traverse_ (tryTo . applyConstraint opt)
+    ec = traverse_ (tryTo . applyConstraint opt)
+    ecd = traverse_ (tryTo . applyConstraint opt)
+    store = maybe (return ()) (tryTo . applyVectorStorage opt)
+    bound = traverse_ (tryTo . applyBounds opt)
+    step0 = maybe (return ()) (tryTo . applyInitialStep opt)
 
-    go 0 !alpha_cur _ _ _                       = pure alpha_cur
-    go it !alpha_cur alpha_prev wolfe curvature = do
-        insertIfMissing alpha_cur
-        insertIfMissing alpha_prev
-        phi_cur  <- getPhi alpha_cur
-        phi_prev <- getPhi alpha_prev
-        phi_cur' <- getPhi' alpha_cur
-        if | isNaN phi_cur                     -> pure alpha_prev
-           | wolfe alpha_cur phi_cur           -> zoom alpha_prev alpha_cur phi wolfe curvature nIter
-           | phi_cur >= phi_prev && it < nIter -> zoom alpha_prev alpha_cur phi wolfe curvature nIter
-           | curvature phi_cur'                -> pure alpha_cur
-           | phi_cur' >= 0                     -> zoom alpha_cur alpha_prev phi wolfe curvature nIter
-           | otherwise                         -> insertIfMissing (2*alpha_cur) >> go (it-1) (2*alpha_cur) alpha_cur wolfe curvature
+    go (LBFGS_NOCEDAL _ vs)           = store vs
+    go (LBFGS _ vs)                   = store vs
+    go (VAR2 _ vs)                    = store vs
+    go (VAR1 _ vs)                    = store vs
+    go (TNEWTON _ vs)                 = store vs
+    go (TNEWTON_RESTART _ vs)         = store vs
+    go (TNEWTON_PRECOND _ vs)         = store vs
+    go (TNEWTON_PRECOND_RESTART _ vs) = store vs
+    go (MMA _ ineqd)                  = icd ineqd
+    go (SLSQP _ b ineqd eqd)          =
+      bound b *> icd ineqd *> ecd eqd
+    go (CCSAQ _ _   )                 = return ()
+    go (PRAXIS _ b s)                 = bound b *> step0 s
+    go (COBYLA _ b ineq eq s)         =
+      bound b *> ic ineq *> ec eq *> step0 s
+    go (NEWUOA _ s)                   = step0 s
+    go (NEWUOA_BOUND _ b s)           = bound b *> step0 s
+    go (NELDERMEAD _ b s)             = bound b *> step0 s
+    go (SBPLX _ b s)                  = bound b *> step0 s
+    go (BOBYQA _ b s)                 = bound b *> step0 s
 
+applyLocalProblem :: N.Opt -> LocalProblem -> IO ()
+applyLocalProblem opt (LocalProblem _ stop alg) = do
+  traverse_ (tryTo . applyStoppingCondition opt) stop
+  applyLocalAlgorithm opt alg
 
-    phi  alpha_k = do let xap       = MA.computeAs MA.S $ MA.zipWith (\xj pj -> xj + alpha_k * pj) x0 p0
-                          (fk, fk') = funAndGrad xap
-                          fp        = fk' !.! p0
-                      pure (fk, fp)
-{-# INLINE lineSearchWolfe #-}
+setupLocalProblem :: LocalProblem -> IO N.Opt
+setupLocalProblem lp@(LocalProblem sz _ alg) = do
+  opt <- newOpt (algorithmEnumOfLocal alg) sz
+  applyLocalProblem opt lp
+  return opt
 
-zoom :: (MA.PrimMonad m)
-     => Double
-     -> Double
-     -> (Double -> m (Double, Double))
-     -> (Double -> Double -> Bool)
-     -> (Double -> Bool)
-     -> Int
-     -> MSTLS m Double
-zoom aLo aHi phi wolfe curvature nIter = go nIter aLo aHi 0
+minimizeLocal' :: LocalProblem -> Vector Double -> IO Solution
+minimizeLocal' lp x0 = do
+  opt <- setupLocalProblem lp
+  solveProblem opt x0
+
+-- |
+-- == Example program
+--
+-- The following interactive session example enforces the same scalar
+-- constraint as the nonlinear constraint example, but this time it
+-- uses the SLSQP solver to find the minimum.
+--
+-- >>> import Numeric.LinearAlgebra ( dot, fromList, toList, scale )
+-- >>> let objf x = (x `dot` x + 22, 2 `scale` x)
+-- >>> let stop = ObjectiveRelativeTolerance 1e-9 :| []
+-- >>> let constraintf x = (sum (toList x) - 1.0, fromList [1, 1])
+-- >>> let constraint = EqualityConstraint (Scalar constraintf) 1e-6
+-- >>> let algorithm = SLSQP objf [] [] [constraint]
+-- >>> let problem = LocalProblem 2 stop algorithm
+-- >>> let x0 = fromList [5, 10]
+-- >>> minimizeLocal problem x0
+-- Right (Solution {solutionCost = 22.5, solutionParams = [0.4999999999999998,0.5000000000000002], solutionResult = FTOL_REACHED})
+minimizeLocal :: LocalProblem -> Vector Double -> Either N.Result Solution
+minimizeLocal prob x0 =
+  unsafePerformIO $ (Right <$> minimizeLocal' prob x0) `Ex.catch` handler
   where
-    getAlpha dflt ma chck = case ma of
-                              Nothing -> dflt
-                              Just a  -> if chck a then dflt else a
+    handler :: NloptException -> IO (Either N.Result a)
+    handler (NloptException retcode) = return $ Left retcode
+
+class ProblemSize c where
+  problemSize :: c -> Word
+
+instance ProblemSize LocalProblem where
+  problemSize = lsize
+
+instance ProblemSize GlobalProblem where
+  problemSize = fromIntegral . V.length . lowerBounds
+
+instance ProblemSize AugLagProblem where
+  problemSize (AugLagProblem _ _ alg) = case alg of
+    AUGLAG_LOCAL lp _ _  -> problemSize lp
+    AUGLAG_EQ_LOCAL lp   -> problemSize lp
+    AUGLAG_GLOBAL gp _ _ -> problemSize gp
+    AUGLAG_EQ_GLOBAL gp  -> problemSize gp
 
 
-    go 0 !alphaLo _ _ = pure alphaLo
-    go it !alphaLo !alphaHi alphaRec 
-      | alphaLo > alphaHi  = go it alphaHi alphaLo alphaRec
-      | alphaLo == alphaHi = pure alphaLo
-      | otherwise          = do
-        phiLo  <- getPhi alphaLo
-        phiLo' <- getPhi' alphaLo
-        phiHi  <- getPhi alphaHi
-        phiRec <- getPhi alphaRec
-        let alpha_dflt  = alphaLo + 0.5 * (alphaHi - alphaLo)
-            alpha_cubic = cubicMin alphaLo phiLo phiLo' alphaHi phiHi alphaRec phiRec
-            alpha_quad  = quadMin alphaLo phiLo phiLo' alphaHi phiHi
-            delta       = alphaHi - alphaLo
-            cchk a      = it < nIter && (a > alphaHi - 0.2 * delta || a < alphaLo + 0.2 * delta)
-            qchk a      = a > alphaHi - 0.1 * delta || a < alphaLo + 0.1 * delta
-            alpha_i     = alpha_dflt -- getAlpha (getAlpha alpha_dflt alpha_quad qchk) alpha_cubic cchk
-        (phi_i, phi_i') <- lift $ phi alpha_i
-        modify (M.insert alpha_i (LSData alpha_i phi_i phi_i'))
-        if | wolfe alpha_i phi_i || phi_i >= phiLo -> go (it-1) alphaLo alpha_i alphaHi
-           | curvature phi_i'                      -> pure alpha_i
-           | phi_i' * (alphaHi - alphaLo) >= 0     -> go (it-1) alpha_i alphaLo alphaHi
-           | otherwise                             -> go (it-1) alpha_i alphaHi alphaLo
-{-# INLINE zoom #-}
+-- | __IMPORTANT NOTE__
+--
+-- For augmented lagrangian problems, you, the user, are responsible
+-- for providing the appropriate type of constraint.  If the
+-- subsidiary problem requires an `ObjectiveD`, then you should
+-- provide constraint functions with derivatives.  If the subsidiary
+-- problem requires an `Objective`, you should provide constraint
+-- functions without derivatives.  If you don't do this, you may get a
+-- runtime error.
+data AugLagProblem = AugLagProblem
+  { alEquality :: EqualityConstraints   -- ^ Possibly empty set of
+                                        -- equality constraints
+  , alEqualityD :: EqualityConstraintsD -- ^ Possibly empty set of
+                                        -- equality constraints with
+                                        -- derivatives
+  , alalgorithm :: AugLagAlgorithm      -- ^ Algorithm specification.
+  }
 
+-- | The Augmented Lagrangian solvers allow you to enforce nonlinear
+-- constraints while using local or global algorithms that don't
+-- natively support them.  The subsidiary problem is used to do the
+-- minimization, but the @AUGLAG@ methods modify the objective to
+-- enforce the constraints.  Please see
+-- <http://ab-initio.mit.edu/wiki/index.php/NLopt_Algorithms the NLOPT algorithm manual>
+-- for more details on how the methods work and how they relate to one another.
+--
+-- See the documentation for 'AugLagProblem' for an important note
+-- about the constraint functions.
+data AugLagAlgorithm
+    -- | AUGmented LAGrangian with a local subsidiary method
+  = AUGLAG_LOCAL LocalProblem InequalityConstraints InequalityConstraintsD
+    -- | AUGmented LAGrangian with a local subsidiary method and with
+    -- penalty functions only for equality constraints
+  | AUGLAG_EQ_LOCAL LocalProblem
+    -- | AUGmented LAGrangian with a global subsidiary method
+  | AUGLAG_GLOBAL GlobalProblem InequalityConstraints InequalityConstraintsD
+    -- | AUGmented LAGrangian with a global subsidiary method and with
+    -- penalty functions only for equality constraints.
+  | AUGLAG_EQ_GLOBAL GlobalProblem
 
-cubicMin :: Double -> Double -> Double -> Double -> Double -> Double -> Double -> Maybe Double
-cubicMin a fa fa' b fb c fc
-  | a' == 0 || isNaN cubic || isInfinite cubic = Nothing
-  | otherwise   = Just cubic
+algorithmEnumOfAugLag :: AugLagAlgorithm -> N.Algorithm
+algorithmEnumOfAugLag (AUGLAG_LOCAL _ _ _) = N.AUGLAG
+algorithmEnumOfAugLag (AUGLAG_EQ_LOCAL _) = N.AUGLAG_EQ
+algorithmEnumOfAugLag (AUGLAG_GLOBAL _ _ _) = N.AUGLAG
+algorithmEnumOfAugLag (AUGLAG_EQ_GLOBAL _) = N.AUGLAG_EQ
+
+-- | This structure is returned in the event of a successful
+-- optimization.
+data Solution = Solution
+  { solutionCost :: Double          -- ^ The objective function value
+                                    -- at the minimum
+  , solutionParams :: Vector Double -- ^ The parameter vector which
+                                    -- minimizes the objective
+  , solutionResult :: N.Result      -- ^ Why the optimizer stopped
+  } deriving (Eq, Show, Read)
+
+applyAugLagAlgorithm :: N.Opt -> AugLagAlgorithm -> IO ()
+applyAugLagAlgorithm opt alg = go alg
   where
-    cubic  = a + (sqrt radical - b') / (3 * a')
-    deltaB = b - a
-    deltaC = c - a
-    denom  = (deltaBC2 * deltaB) * (deltaB - deltaC)
-    deltaBC = deltaC * deltaB
-    deltaBC2 = deltaBC * deltaC
-    a' = ((fb - fa - fa' * deltaB) * deltaC * deltaC - (fc - fa - fa' * deltaC) * deltaB * deltaB) / denom
-    b' = -((fb - fa - fa' * deltaB) * deltaC * deltaC * deltaC + (fc - fa - fa' * deltaC) * deltaB * deltaB * deltaB) / denom
-    radical = b' ^ (2 :: Int) - 3 * a' * fa'
-{-# INLINE cubicMin #-}
+    ic = traverse_ (tryTo . applyConstraint opt)
+    icd = traverse_ (tryTo . applyConstraint opt)
+    -- AUGLAG won't work at all if you don't pass it the same
+    -- objective as the subproblem -- here we pull out the subproblem
+    -- objectives from the algorithm spec and set the same objective
+    -- function so the user can't mess it up.
+    local lp = tryTo $ do
+      localopt <- setupLocalProblem lp
+      applyLocalObjective opt (lalgorithm lp)
+      N.set_local_optimizer opt localopt
+    global gp = do
+      tryTo $ setupGlobalProblem gp >>= N.set_local_optimizer opt
+      applyGlobalObjective opt (galgorithm gp)
 
-quadMin :: Double -> Double -> Double -> Double -> Double -> Maybe Double
-quadMin a fa fa' b fb
-  | b' == 0 || isNaN quad || isInfinite quad = Nothing
-  | otherwise                                = Just quad
+    go (AUGLAG_LOCAL lp ineq ineqd)  = local lp *> ic ineq *> icd ineqd
+    go (AUGLAG_EQ_LOCAL lp)          = local lp
+    go (AUGLAG_GLOBAL gp ineq ineqd) = global gp *> ic ineq *> icd ineqd
+    go (AUGLAG_EQ_GLOBAL gp)         = global gp
+
+applyAugLagProblem :: N.Opt -> AugLagProblem -> IO ()
+applyAugLagProblem opt (AugLagProblem eq eqd alg) = do
+  traverse_ (tryTo . applyConstraint opt) eq
+  traverse_ (tryTo . applyConstraint opt) eqd
+  applyAugLagAlgorithm opt alg
+
+minimizeAugLag' :: AugLagProblem -> Vector Double -> IO Solution
+minimizeAugLag' ap@(AugLagProblem _ _ alg) x0 = do
+  opt <- newOpt (algorithmEnumOfAugLag alg) (problemSize ap)
+  applyAugLagProblem opt ap
+  solveProblem opt x0
+
+-- |
+-- == Example program
+--
+-- The following interactive session example enforces the same scalar
+-- constraint as the nonlinear constraint example, but this time it
+-- uses the augmented Lagrangian method to enforce the constraint and
+-- the 'SBPLX' algorithm, which does not support nonlinear constraints
+-- itself, to perform the minimization.  As before, the parameters
+-- must always sum to 1, and the minimizer finds the same constrained
+-- minimum of 22.5 at @(0.5, 0.5)@.
+--
+-- >>> import Numeric.LinearAlgebra ( dot, fromList, toList )
+-- >>> let objf x = x `dot` x + 22
+-- >>> let stop = ObjectiveRelativeTolerance 1e-9 :| []
+-- >>> let algorithm = SBPLX objf [] Nothing
+-- >>> let subproblem = LocalProblem 2 stop algorithm
+-- >>> let x0 = fromList [5, 10]
+-- >>> minimizeLocal subproblem x0
+-- Right (Solution {solutionCost = 22.0, solutionParams = [0.0,0.0], solutionResult = FTOL_REACHED})
+-- >>>          -- define constraint function:
+-- >>> let constraintf x = sum (toList x) - 1.0
+-- >>>          -- define constraint object to pass to the algorithm:
+-- >>> let constraint = EqualityConstraint (Scalar constraintf) 1e-6
+-- >>> let problem = AugLagProblem [constraint] [] (AUGLAG_EQ_LOCAL subproblem)
+-- >>> minimizeAugLag problem x0
+-- Right (Solution {solutionCost = 22.500000015505844, solutionParams = [0.5000880506776678,0.4999119493223323], solutionResult = FTOL_REACHED})
+
+minimizeAugLag :: AugLagProblem -> Vector Double -> Either N.Result Solution
+minimizeAugLag prob x0 =
+  unsafePerformIO $ (Right <$> minimizeAugLag' prob x0) `Ex.catch` handler
   where
-    quad   = a - fa' / (2 * b')
-    deltaB = b - a
-    b' = (fb - fa - fa' * deltaB) / (deltaB ^ (2 :: Int))
-{-# INLINE quadMin #-}
-
+    handler :: NloptException -> IO (Either N.Result a)
+    handler (NloptException retcode) = return $ Left retcode

@@ -10,6 +10,7 @@ module Algorithm.SRTree.Likelihoods
   , nll
   , predict
   , gradNLL
+  , gradNLLNonUnique
   , fisherNLL
   , getSErr
   , hessianNLL
@@ -93,7 +94,7 @@ nll Bernoulli _ xss ys tree theta
 
 nll Poisson _ xss ys tree theta 
   | notValid ys = error "For Poisson distribution the output must be non-negative."
-  | M.any isNaN yhat = error $ "NaN predictions " <> show theta
+  -- | M.any isNaN yhat = error $ "NaN predictions " <> show theta
   | otherwise   = negate . M.sum $ ys' * yhat - ys' * log ys' - exp yhat
   where
     ys'      = delay ys
@@ -142,21 +143,52 @@ gradNLL Bernoulli _ xss (delay -> ys) tree theta
 
 gradNLL Poisson _ xss (delay -> ys) tree theta
   | M.any (<0) ys    = error "For Poisson distribution the output must be non-negative."
-  | M.any isNaN grad = error $ "NaN gradient " <> show grad
+ -- | M.any isNaN grad = error $ "NaN gradient " <> show grad
   | otherwise        = (nll' Poisson 1.0 yhat ys, delay grad)
   where
     (yhat, grad) = reverseModeUnique xss theta ys exp tree
     --err          = exp yhat - ys
 
+-- | Gradient of the negative log-likelihood
+gradNLLNonUnique :: Distribution -> Maybe Double -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (Double, SRVector)
+gradNLLNonUnique Gaussian msErr xss ys tree theta =
+  (nll' Gaussian sErr yhat ys', delay grad ./ (sErr * sErr))
+  where
+    (Sz m)       = M.size ys
+    (Sz p)       = M.size theta
+    ys'          = delay ys
+    (yhat, grad) = forwardMode xss theta err tree
+    err          = predict Gaussian tree theta xss - ys'
+    ssr          = sse xss ys tree theta
+    est          = sqrt $ ssr / fromIntegral (m - p)
+    sErr         = getSErr Gaussian est msErr
+
+gradNLLNonUnique Bernoulli _ xss (delay -> ys) tree theta
+  | M.any (\x -> x /= 0 && x /= 1) ys = error "For Bernoulli distribution the output must be either 0 or 1."
+  | otherwise                         = (nll' Bernoulli 1.0 yhat ys, delay grad)
+  where
+    (yhat, grad) = forwardMode xss theta err tree
+    grad'        = M.map nanTo0 grad
+    err          = predict Bernoulli tree theta xss - delay ys
+    nanTo0 x     = if isNaN x then 0 else x
+
+gradNLLNonUnique Poisson _ xss (delay -> ys) tree theta
+  | M.any (<0) ys    = error "For Poisson distribution the output must be non-negative."
+  -- | M.any isNaN grad = error $ "NaN gradient " <> show grad
+  | otherwise        = (nll' Poisson 1.0 yhat ys, delay grad)
+  where
+    (yhat, grad) = forwardMode xss theta err tree
+    err          = predict Poisson tree theta xss - delay ys
+
 -- | Fisher information of negative log-likelihood
 fisherNLL :: Distribution -> Maybe Double -> SRMatrix -> PVector -> Fix SRTree -> PVector -> SRVector
-fisherNLL dist msErr xss ys tree theta = makeArray cmp (Sz p) build 
+fisherNLL dist msErr xss ys tree theta = makeArray cmp (Sz p) build
   where
-    build ix = let dtdix = deriveByParam ix t'
+    build ix = let dtdix   = deriveByParam ix t'
                    d2tdix2 = deriveByParam ix dtdix 
                    f'      = eval dtdix 
                    f''     = eval d2tdix2 
-                in (/sErr^2) . M.sum $ phi' * f'^2 - res * f'' 
+               in (/sErr^2) . M.sum $ phi' * f'^2 - res * f''
     cmp    = getComp xss 
     (Sz m) = M.size ys
     (Sz p) = M.size theta
@@ -169,8 +201,8 @@ fisherNLL dist msErr xss ys tree theta = makeArray cmp (Sz p) build
     res    = delay ys - phi
 
     (phi, phi') = case dist of
-                    Gaussian  -> (yhat, 1)
-                    Bernoulli -> (logistic yhat, phi*(1 - phi))
+                    Gaussian  -> (yhat, M.replicate M.Seq (Sz m) 1)
+                    Bernoulli -> (logistic yhat, phi*(M.replicate M.Seq (Sz m) 1 - phi))
                     Poisson   -> (exp yhat, phi)
 
 -- | Hessian of negative log-likelihood
@@ -190,7 +222,7 @@ hessianNLL dist msErr xss ys tree theta = makeArray cmp (Sz (p :. p)) build
     cmp    = getComp xss
     (Sz m) = M.size ys
     (Sz p) = M.size theta
-    t'     = relabelParams tree -- $ floatConstsToParam tree
+    t'     = tree -- relabelParams tree -- $ floatConstsToParam tree
     eval   = evalTree xss theta
     ssr    = sse xss ys tree theta
     sErr   = getSErr dist est msErr

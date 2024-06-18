@@ -34,14 +34,22 @@ dependencies:
 - zlib 
 - bytestring >= 0.11 && < 0.12
 - nlopt-haskell 
+- statistics 
+- attoparsec
+- attoparsec-expr
+- transformers
+- deriving-compat
+- text
+- graphviz
+- ieee
 
 library:
   source-dirs: src
 
 executables:
-  srtree-exe:
+  tinygp:
     main:                Main.hs
-    source-dirs:         app
+    source-dirs:         tinygp
     ghc-options:
     - -threaded
     - -rtsopts
@@ -50,6 +58,20 @@ executables:
     - -optc-O3
     dependencies:
     - srtree
+  srtools:
+    main:                Main.hs
+    source-dirs:         srtools
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -O2
+    - -optc-O3
+    dependencies:
+    - srtree
+    - bytestring >= 0.11 && < 0.12
+    - optparse-applicative >= 0.17 && < 0.19
+    - normaldistribution
 
 tests:
   srtree-test:

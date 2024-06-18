@@ -27,58 +27,137 @@ source-repository head
 
 library
   exposed-modules:
+      Algorithm.Massiv.Utils
       Algorithm.SRTree.AD
+      Algorithm.SRTree.ConfidenceIntervals
       Algorithm.SRTree.Likelihoods
-      Algorithm.SRTree.NLOPT
+      Algorithm.SRTree.ModelSelection
       Algorithm.SRTree.NonlinearOpt
       Algorithm.SRTree.Opt
+      Data.Equality.Analysis
+      Data.Equality.Analysis.Monadic
+      Data.Equality.Extraction
+      Data.Equality.Graph
+      Data.Equality.Graph.Classes
+      Data.Equality.Graph.Classes.Id
+      Data.Equality.Graph.Dot
+      Data.Equality.Graph.Internal
+      Data.Equality.Graph.Lens
+      Data.Equality.Graph.Monad
+      Data.Equality.Graph.Nodes
+      Data.Equality.Graph.ReprUnionFind
+      Data.Equality.Language
+      Data.Equality.Matching
+      Data.Equality.Matching.Database
+      Data.Equality.Matching.Pattern
+      Data.Equality.Saturation
+      Data.Equality.Saturation.Rewrites
+      Data.Equality.Saturation.Scheduler
+      Data.Equality.Utils
+      Data.Equality.Utils.IntToIntMap
+      Data.Equality.Utils.SizedList
       Data.SRTree
       Data.SRTree.Datasets
       Data.SRTree.Derivative
+      Data.SRTree.EqSat
       Data.SRTree.Eval
       Data.SRTree.Internal
       Data.SRTree.Print
       Data.SRTree.Random
       Data.SRTree.Recursion
-      GP
+      Text.ParseSR
+      Text.ParseSR.IO
   other-modules:
       Paths_srtree
   hs-source-dirs:
       src
   build-depends:
-      base >=4.16 && <5
+      attoparsec
+    , attoparsec-expr
+    , base >=4.16 && <5
     , bytestring ==0.11.*
     , containers ==0.6.*
+    , deriving-compat
     , dlist ==1.0.*
     , filepath
+    , graphviz
+    , ieee
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , nlopt-haskell
     , random ==1.2.*
     , split
+    , statistics
+    , text
+    , transformers
     , vector >=0.12 && <0.14
     , zlib
   default-language: Haskell2010
 
-executable srtree-exe
+executable srtools
   main-is: Main.hs
   other-modules:
+      Args
+      IO
+      Report
       Paths_srtree
   hs-source-dirs:
-      app
+      srtools
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2 -optc-O3
   build-depends:
-      base >=4.16 && <5
+      attoparsec
+    , attoparsec-expr
+    , base >=4.16 && <5
     , bytestring ==0.11.*
     , containers ==0.6.*
+    , deriving-compat
     , dlist ==1.0.*
     , filepath
+    , graphviz
+    , ieee
+    , massiv >=1.0.4.0 && <1.1
+    , mtl >=2.2 && <2.4
+    , nlopt-haskell
+    , normaldistribution
+    , optparse-applicative >=0.17 && <0.19
+    , random ==1.2.*
+    , split
+    , srtree
+    , statistics
+    , text
+    , transformers
+    , vector >=0.12 && <0.14
+    , zlib
+  default-language: Haskell2010
+
+executable tinygp
+  main-is: Main.hs
+  other-modules:
+      GP
+      Paths_srtree
+  hs-source-dirs:
+      tinygp
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2 -optc-O3
+  build-depends:
+      attoparsec
+    , attoparsec-expr
+    , base >=4.16 && <5
+    , bytestring ==0.11.*
+    , containers ==0.6.*
+    , deriving-compat
+    , dlist ==1.0.*
+    , filepath
+    , graphviz
+    , ieee
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , nlopt-haskell
     , random ==1.2.*
     , split
     , srtree
+    , statistics
+    , text
+    , transformers
     , vector >=0.12 && <0.14
     , zlib
   default-language: Haskell2010
@@ -94,17 +173,25 @@ test-suite srtree-test
   build-depends:
       HUnit
     , ad
+    , attoparsec
+    , attoparsec-expr
     , base >=4.16 && <5
     , bytestring ==0.11.*
     , containers ==0.6.*
+    , deriving-compat
     , dlist ==1.0.*
     , filepath
+    , graphviz
+    , ieee
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , nlopt-haskell
     , random ==1.2.*
     , split
     , srtree
+    , statistics
+    , text
+    , transformers
     , vector >=0.12 && <0.14
     , zlib
   default-language: Haskell2010

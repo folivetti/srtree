@@ -131,7 +131,7 @@ fitness x y ind =
     let 
         tree = relabelParams $ _tree ind
         thetaOrig = _params ind
-        (theta, fit, it) = minimizeNLL Gaussian (Just 1) 10 x y tree thetaOrig
+        (theta, fit) = minimizeNLL Gaussian (Just 1) 10 x y tree thetaOrig
         --theta = _params ind
         fit' = negate $ mse x y tree thetaOrig -- nll Gaussian (Just 1) x y (relabelParams $ _tree ind) (_params ind)
        -- (fit, g) = gradNLL Gaussian Nothing x y (_tree ind) (_params ind)

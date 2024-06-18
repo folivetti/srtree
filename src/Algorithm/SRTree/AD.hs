@@ -21,6 +21,7 @@ module Algorithm.SRTree.AD
          ( forwardMode
          , forwardModeUnique
          , reverseModeUnique
+         , forwardModeUniqueJac
          ) where
 
 import Data.SRTree.Internal
@@ -37,11 +38,12 @@ import qualified Data.Vector as V
 import qualified Data.DList as DL
 import Data.Bifunctor (bimap, first, second)
 import Control.Monad ( forM_ )
-import Debug.Trace ( traceShow ) 
+import Debug.Trace ( traceShow, trace )
 import GHC.IO (unsafePerformIO)
 import Control.Monad.ST
 import Algorithm.SRTree.NonlinearOpt
 
+import Data.SRTree.Print ( showExpr )
 
 applyUni f (Left t)  =
     Left $ M.map (evalFun f) t
@@ -171,7 +173,12 @@ data TupleF a b = Single a | T a b | Branch a b b deriving Functor -- hi, I'm a 
 type Tuple a = Fix (TupleF a)
 
 -- | Same as above, but using reverse mode, that is much faster.
-reverseModeUnique :: SRMatrix -> PVector -> SRVector -> (SRVector -> SRVector) -> Fix SRTree -> (Array D Ix1 Double, Array S Ix1 Double)
+reverseModeUnique :: SRMatrix
+                  -> PVector
+                  -> SRVector
+                  -> (SRVector -> SRVector)
+                  -> Fix SRTree
+                  -> (Array D Ix1 Double, Array S Ix1 Double)
 reverseModeUnique xss theta ys f t = unsafePerformIO $
                                           do jacob <- M.newMArray (Sz p) 0
                                              let !_ = accu reverse (combine jacob) t ((Right 1), fwdMode)
@@ -248,3 +255,26 @@ reverseModeUnique xss theta ys f t = unsafePerformIO $
                                  UMA.unsafeRead j ix
       combine j (Uni f gs) s = gs
       combine j (Bin op l r) s = l+r
+
+
+-- | The function `forwardModeUnique` calculates the numerical gradient of the tree and evaluates the tree at the same time. It assumes that each parameter has a unique occurrence in the expression. This should be significantly faster than `forwardMode`.
+forwardModeUniqueJac  :: SRMatrix -> PVector -> Fix SRTree -> [PVector]
+forwardModeUniqueJac xss theta = snd . second (map (M.computeAs M.S) . DL.toList) . cata alg
+  where
+      (Sz n) = M.size theta
+      one    = replicateAs xss 1
+
+      alg (Var ix)        = (xss <! ix, DL.empty)
+      alg (Param ix)      = (replicateAs xss $ theta ! ix, DL.singleton one)
+      alg (Const c)       = (replicateAs xss c, DL.empty)
+      alg (Uni f (v, gs)) = let v' = evalFun f v
+                                dv = derivative f v
+                             in (v', DL.map (*dv) gs)
+      alg (Bin Add (v1, l) (v2, r)) = (v1+v2, DL.append l r)
+      alg (Bin Sub (v1, l) (v2, r)) = (v1-v2, DL.append l (DL.map negate r))
+      alg (Bin Mul (v1, l) (v2, r)) = (v1*v2, DL.append (DL.map (*v2) l) (DL.map (*v1) r))
+      alg (Bin Div (v1, l) (v2, r)) = let dv = ((-v1)/(v2*v2))
+                                       in (v1/v2, DL.append (DL.map (/v2) l) (DL.map (*dv) r))
+      alg (Bin Power (v1, l) (v2, r)) = let dv1 = v1 ** (v2 - one)
+                                            dv2 = v1 * log v1
+                                         in (v1 ** v2, DL.map (*dv1) (DL.append (DL.map (*v2) l) (DL.map (*dv2) r)))
