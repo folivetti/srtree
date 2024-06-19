@@ -136,10 +136,10 @@ invChol arr = do l <- cholesky arr -- lower diag
 lu :: (PrimMonad m, MonadThrow m, MonadIO m) => SRMatrix -> m (SRMatrix, SRMatrix)
 lu mtx = do
     let (Sz2 m n) = size mtx
-    initU <- thawS $ computeAs S $ identityMatrix (Sz m)
-    initL <- thawS $ A.replicate Seq (Sz2 m n) 0
+    u <- thawS $ computeAs S $ identityMatrix (Sz m)
+    l <- thawS $ A.replicate Seq (Sz2 m n) 0
 
-    let buildLVal !i !j !l !u = do
+    let buildLVal !i !j = do
             let go !k !s
                     | k == j    = pure s
                     | otherwise = do lik <- UMA.unsafeRead l (i :. k)
@@ -147,12 +147,11 @@ lu mtx = do
                                      go (k+1) ( s + (lik * ukj) )
             s' <- go 0 0
             UMA.unsafeWrite l (i :. j) ((mtx ! (i :. j)) - s')
-            pure l
-        buildL !i !j !l !u
-            | i == n = pure l
-            | otherwise = do l' <- buildLVal i j l u
-                             buildL (i+1) j l' u
-        buildUVal !i !j !l !u = do
+            -- pure l
+        buildL !i !j
+            = when (i /= n) $ do buildLVal i j
+                                 buildL (i+1) j
+        buildUVal !i !j = do
             let go !k !s
                     | k == j = pure s
                     | otherwise = do ljk <- UMA.unsafeRead l (j :. k)
@@ -162,60 +161,56 @@ lu mtx = do
             s' <- go 0 0
             ljj <- UMA.unsafeRead l (j :. j)
             UMA.unsafeWrite u (j :. i) (((mtx ! (j :. i)) - s') / (ljj))
-            pure u
+            -- pure u
 
-        buildU !i !j !l !u
-            | i == n = pure u
-            | otherwise = do u' <- buildUVal i j l u
-                             buildU (i+1) j l u'
-        buildLU !j !l !u
-            | j == n = pure (l, u)
-            | otherwise = do
-                    l' <- buildL j j l u
-                    u' <- buildU j j l' u
-                    buildLU (j+1) l' u'
-    (l', u') <- buildLU 0 initL initU
-    finalL <- freezeS l'
-    finalU <- freezeS u'
+        buildU !i !j
+            = when (i /= n) $ do buildUVal i j
+                                 buildU (i+1) j
+        buildLU !j
+            = when (j /= n) $
+                 do buildL j j
+                    buildU j j
+                    buildLU (j+1)
+    buildLU 0
+    finalL <- freezeS l
+    finalU <- freezeS u
     pure (finalL, finalU)
 
 forwardSub :: (PrimMonad m, MonadThrow m, MonadIO m) => SRMatrix -> PVector -> m PVector
 forwardSub a b = do
     let (Sz m) = size b
-    initX <- thawS $ A.replicate Seq (Sz1 m) 0
-    let coeff !i !j !s !x
+    x <- thawS $ A.replicate Seq (Sz1 m) 0
+    let coeff !i !j !s
             | j == i = pure s
             | otherwise = do let aij = a ! (i :. j)
                              xj  <- UMA.unsafeRead x j
-                             coeff i (j+1) (s + aij * xj) x
-        go !i !x
-          | i == m = pure x
-          | otherwise = do let bi = b ! i
-                               aii = a ! (i :. i)
-                           c <- coeff i 0 0 x
-                           UMA.unsafeWrite x i ((bi - c)/aii)
-                           go (i+1) x
-    v <- go 0 initX
-    freezeS v
+                             coeff i (j+1) (s + aij * xj)
+        go !i = when (i/= m) $
+                   do let bi = b ! i
+                          aii = a ! (i :. i)
+                      c <- coeff i 0 0
+                      UMA.unsafeWrite x i ((bi - c)/aii)
+                      go (i+1)
+    go 0
+    freezeS x
 
 backwardSub :: (PrimMonad m, MonadThrow m, MonadIO m) => SRMatrix -> PVector -> m PVector
 backwardSub a b = do
     let (Sz m) = size b
-    initX <- thawS $ A.replicate Seq (Sz1 m) 0
-    let coeff !i !j !s !x
+    x <- thawS $ A.replicate Seq (Sz1 m) 0
+    let coeff !i !j !s
             | j == m = pure s
             | otherwise = do let aij = a ! (i :. j)
                              xj  <- UMA.unsafeRead x j
-                             coeff i (j+1) (s + aij * xj) x
-        go !i !x
-          | i < 0     = pure x
-          | otherwise = do let bi  = b ! i
+                             coeff i (j+1) (s + aij * xj)
+        go !i = when (i >= 0) $
+                        do let bi  = b ! i
                                aii = a ! (i :. i)
-                           c <- coeff i (i+1) 0 x
+                           c <- coeff i (i+1) 0
                            UMA.unsafeWrite x i ((bi - c)/aii)
-                           go (i-1) x
-    v <- go (m-1) initX
-    freezeS v
+                           go (i-1)
+    go (m-1)
+    freezeS x
 
 luSolve :: (PrimMonad m, MonadThrow m, MonadIO m) => SRMatrix -> PVector -> m PVector
 luSolve a b = do (l, u) <- lu a
