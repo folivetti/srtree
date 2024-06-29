@@ -42,6 +42,7 @@ dependencies:
 - text
 - graphviz
 - ieee
+- lens 
 
 library:
   source-dirs: src

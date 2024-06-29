@@ -192,9 +192,6 @@ crossover :: HyperParams -> Individual -> Individual -> Rng Individual
 crossover hp ind1 ind2 = pure ind1
 
 evolve :: HyperParams -> FitFun -> V.Vector Individual -> Rng Individual
---evolve hp fitFun pop =  randomIndividual hp fitFun True
-{-# INLINE evolve #-}
-
 evolve hp fitFun pop = do 
     parent1 <- tournament hp pop
     parent2 <- tournament hp pop 
@@ -203,6 +200,7 @@ evolve hp fitFun pop = do
     let p = countParams (_tree child')
     theta' <- M.fromList M.Seq <$> replicateM p (randomRange (-1,1))
     pure $ fitFun child'{_params = theta'}
+{-# INLINE evolve #-}
 
 report :: Int -> V.Vector Individual -> IO ()
 report gen = mapM_ reportOne

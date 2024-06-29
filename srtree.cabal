@@ -60,6 +60,7 @@ library
       Data.SRTree.Datasets
       Data.SRTree.Derivative
       Data.SRTree.EqSat
+      Data.SRTree.EqSat1
       Data.SRTree.Eval
       Data.SRTree.Internal
       Data.SRTree.Print
@@ -82,6 +83,7 @@ library
     , filepath
     , graphviz
     , ieee
+    , lens
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , nlopt-haskell
@@ -115,6 +117,7 @@ executable srtools
     , filepath
     , graphviz
     , ieee
+    , lens
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , nlopt-haskell
@@ -149,6 +152,7 @@ executable tinygp
     , filepath
     , graphviz
     , ieee
+    , lens
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , nlopt-haskell
@@ -183,6 +187,7 @@ test-suite srtree-test
     , filepath
     , graphviz
     , ieee
+    , lens
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , nlopt-haskell
