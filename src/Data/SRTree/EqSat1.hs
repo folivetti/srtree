@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
-
+{-# LANGUAGE TupleSections #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.EqSat1
@@ -16,6 +16,7 @@
 module Data.SRTree.EqSat1 where
 
 import Data.SRTree
+import Data.SRTree.Recursion ( cataM )
 import Control.Monad
 import Control.Monad.State
 import Control.Lens ( (+~), (-~), makeLenses, (^.), (.~), (&), element, over )
@@ -24,6 +25,7 @@ import Data.Set ( Set )
 import Data.Map ( Map )
 import qualified Data.Set as Set
 import qualified Data.Map as Map
+import System.Random
 
 type EClassId   = Int -- DO NOT CHANGE THIS without changing the next line! This will break the use of IntMap for speed
 type ClassIdMap = IntMap
@@ -43,6 +45,10 @@ data EClass = EClass { _eClassId :: Int                 -- e-class id (maybe we 
                      , _eNodes :: Set ENode             -- set of e-nodes inside this e-class
                      , _parents :: [(EClassId, ENode)]  -- parents (e-class, e-node)'s
                      , _info :: EData                   -- data (tbd)
+                     -- , _height :: Int
+                     -- , _cost :: Int
+                     -- , _data :: NoData | ParamIx Int | ConstVal Ratio
+                     -- , _properties :: Set Property  -- Property = Positive | Negative
                      }
 
 makeLenses ''EGraph
@@ -56,15 +62,32 @@ canonical eclassId =
       go m ecId
         | m ! ecId == ecId = pure ecId        -- if the e-class id is mapped to itself, it's canonical
         | otherwise        = go m (m ! ecId)  -- otherwise, check the next id in the sequence
+{-# INLINE canonical #-}
 
 canonize :: ENode -> EGraphST ENode
 canonize = sequence' . fmap canonical  -- applies canonical to the children
-  where
-    sequence' (Bin f ml mr) = Bin f <$> ml <*> mr
-    sequence' (Uni f mt)    = Uni f <$> mt
-    sequence' (Var ix)      = pure (Var ix)
-    sequence' (Param ix)    = pure (Param ix)
-    sequence' (Const x)     = pure (Const x)
+{-# INLINE canonize #-}
+
+sequence' :: Applicative f => SRTree (f a) -> f (SRTree a)
+sequence' (Bin f ml mr) = Bin f <$> ml <*> mr
+sequence' (Uni f mt)    = Uni f <$> mt
+sequence' (Var ix)      = pure (Var ix)
+sequence' (Param ix)    = pure (Param ix)
+sequence' (Const x)     = pure (Const x)
+{-# INLINE sequence' #-}
+
+children :: SRTree a -> [a]
+children (Bin _ l r) = [l, r]
+children (Uni _ t)   = [t]
+children _           = []
+{-# INLINE children #-}
+
+getEClass :: EClassId -> EGraphST EClass
+getEClass c = gets ((! c) . _eClass)
+{-# INLINE getEClass #-}
+
+emptyGraph :: EGraph
+emptyGraph = EGraph empty Map.empty empty [] [] 0
 
 add :: ENode -> EGraphST EClassId
 add enode =
@@ -83,13 +106,9 @@ add enode =
                 modify' $ over eClass (insert curId newClass)              -- insert new e-class into e-graph
                 pure curId
   where
-    children (Bin _ l r) = [l, r]
-    children (Uni _ t)   = [t]
-    children _           = []
-
     addParents :: EClassId -> ENode -> EClassId -> EGraphST ()
     addParents cId node c =
-      do ec <- gets ((! c) . _eClass )
+      do ec <- getEClass c
          let ec' = ec{ _parents = (cId, node):_parents ec }
          modify' $ over eClass (insert c ec')
 
@@ -125,10 +144,6 @@ repairAnalysis ecId enode =
        do modify' $ over analysis (_parents eclass <>)
           modify' $ over eClass (insert ecId' eclass')
           modifyEClass ecId'
-
-getEClass :: EClassId -> EGraphST EClass
-getEClass c = gets ((! c) . _eClass)
-{-# INLINE getEClass #-}
 
 merge :: EClassId -> EClassId -> EGraphST EClassId
 merge c1 c2 =
@@ -177,3 +192,41 @@ joinData d1 d2 = ()
 
 makeAnalysis :: ENode -> EGraphST EData
 makeAnalysis enode = pure ()
+
+fromTree :: Fix SRTree -> (EClassId, EGraph)
+fromTree tree = cataM sequence' add tree `runState` emptyGraph
+
+fromTrees :: [Fix SRTree] -> (EClassId, EGraph)
+fromTrees = Prelude.foldr (\t (v, eg) -> fromTreeWith eg t) (0, emptyGraph)
+
+fromTreeWith :: EGraph -> Fix SRTree -> (EClassId, EGraph)
+fromTreeWith eg tree = cataM sequence' add tree `runState` eg
+
+findRootClasses :: EGraph -> [EClassId]
+findRootClasses = Prelude.map fst . Prelude.filter isParent . toList . _eClass
+  where
+    isParent (k, v) = Prelude.null (_parents v) || fst (head (_parents v)) == k
+
+getExpressionFrom :: EGraph -> EClassId -> Fix SRTree
+getExpressionFrom eg eId = case head (Set.toList nodes) of
+                                Bin op l r -> Fix $ Bin op (getExpressionFrom eg l) (getExpressionFrom eg r)
+                                Uni f t    -> Fix $ Uni f (getExpressionFrom eg t)
+                                Var ix     -> Fix $ Var ix
+                                Const x    -> Fix $ Const x
+                                Param ix   -> Fix $ Param ix
+  where
+    nodes = _eNodes . (! eId) . _eClass $ eg
+
+getRndExpressionFrom :: EGraph -> EClassId -> State StdGen (Fix SRTree)
+getRndExpressionFrom eg eId = do n <- randomFrom nodes
+                                 case n of
+                                  Bin op l r -> Fix <$> (Bin op <$> (getRndExpressionFrom eg l) <*> (getRndExpressionFrom eg r))
+                                  Uni f t    -> Fix . Uni f <$> (getRndExpressionFrom eg t)
+                                  Var ix     -> pure $ Fix $ Var ix
+                                  Const x    -> pure $ Fix $ Const x
+                                  Param ix   -> pure $ Fix $ Param ix
+  where
+    nodes = Set.toList . _eNodes . (! eId) . _eClass $ eg
+    randomRange rng = state (randomR rng)
+    randomFrom xs = do n <- randomRange (0, length xs - 1)
+                       pure $ xs !! n
