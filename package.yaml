@@ -73,6 +73,17 @@ executables:
     - bytestring >= 0.11 && < 0.12
     - optparse-applicative >= 0.17 && < 0.19
     - normaldistribution
+  eqsatrepr:
+    main:                Main.hs
+    source-dirs:         eqsatrepr
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -O2
+    - -optc-O3
+    dependencies:
+    - srtree
 
 tests:
   srtree-test:

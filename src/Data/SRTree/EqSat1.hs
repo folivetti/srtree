@@ -26,6 +26,8 @@ import Data.Map ( Map )
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 import System.Random
+import Data.Ratio
+import Debug.Trace
 
 type EClassId   = Int -- DO NOT CHANGE THIS without changing the next line! This will break the use of IntMap for speed
 type ClassIdMap = IntMap
@@ -39,20 +41,72 @@ data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId -- maps an e-class 
                      , _worklist      :: [(EClassId, ENode)] -- e-nodes and e-class schedule for analysis
                      , _analysis      :: [(EClassId, ENode)] -- e-nodes and e-class that changed data
                      , _nextId        :: Int                 -- next available id
-                     }
+                     } deriving Show
 
 data EClass = EClass { _eClassId :: Int                 -- e-class id (maybe we don't need that here)
                      , _eNodes :: Set ENode             -- set of e-nodes inside this e-class
                      , _parents :: [(EClassId, ENode)]  -- parents (e-class, e-node)'s
-                     , _info :: EData                   -- data (tbd)
-                     -- , _height :: Int
-                     -- , _cost :: Int
-                     -- , _data :: NoData | ParamIx Int | ConstVal Ratio
-                     -- , _properties :: Set Property  -- Property = Positive | Negative
-                     }
+                     , _info :: EClassData              -- data (tbd)
+                     } deriving Show
+
+data Consts   = NotConst | ParamIx Int | ConstVal Double deriving (Show, Eq)
+data Property = Positive | Negative | NonZero deriving (Show, Eq)
+
+data EClassData = EData { _height :: Int
+                        , _cost   :: Int
+                        , _consts :: Consts
+                        , _properties :: Set Property
+                        } deriving (Show, Eq)
 
 makeLenses ''EGraph
 makeLenses ''EClass
+makeLenses ''EClassData
+
+updateConsts :: EGraphST ()
+updateConsts =
+  do roots <- gets findRootClasses
+     traverse go roots
+  where
+    getDataFromNode n =
+      case n of
+        Param ix   -> pure $ ParamIx ix
+        Const x    -> pure $ ConstVal x
+        Var   ix   -> pure $ NotConst
+        Bin op l r ->
+          do l' <- getDataFromClass l
+             r' <- getDataFromClass r
+             case l' of
+               NotConst   -> pure $ NotConst
+               ParamIx ix -> case r' of
+                               ParamIx iy -> pure $ ParamIx ix
+                               _          -> pure $ NotConst
+               ConstVal x  -> case r' of
+                                ConstVal y -> pure $ ConstVal (evalOp op x y)
+                                _          -> pure $ NotConst
+        Uni f t ->
+          do t' <- getDataFromClass t
+             case t' of
+                ParamIx ix -> pure $ ParamIx ix
+                ConstVal x -> pure $ evalFun f x
+                _          -> pure $ Notconst
+
+    getDataFromClass cId =
+      do cl    <- gets ((! cId) . _eClass)
+         let nodes = _eNodes cl
+             info  = _info cl
+         vals  <- Prelude.filter (/=NotConst) <$> forM nodes getDataFromNode
+         let cl' = if null vals
+                     then cl {_info = info{_consts = NotConst}}
+                     else cl {_info = info{_consts = checkConsistency vals}}
+           modify' $ over eClass (insert cId cl')
+    checkConsistency []  = NotConst
+    checkConsistency [x] = x
+    checkConsistency (x:y:xs)
+      | areTheSame x y = checkConsistency (y:xs)
+      | otherwise      = traceShow ("Warning: inconsistent values", x, y) y
+    areTheSame (ConstVal x) (ConstVal y) = abs (x-y) < 1e-9
+    areTheSame (ParamIx _) (ParamIx _) = True
+    areTheSame _ _ = False
 
 canonical :: EClassId -> EGraphST EClassId
 canonical eclassId =
@@ -97,9 +151,9 @@ add enode =
         then gets ((Map.! enode') . _eNodeToEClass)                        -- returns existing e-node
         else do curId <- gets _nextId                                      -- get the next available e-class id
                 modify' $ over nextId (+1)                                 -- update next id
-                modify' $ over canonicalMap (insert curId curId)           -- insert e-class id into canon map
-                modify' $ over eNodeToEClass (Map.insert enode' curId)     -- associate new e-node with id
-                modify' $ over worklist ((curId, enode'):)                 -- add e-node and id into worklist
+                        . over canonicalMap (insert curId curId)           -- insert e-class id into canon map
+                        . over eNodeToEClass (Map.insert enode' curId)     -- associate new e-node with id
+                        . over worklist ((curId, enode'):)                 -- add e-node and id into worklist
                 forM_ (children enode') (addParents curId enode')          -- update the children's parent list
                 info <- makeAnalysis enode'
                 let newClass = EClass curId (Set.singleton enode') [] info -- create e-class
@@ -117,7 +171,7 @@ rebuild =
   do wl <- gets _worklist
      al <- gets _analysis
      modify' $ over worklist (const [])
-     modify' $ over analysis (const [])
+             . over analysis (const [])
      forM_ wl (uncurry repair)
      forM_ al (uncurry repairAnalysis)
 
@@ -142,7 +196,7 @@ repairAnalysis ecId enode =
          eclass' = eclass { _info = newData }
      when ((_info eclass) /= newData) $
        do modify' $ over analysis (_parents eclass <>)
-          modify' $ over eClass (insert ecId' eclass')
+                  . over eClass (insert ecId' eclass')
           modifyEClass ecId'
 
 merge :: EClassId -> EClassId -> EGraphST EClassId
@@ -163,11 +217,10 @@ merge c1 c2 =
                            (_parents ledC <> _parents subC)
                            (joinData (_info ledC) (_info subC))
 
-         modify' $ over eClass (delete sub)                 -- delete sub e-class
-         modify' $ over eClass (insert led newC)            -- replace new leader e-class
-         modify' $ over worklist ((_parents subC) <>)       -- insert parents of sub into worklist
-         when (_info newC /= _info ledC)                    -- if there was change in data,
-           $ modify' $ over analysis ((_parents ledC) <>)   --   insert parents into analysis
+         modify' $ over eClass (insert led newC . delete sub) -- delete sub e-class and replace leader
+                 . over worklist ((_parents subC) <>)         -- insert parents of sub into worklist
+         when (_info newC /= _info ledC)                      -- if there was change in data,
+           $ modify' $ over analysis ((_parents ledC) <>)     --   insert parents into analysis
          when (_info newC /= _info subC)
            $ modify' $ over analysis ((_parents subC) <>)
          modifyEClass led
@@ -187,11 +240,11 @@ modifyEClass :: EClassId -> EGraphST ()
 modifyEClass ecId = pure ()
 
 -- join data from two e-classes
-joinData :: EData -> EData -> EData
-joinData d1 d2 = ()
+joinData :: EClassData -> EClassData -> EClassData
+joinData d1 d2 = d1
 
-makeAnalysis :: ENode -> EGraphST EData
-makeAnalysis enode = pure ()
+makeAnalysis :: ENode -> EGraphST EClassData
+makeAnalysis enode = pure $ EData 0 0 NotConst Set.empty
 
 fromTree :: Fix SRTree -> (EClassId, EGraph)
 fromTree tree = cataM sequence' add tree `runState` emptyGraph
@@ -219,14 +272,41 @@ getExpressionFrom eg eId = case head (Set.toList nodes) of
 
 getRndExpressionFrom :: EGraph -> EClassId -> State StdGen (Fix SRTree)
 getRndExpressionFrom eg eId = do n <- randomFrom nodes
-                                 case n of
-                                  Bin op l r -> Fix <$> (Bin op <$> (getRndExpressionFrom eg l) <*> (getRndExpressionFrom eg r))
-                                  Uni f t    -> Fix . Uni f <$> (getRndExpressionFrom eg t)
-                                  Var ix     -> pure $ Fix $ Var ix
-                                  Const x    -> pure $ Fix $ Const x
-                                  Param ix   -> pure $ Fix $ Param ix
+                                 Fix <$> case n of
+                                            Bin op l r -> Bin op <$> (getRndExpressionFrom eg l) <*> (getRndExpressionFrom eg r)
+                                            Uni f t    -> Uni f <$> (getRndExpressionFrom eg t)
+                                            Var ix     -> pure $ Var ix
+                                            Const x    -> pure $ Const x
+                                            Param ix   -> pure $ Param ix
   where
-    nodes = Set.toList . _eNodes . (! eId) . _eClass $ eg
+    nodes           = Set.toList . _eNodes . (! eId) . _eClass $ eg
     randomRange rng = state (randomR rng)
-    randomFrom xs = do n <- randomRange (0, length xs - 1)
-                       pure $ xs !! n
+    randomFrom xs   = do n <- randomRange (0, length xs - 1)
+                         pure $ xs !! n
+
+calculateHeights :: EGraphST ()
+calculateHeights = do queue   <- gets findRootClasses
+                      classes <- gets (Prelude.map fst . toList . _eClass)
+                      let nClasses = length classes
+                      forM_ classes (setHeight nClasses)
+                      forM_ queue (setHeight 0)
+                      go queue (Set.fromList queue) 1
+  where
+    setHeight x eId =
+      do ec <- getEClass eId
+         let ec' = over (info . height) (const x) ec
+         modify' $ over eClass (insert eId ec')
+
+    setMinHeight x eId =
+      do h <- (_height . _info) <$> getEClass eId
+         setHeight (min h x) eId
+
+    getChildren :: EClassId -> EGraphST [EClassId]
+    getChildren ec = gets (concatMap children . _eNodes . (! ec) . _eClass)
+
+    go [] _    _ = pure ()
+    go qs tabu h =
+      do children <- (Set.\\ tabu) . Set.fromList . concat <$> forM qs getChildren
+         let childrenL = Set.toList children
+         forM_ childrenL (setMinHeight h)
+         go childrenL (Set.union tabu children) (h+1)
