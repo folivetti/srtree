@@ -13,7 +13,8 @@ main = do
         t2 = 3.2 * var 0
         t3 = 3.2 * var 0 / (var 0 + 12.0)
         t4 = var 0 + sin (var 0)
-        (v, eg) = fromTrees [t3,t1,t2,t4]
+        t5 = 1.5 + exp 5.2
+        (v, eg) = fromTrees [t3,t1,t2,t4,t5]
         roots = findRootClasses eg
         ecId = _eNodeToEClass eg Map.! (Var 0)
         eg' = (updateConsts >> calculateHeights) `execState` eg
@@ -24,3 +25,4 @@ main = do
     putStrLn "\nexpressions from each e-class: "
     mapM_ (putStrLn . showExpr . getExpressionFrom eg) (IM.keys $ _eClass eg)
     mapM_ (print . _height . _info) (IM.elems $ _eClass eg')
+    mapM_ (print . _consts . _info) (IM.elems $ _eClass eg')

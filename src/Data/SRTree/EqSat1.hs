@@ -16,6 +16,7 @@
 module Data.SRTree.EqSat1 where
 
 import Data.SRTree
+import Data.SRTree.Eval
 import Data.SRTree.Recursion ( cataM )
 import Control.Monad
 import Control.Monad.State
@@ -62,11 +63,14 @@ makeLenses ''EGraph
 makeLenses ''EClass
 makeLenses ''EClassData
 
+-- | this is ugly af
 updateConsts :: EGraphST ()
 updateConsts =
   do roots <- gets findRootClasses
-     traverse go roots
+     _ <- traverse getDataFromClass roots
+     pure ()
   where
+    getDataFromNode :: ENode -> EGraphST Consts
     getDataFromNode n =
       case n of
         Param ix   -> pure $ ParamIx ix
@@ -87,18 +91,21 @@ updateConsts =
           do t' <- getDataFromClass t
              case t' of
                 ParamIx ix -> pure $ ParamIx ix
-                ConstVal x -> pure $ evalFun f x
-                _          -> pure $ Notconst
+                ConstVal x -> pure $ ConstVal $ evalFun f x
+                _          -> pure $ NotConst
 
+    getDataFromClass :: EClassId -> EGraphST Consts
     getDataFromClass cId =
       do cl    <- gets ((! cId) . _eClass)
-         let nodes = _eNodes cl
+         let nodes = Set.toList $ _eNodes cl
              info  = _info cl
          vals  <- Prelude.filter (/=NotConst) <$> forM nodes getDataFromNode
-         let cl' = if null vals
+         let cl' = if Prelude.null vals
                      then cl {_info = info{_consts = NotConst}}
                      else cl {_info = info{_consts = checkConsistency vals}}
-           modify' $ over eClass (insert cId cl')
+         modify' $ over eClass (insert cId cl')
+         pure $ (_consts . _info) cl'
+
     checkConsistency []  = NotConst
     checkConsistency [x] = x
     checkConsistency (x:y:xs)
