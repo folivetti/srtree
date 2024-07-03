@@ -63,7 +63,6 @@ makeLenses ''EGraph
 makeLenses ''EClass
 makeLenses ''EClassData
 
--- | this is ugly af
 updateConsts :: EGraphST ()
 updateConsts =
   do roots <- gets findRootClasses
@@ -72,27 +71,8 @@ updateConsts =
   where
     getDataFromNode :: ENode -> EGraphST Consts
     getDataFromNode n =
-      case n of
-        Param ix   -> pure $ ParamIx ix
-        Const x    -> pure $ ConstVal x
-        Var   ix   -> pure $ NotConst
-        Bin op l r ->
-          do l' <- getDataFromClass l
-             r' <- getDataFromClass r
-             case l' of
-               NotConst   -> pure $ NotConst
-               ParamIx ix -> case r' of
-                               ParamIx iy -> pure $ ParamIx ix
-                               _          -> pure $ NotConst
-               ConstVal x  -> case r' of
-                                ConstVal y -> pure $ ConstVal (evalOp op x y)
-                                _          -> pure $ NotConst
-        Uni f t ->
-          do t' <- getDataFromClass t
-             case t' of
-                ParamIx ix -> pure $ ParamIx ix
-                ConstVal x -> pure $ ConstVal $ evalFun f x
-                _          -> pure $ NotConst
+      do cs <- traverse getDataFromClass $ children n
+         pure $ evalNode n cs
 
     getDataFromClass :: EClassId -> EGraphST Consts
     getDataFromClass cId =
@@ -106,14 +86,30 @@ updateConsts =
          modify' $ over eClass (insert cId cl')
          pure $ (_consts . _info) cl'
 
-    checkConsistency []  = NotConst
-    checkConsistency [x] = x
-    checkConsistency (x:y:xs)
-      | areTheSame x y = checkConsistency (y:xs)
-      | otherwise      = traceShow ("Warning: inconsistent values", x, y) y
-    areTheSame (ConstVal x) (ConstVal y) = abs (x-y) < 1e-9
-    areTheSame (ParamIx _) (ParamIx _) = True
-    areTheSame _ _ = False
+evalNode :: SRTree EClassId -> [Consts] -> Consts
+evalNode (Param ix) _                          = ParamIx ix
+evalNode (Const x)  _                          = ConstVal x
+evalNode (Var ix)   _                          = NotConst
+evalNode (Uni f t) [ConstVal x]                = ConstVal $ (evalFun f x)
+evalNode (Uni f t) [x]                         = x
+evalNode (Bin op l r) [ConstVal x, ConstVal y] = ConstVal $ evalOp op x y
+evalNode (Bin op l r) [x,y]                    = NotConst
+{-# INLINE evalNode #-}
+
+checkConsistency :: [Consts] -> Consts
+checkConsistency []  = NotConst
+checkConsistency [x] = x
+checkConsistency (x:y:xs)
+  | areTheSame x y = checkConsistency (y:xs)
+  | otherwise      = traceShow ("Warning: inconsistent values", x, y) y
+{-# INLINE checkConsistency #-}
+
+areTheSame :: Consts -> Consts -> Bool
+areTheSame (ConstVal x) (ConstVal y) = abs (x-y) < 1e-9
+areTheSame (ParamIx _) (ParamIx _)   = True
+areTheSame NotConst    NotConst      = True
+areTheSame _           _             = False
+{-# INLINE areTheSame #-}
 
 canonical :: EClassId -> EGraphST EClassId
 canonical eclassId =
