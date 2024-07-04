@@ -17,12 +17,12 @@ main = do
         (v, eg) = fromTrees [t3,t1,t2,t4,t5]
         roots = findRootClasses eg
         ecId = _eNodeToEClass eg Map.! (Var 0)
-        eg' = (updateConsts >> calculateHeights) `execState` eg
+        eg' = (calculateHeights) `execState` eg
     putStr "Parents of x0: "
     print $ _parents $ _eClass eg IM.! ecId    
     putStrLn "\nexpressions from root: "
     mapM_ (putStrLn . showExpr . getExpressionFrom eg) roots
     putStrLn "\nexpressions from each e-class: "
     mapM_ (putStrLn . showExpr . getExpressionFrom eg) (IM.keys $ _eClass eg)
-    mapM_ (print . _height . _info) (IM.elems $ _eClass eg')
+    mapM_ (print . _height) (IM.elems $ _eClass eg')
     mapM_ (print . _consts . _info) (IM.elems $ _eClass eg')

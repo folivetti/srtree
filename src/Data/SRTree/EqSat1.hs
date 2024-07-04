@@ -35,6 +35,8 @@ type ClassIdMap = IntMap
 type ENode      = SRTree EClassId
 type EData      = ()
 type EGraphST a = State EGraph a
+type Cost       = Int
+type CostFun    = SRTree Cost -> Cost
 
 data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId -- maps an e-class id to its canonical form
                      , _eNodeToEClass :: Map ENode EClassId  -- maps an e-node to its e-class id
@@ -45,110 +47,59 @@ data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId -- maps an e-class 
                      } deriving Show
 
 data EClass = EClass { _eClassId :: Int                 -- e-class id (maybe we don't need that here)
-                     , _eNodes :: Set ENode             -- set of e-nodes inside this e-class
-                     , _parents :: [(EClassId, ENode)]  -- parents (e-class, e-node)'s
-                     , _info :: EClassData              -- data (tbd)
+                     , _eNodes   :: Set ENode           -- set of e-nodes inside this e-class
+                     , _parents  :: [(EClassId, ENode)] -- parents (e-class, e-node)'s
+                     , _height   :: Int                 -- height
+                     , _info     :: EClassData          -- data
                      } deriving Show
 
 data Consts   = NotConst | ParamIx Int | ConstVal Double deriving (Show, Eq)
-data Property = Positive | Negative | NonZero deriving (Show, Eq)
+data Property = Positive | Negative | NonZero | Real deriving (Show, Eq)
 
-data EClassData = EData { _height :: Int
-                        , _cost   :: Int
+data EClassData = EData { _cost   :: Cost
                         , _consts :: Consts
-                        , _properties :: Set Property
+                        -- , _properties :: Property
                         } deriving (Show, Eq)
 
 makeLenses ''EGraph
 makeLenses ''EClass
 makeLenses ''EClassData
 
-updateConsts :: EGraphST ()
-updateConsts =
-  do roots <- gets findRootClasses
-     _ <- traverse getDataFromClass roots
-     pure ()
+calculateCost :: CostFun -> SRTree EClassId -> EGraphST Cost
+calculateCost f t =
+  do let cs = children t
+     costs <- traverse (\c -> (_cost . _info) <$> getEClass c) cs
+     pure . f $ replaceChildren costs t
+
+costFun :: CostFun
+costFun (Const _)   = 1
+costFun (Param _)   = 1
+costFun (Var _)     = 1
+costFun (Bin _ l r) = 2 + l + r
+costFun (Uni _ t)   = 3 + t
+
+calculateConsts :: SRTree EClassId -> EGraphST Consts
+calculateConsts t =
+  do let cs = children t
+     consts <- traverse (\c -> (_consts . _info) <$> getEClass c) cs
+     pure . combineConsts $ replaceChildren consts t
+
+combineConsts :: SRTree Consts -> Consts
+combineConsts (Const x)    = ConstVal x
+combineConsts (Param ix)   = ParamIx ix
+combineConsts (Var _)      = NotConst
+combineConsts (Uni f t)    = case t of
+                              ConstVal x -> ConstVal $ evalFun f x
+                              _          -> t
+combineConsts (Bin op l r) = evalOp' l r
   where
-    getDataFromNode :: ENode -> EGraphST Consts
-    getDataFromNode n =
-      do cs <- traverse getDataFromClass $ children n
-         pure $ evalNode n cs
-
-    getDataFromClass :: EClassId -> EGraphST Consts
-    getDataFromClass cId =
-      do cl    <- gets ((! cId) . _eClass)
-         let nodes = Set.toList $ _eNodes cl
-             info  = _info cl
-         vals  <- Prelude.filter (/=NotConst) <$> forM nodes getDataFromNode
-         let cl' = if Prelude.null vals
-                     then cl {_info = info{_consts = NotConst}}
-                     else cl {_info = info{_consts = checkConsistency vals}}
-         modify' $ over eClass (insert cId cl')
-         pure $ (_consts . _info) cl'
-
-evalNode :: SRTree EClassId -> [Consts] -> Consts
-evalNode (Param ix) _                          = ParamIx ix
-evalNode (Const x)  _                          = ConstVal x
-evalNode (Var ix)   _                          = NotConst
-evalNode (Uni f t) [ConstVal x]                = ConstVal $ (evalFun f x)
-evalNode (Uni f t) [x]                         = x
-evalNode (Bin op l r) [ConstVal x, ConstVal y] = ConstVal $ evalOp op x y
-evalNode (Bin op l r) [x,y]                    = NotConst
-{-# INLINE evalNode #-}
-
-checkConsistency :: [Consts] -> Consts
-checkConsistency []  = NotConst
-checkConsistency [x] = x
-checkConsistency (x:y:xs)
-  | areTheSame x y = checkConsistency (y:xs)
-  | otherwise      = traceShow ("Warning: inconsistent values", x, y) y
-{-# INLINE checkConsistency #-}
-
-areTheSame :: Consts -> Consts -> Bool
-areTheSame (ConstVal x) (ConstVal y) = abs (x-y) < 1e-9
-areTheSame (ParamIx _) (ParamIx _)   = True
-areTheSame NotConst    NotConst      = True
-areTheSame _           _             = False
-{-# INLINE areTheSame #-}
-
-canonical :: EClassId -> EGraphST EClassId
-canonical eclassId =
-  do m <- gets _canonicalMap
-     go m eclassId
-    where
-      go m ecId
-        | m ! ecId == ecId = pure ecId        -- if the e-class id is mapped to itself, it's canonical
-        | otherwise        = go m (m ! ecId)  -- otherwise, check the next id in the sequence
-{-# INLINE canonical #-}
-
-canonize :: ENode -> EGraphST ENode
-canonize = sequence' . fmap canonical  -- applies canonical to the children
-{-# INLINE canonize #-}
-
-sequence' :: Applicative f => SRTree (f a) -> f (SRTree a)
-sequence' (Bin f ml mr) = Bin f <$> ml <*> mr
-sequence' (Uni f mt)    = Uni f <$> mt
-sequence' (Var ix)      = pure (Var ix)
-sequence' (Param ix)    = pure (Param ix)
-sequence' (Const x)     = pure (Const x)
-{-# INLINE sequence' #-}
-
-children :: SRTree a -> [a]
-children (Bin _ l r) = [l, r]
-children (Uni _ t)   = [t]
-children _           = []
-{-# INLINE children #-}
-
-getEClass :: EClassId -> EGraphST EClass
-getEClass c = gets ((! c) . _eClass)
-{-# INLINE getEClass #-}
-
-emptyGraph :: EGraph
-emptyGraph = EGraph empty Map.empty empty [] [] 0
+    evalOp' (ParamIx ix) (ParamIx iy) = ParamIx (min ix iy)
+    evalOp' (ConstVal x) (ConstVal y) = ConstVal $ evalOp op x y
+    evalOp' _            _            = NotConst
 
 add :: ENode -> EGraphST EClassId
 add enode =
-  do enode'  <- canonize enode                                            -- canonize e-node
+  do enode'  <- canonize enode                                             -- canonize e-node
      doExist <- gets ((Map.member enode') . _eNodeToEClass)                -- check if canonical e-node exists
      if doExist
         then gets ((Map.! enode') . _eNodeToEClass)                        -- returns existing e-node
@@ -159,7 +110,7 @@ add enode =
                         . over worklist ((curId, enode'):)                 -- add e-node and id into worklist
                 forM_ (children enode') (addParents curId enode')          -- update the children's parent list
                 info <- makeAnalysis enode'
-                let newClass = EClass curId (Set.singleton enode') [] info -- create e-class
+                let newClass = EClass curId (Set.singleton enode') [] 0 info -- create e-class
                 modify' $ over eClass (insert curId newClass)              -- insert new e-class into e-graph
                 pure curId
   where
@@ -218,6 +169,7 @@ merge c1 c2 =
              newC = EClass led
                            (_eNodes ledC `Set.union` _eNodes subC)
                            (_parents ledC <> _parents subC)
+                           (min (_height ledC) (_height subC))
                            (joinData (_info ledC) (_info subC))
 
          modify' $ over eClass (insert led newC . delete sub) -- delete sub e-class and replace leader
@@ -247,7 +199,10 @@ joinData :: EClassData -> EClassData -> EClassData
 joinData d1 d2 = d1
 
 makeAnalysis :: ENode -> EGraphST EClassData
-makeAnalysis enode = pure $ EData 0 0 NotConst Set.empty
+makeAnalysis enode =
+  do consts <- calculateConsts enode
+     cost   <- calculateCost costFun enode
+     pure $ EData cost consts
 
 fromTree :: Fix SRTree -> (EClassId, EGraph)
 fromTree tree = cataM sequence' add tree `runState` emptyGraph
@@ -297,11 +252,11 @@ calculateHeights = do queue   <- gets findRootClasses
   where
     setHeight x eId =
       do ec <- getEClass eId
-         let ec' = over (info . height) (const x) ec
+         let ec' = over height (const x) ec
          modify' $ over eClass (insert eId ec')
 
     setMinHeight x eId =
-      do h <- (_height . _info) <$> getEClass eId
+      do h <- _height <$> getEClass eId
          setHeight (min h x) eId
 
     getChildren :: EClassId -> EGraphST [EClassId]
@@ -313,3 +268,94 @@ calculateHeights = do queue   <- gets findRootClasses
          let childrenL = Set.toList children
          forM_ childrenL (setMinHeight h)
          go childrenL (Set.union tabu children) (h+1)
+
+updateAllConsts :: EGraphST ()
+updateAllConsts =
+  do roots <- gets findRootClasses
+     _ <- traverse getConstsFromClass roots
+     pure ()
+
+getConstsFromNode :: ENode -> EGraphST Consts
+getConstsFromNode n =
+  do cs <- traverse getConstsFromClass $ children n
+     pure $ evalNode n cs
+
+getConstsFromClass :: EClassId -> EGraphST Consts
+getConstsFromClass cId =
+  do cl    <- gets ((! cId) . _eClass)
+     let nodes = Set.toList $ _eNodes cl
+         info  = _info cl
+     vals  <- Prelude.filter (/=NotConst) <$> forM nodes getConstsFromNode
+     let cl' = if Prelude.null vals
+                 then cl {_info = info{_consts = NotConst}}
+                 else cl {_info = info{_consts = checkConsistency vals}}
+     modify' $ over eClass (insert cId cl')
+     pure $ (_consts . _info) cl'
+
+evalNode :: SRTree EClassId -> [Consts] -> Consts
+evalNode (Param ix) _                          = ParamIx ix
+evalNode (Const x)  _                          = ConstVal x
+evalNode (Var ix)   _                          = NotConst
+evalNode (Uni f t) [ConstVal x]                = ConstVal $ (evalFun f x)
+evalNode (Uni f t) [x]                         = x
+evalNode (Bin op l r) [ConstVal x, ConstVal y] = ConstVal $ evalOp op x y
+evalNode (Bin op l r) [x,y]                    = NotConst
+{-# INLINE evalNode #-}
+
+checkConsistency :: [Consts] -> Consts
+checkConsistency []  = NotConst
+checkConsistency [x] = x
+checkConsistency (x:y:xs)
+  | areTheSame x y = checkConsistency (y:xs)
+  | otherwise      = traceShow ("Warning: inconsistent values", x, y) y
+{-# INLINE checkConsistency #-}
+
+areTheSame :: Consts -> Consts -> Bool
+areTheSame (ConstVal x) (ConstVal y) = abs (x-y) < 1e-9
+areTheSame (ParamIx _) (ParamIx _)   = True
+areTheSame NotConst    NotConst      = True
+areTheSame _           _             = False
+{-# INLINE areTheSame #-}
+
+canonical :: EClassId -> EGraphST EClassId
+canonical eclassId =
+  do m <- gets _canonicalMap
+     go m eclassId
+    where
+      go m ecId
+        | m ! ecId == ecId = pure ecId        -- if the e-class id is mapped to itself, it's canonical
+        | otherwise        = go m (m ! ecId)  -- otherwise, check the next id in the sequence
+{-# INLINE canonical #-}
+
+canonize :: ENode -> EGraphST ENode
+canonize = sequence' . fmap canonical  -- applies canonical to the children
+{-# INLINE canonize #-}
+
+sequence' :: Applicative f => SRTree (f a) -> f (SRTree a)
+sequence' (Bin f ml mr) = Bin f <$> ml <*> mr
+sequence' (Uni f mt)    = Uni f <$> mt
+sequence' (Var ix)      = pure (Var ix)
+sequence' (Param ix)    = pure (Param ix)
+sequence' (Const x)     = pure (Const x)
+{-# INLINE sequence' #-}
+
+children :: SRTree a -> [a]
+children (Bin _ l r) = [l, r]
+children (Uni _ t)   = [t]
+children _           = []
+{-# INLINE children #-}
+
+replaceChildren :: [a] -> SRTree b -> SRTree a
+replaceChildren [l, r] (Bin op _ _) = Bin op l r
+replaceChildren [t]    (Uni f _)    = Uni f t
+replaceChildren _      (Var ix)     = Var ix
+replaceChildren _      (Param ix)   = Param ix
+replaceChildren _      (Const x)    = Const x
+{-# INLINE replaceChildren #-}
+
+getEClass :: EClassId -> EGraphST EClass
+getEClass c = gets ((! c) . _eClass)
+{-# INLINE getEClass #-}
+
+emptyGraph :: EGraph
+emptyGraph = EGraph empty Map.empty empty [] [] 0
