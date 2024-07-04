@@ -24,5 +24,9 @@ main = do
     mapM_ (putStrLn . showExpr . getExpressionFrom eg) roots
     putStrLn "\nexpressions from each e-class: "
     mapM_ (putStrLn . showExpr . getExpressionFrom eg) (IM.keys $ _eClass eg)
+    putStrLn "heights: "
     mapM_ (print . _height) (IM.elems $ _eClass eg')
+    putStrLn "values: "
     mapM_ (print . _consts . _info) (IM.elems $ _eClass eg')
+    putStrLn "costs: "
+    mapM_ (print . _cost . _info) (IM.elems $ _eClass eg')

@@ -65,38 +65,6 @@ makeLenses ''EGraph
 makeLenses ''EClass
 makeLenses ''EClassData
 
-calculateCost :: CostFun -> SRTree EClassId -> EGraphST Cost
-calculateCost f t =
-  do let cs = children t
-     costs <- traverse (\c -> (_cost . _info) <$> getEClass c) cs
-     pure . f $ replaceChildren costs t
-
-costFun :: CostFun
-costFun (Const _)   = 1
-costFun (Param _)   = 1
-costFun (Var _)     = 1
-costFun (Bin _ l r) = 2 + l + r
-costFun (Uni _ t)   = 3 + t
-
-calculateConsts :: SRTree EClassId -> EGraphST Consts
-calculateConsts t =
-  do let cs = children t
-     consts <- traverse (\c -> (_consts . _info) <$> getEClass c) cs
-     pure . combineConsts $ replaceChildren consts t
-
-combineConsts :: SRTree Consts -> Consts
-combineConsts (Const x)    = ConstVal x
-combineConsts (Param ix)   = ParamIx ix
-combineConsts (Var _)      = NotConst
-combineConsts (Uni f t)    = case t of
-                              ConstVal x -> ConstVal $ evalFun f x
-                              _          -> t
-combineConsts (Bin op l r) = evalOp' l r
-  where
-    evalOp' (ParamIx ix) (ParamIx iy) = ParamIx (min ix iy)
-    evalOp' (ConstVal x) (ConstVal y) = ConstVal $ evalOp op x y
-    evalOp' _            _            = NotConst
-
 add :: ENode -> EGraphST EClassId
 add enode =
   do enode'  <- canonize enode                                             -- canonize e-node
@@ -196,7 +164,16 @@ modifyEClass ecId = pure ()
 
 -- join data from two e-classes
 joinData :: EClassData -> EClassData -> EClassData
-joinData d1 d2 = d1
+joinData (EData c1 cn1) (EData c2 cn2) =
+  EData (min c1 c2) (combineConsts cn1 cn2)
+  where
+    combineConsts (ConstVal x) (ConstVal y)
+      | abs (x-y) < 1e-9 = ConstVal $ (x+y)/2
+      | otherwise        = error "Combining different values"
+    combineConsts (ParamIx ix) (ParamIx iy) = ParamIx (min ix iy)
+    combineConsts NotConst x = x
+    combineConsts x NotConst = x
+    combineConsts x y = error (show x <> " " <> show y)
 
 makeAnalysis :: ENode -> EGraphST EClassData
 makeAnalysis enode =
@@ -269,54 +246,6 @@ calculateHeights = do queue   <- gets findRootClasses
          forM_ childrenL (setMinHeight h)
          go childrenL (Set.union tabu children) (h+1)
 
-updateAllConsts :: EGraphST ()
-updateAllConsts =
-  do roots <- gets findRootClasses
-     _ <- traverse getConstsFromClass roots
-     pure ()
-
-getConstsFromNode :: ENode -> EGraphST Consts
-getConstsFromNode n =
-  do cs <- traverse getConstsFromClass $ children n
-     pure $ evalNode n cs
-
-getConstsFromClass :: EClassId -> EGraphST Consts
-getConstsFromClass cId =
-  do cl    <- gets ((! cId) . _eClass)
-     let nodes = Set.toList $ _eNodes cl
-         info  = _info cl
-     vals  <- Prelude.filter (/=NotConst) <$> forM nodes getConstsFromNode
-     let cl' = if Prelude.null vals
-                 then cl {_info = info{_consts = NotConst}}
-                 else cl {_info = info{_consts = checkConsistency vals}}
-     modify' $ over eClass (insert cId cl')
-     pure $ (_consts . _info) cl'
-
-evalNode :: SRTree EClassId -> [Consts] -> Consts
-evalNode (Param ix) _                          = ParamIx ix
-evalNode (Const x)  _                          = ConstVal x
-evalNode (Var ix)   _                          = NotConst
-evalNode (Uni f t) [ConstVal x]                = ConstVal $ (evalFun f x)
-evalNode (Uni f t) [x]                         = x
-evalNode (Bin op l r) [ConstVal x, ConstVal y] = ConstVal $ evalOp op x y
-evalNode (Bin op l r) [x,y]                    = NotConst
-{-# INLINE evalNode #-}
-
-checkConsistency :: [Consts] -> Consts
-checkConsistency []  = NotConst
-checkConsistency [x] = x
-checkConsistency (x:y:xs)
-  | areTheSame x y = checkConsistency (y:xs)
-  | otherwise      = traceShow ("Warning: inconsistent values", x, y) y
-{-# INLINE checkConsistency #-}
-
-areTheSame :: Consts -> Consts -> Bool
-areTheSame (ConstVal x) (ConstVal y) = abs (x-y) < 1e-9
-areTheSame (ParamIx _) (ParamIx _)   = True
-areTheSame NotConst    NotConst      = True
-areTheSame _           _             = False
-{-# INLINE areTheSame #-}
-
 canonical :: EClassId -> EGraphST EClassId
 canonical eclassId =
   do m <- gets _canonicalMap
@@ -359,3 +288,35 @@ getEClass c = gets ((! c) . _eClass)
 
 emptyGraph :: EGraph
 emptyGraph = EGraph empty Map.empty empty [] [] 0
+
+calculateCost :: CostFun -> SRTree EClassId -> EGraphST Cost
+calculateCost f t =
+  do let cs = children t
+     costs <- traverse (\c -> (_cost . _info) <$> getEClass c) cs
+     pure . f $ replaceChildren costs t
+
+costFun :: CostFun
+costFun (Const _)   = 1
+costFun (Param _)   = 1
+costFun (Var _)     = 1
+costFun (Bin _ l r) = 2 + l + r
+costFun (Uni _ t)   = 3 + t
+
+calculateConsts :: SRTree EClassId -> EGraphST Consts
+calculateConsts t =
+  do let cs = children t
+     consts <- traverse (\c -> (_consts . _info) <$> getEClass c) cs
+     pure . combineConsts $ replaceChildren consts t
+
+combineConsts :: SRTree Consts -> Consts
+combineConsts (Const x)    = ConstVal x
+combineConsts (Param ix)   = ParamIx ix
+combineConsts (Var _)      = NotConst
+combineConsts (Uni f t)    = case t of
+                              ConstVal x -> ConstVal $ evalFun f x
+                              _          -> t
+combineConsts (Bin op l r) = evalOp' l r
+  where
+    evalOp' (ParamIx ix) (ParamIx iy) = ParamIx (min ix iy)
+    evalOp' (ConstVal x) (ConstVal y) = ConstVal $ evalOp op x y
+    evalOp' _            _            = NotConst
