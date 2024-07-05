@@ -160,7 +160,15 @@ merge c1 c2 =
 
 -- modify an e-class, e.g., add constant e-node and prune non-leaves
 modifyEClass :: EClassId -> EGraphST ()
-modifyEClass ecId = pure ()
+modifyEClass ecId =
+  do ec <- getEClass ecId
+     when (((_consts . _info) ec) /= NotConst) $
+       do let en = case ((_consts . _info) ec) of
+                     ParamIx ix -> Param ix
+                     ConstVal x -> Const x
+          c <- calculateCost costFun en
+          let infoEc = (_info ec){ _cost = c }
+          modify' $ over eClass (insert ecId ec{_eNodes = Set.singleton en, _info = infoEc})
 
 -- join data from two e-classes
 joinData :: EClassData -> EClassData -> EClassData
