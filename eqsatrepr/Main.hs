@@ -6,6 +6,107 @@ import Data.SRTree.Print
 import qualified Data.Map as Map
 import qualified Data.IntMap as IM
 import Control.Monad.State.Lazy
+import System.Random
+import Data.SRTree.Recursion ( cata )
+import Control.Monad
+
+initialPop :: HyperParams -> Rng ([Fix SRTree])
+initialPop hyperparams = do
+   let depths = [3 .. _maxDepth hyperparams]
+   pop <- forM depths $ \md ->
+           do let m = _popSize hyperparams `div` (_maxDepth hyperparams - 3 + 1)
+                  g = take m $ cycle [True, False]
+              mapM (randomTree hyperparams{ _maxDepth = md}) g
+   pure (concat pop)
+{-# INLINE initialPop #-}
+
+data Method = Grow | Full
+
+type Rng a = StateT StdGen IO a
+type GenUni = Fix SRTree -> Fix SRTree
+type GenBin = Fix SRTree -> Fix SRTree -> Fix SRTree
+
+toss :: Rng Bool
+toss = state random
+{-# INLINE toss #-}
+
+randomRange :: (Ord val, Random val) => (val, val) -> Rng val
+randomRange rng = state (randomR rng)
+{-# INLINE randomRange #-}
+
+randomFrom :: [a] -> Rng a
+randomFrom funs = do n <- randomRange (0, length funs - 1)
+                     pure $ funs !! n
+{-# INLINE randomFrom #-}
+
+countNodes' :: Fix SRTree -> Int
+countNodes' = cata alg
+  where
+    alg (Var _)     = 1
+    alg (Param _)   = 1
+    alg (Const _)   = 0
+    alg (Bin _ l r) = 1 + l + r
+    alg (Uni Abs t) = t
+    alg (Uni _ t)   = 1 + t
+{-# INLINE countNodes' #-}
+
+
+randomTree :: HyperParams -> Bool -> Rng (Fix SRTree)
+randomTree hp grow
+  | depth <= 1 || size <= 2 = randomFrom term
+  | (min_depth >= 0 || (depth > 2 && not grow)) && size > 2 = genNonTerm
+  | otherwise = genTermOrNon
+  where
+    min_depth = _minDepth hp
+    depth     = _maxDepth hp
+    size      = _maxSize hp
+    term      = _term hp
+    nonterm   = _nonterm hp
+
+    genNonTerm =
+       do et <- randomFrom nonterm
+          case et of
+            Left uniT -> uniT <$> randomTree hp{_minDepth = min_depth-1, _maxDepth = depth - 1, _maxSize = size - 1} grow
+            Right binT -> do l <- randomTree hp{_minDepth = min_depth-1, _maxDepth = depth - 1, _maxSize = size - 1} grow
+                             r <- randomTree hp{_minDepth = min_depth-1, _maxDepth = depth - 1, _maxSize = size - 1 - countNodes' l} grow
+                             pure (binT l r)
+    genTermOrNon = do r <- toss
+                      if r
+                        then randomFrom term
+                        else genNonTerm
+{-# INLINE randomTree #-}
+
+data HyperParams =
+    HP { _minDepth  :: Int
+       , _maxDepth  :: Int
+       , _maxSize   :: Int
+       , _popSize   :: Int
+       , _tournSize :: Int
+       , _pc        :: Double
+       , _pm        :: Double
+       , _term      :: [Fix SRTree]
+       , _nonterm   :: [Either GenUni GenBin]
+       }
+
+
+countSubTrees eg = sum $ map (length . getAllExpressionsFrom eg) (IM.keys $ _eClass eg)
+countRootTrees eg = sum $ map (length . getAllExpressionsFrom eg) (findRootClasses eg)
+terms = [var 0, param 0]
+nonterms = [Right (+), Right (-), Right (*), Right (/), Right (\l r -> abs l ** r), Left (1/)]
+
+calcRedundancy nPop = do
+    let hp = HP 2 4 10 nPop 2 1.0 0.25 terms nonterms
+    g <- getStdGen
+    pop <- evalStateT (initialPop hp) g
+    let nSubs = sum $ map (countSubTrees . snd . fromTrees . (:[])) pop
+        (_, popEg) = fromTrees pop
+        nSubsSingle = countSubTrees popEg
+    putStr "Ratio of subtrees: "
+    putStrLn $ show nSubsSingle <> "/" <> show nSubs <> " = " <> show (fromIntegral nSubsSingle / fromIntegral nSubs)
+    let nSubsR = sum $ map (countRootTrees . snd . fromTrees . (:[])) pop
+        nSubsSingleR = countRootTrees popEg
+    putStr "Ratio of rooted trees: "
+    putStrLn $ show nSubsSingleR <> "/" <> show nSubsR <> " = " <> show (fromIntegral nSubsSingleR / fromIntegral nSubsR)
 
 main :: IO ()
 main = do 
@@ -18,6 +119,10 @@ main = do
         roots = findRootClasses eg
         ecId = _eNodeToEClass eg Map.! (Var 0)
         eg' = (calculateHeights) `execState` eg
+        nPop = 10000
+        hp = HP 3 7 100 nPop 2 1.0 0.25 terms nonterms
+    g <- getStdGen
+    pop <- evalStateT (initialPop hp) g
     putStr "Parents of x0: "
     print $ _parents $ _eClass eg IM.! ecId    
     putStrLn "\nexpressions from root: "
@@ -30,3 +135,4 @@ main = do
     mapM_ (print . _consts . _info) (IM.elems $ _eClass eg')
     putStrLn "costs: "
     mapM_ (print . _cost . _info) (IM.elems $ _eClass eg')
+    mapM_ (\nP -> putStr "pop " >> print nP >> calcRedundancy nP >> putStrLn "") [100, 200, 500, 1000, 5000, 10000, 20000, 100000]

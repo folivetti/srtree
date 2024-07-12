@@ -213,6 +213,17 @@ getExpressionFrom eg eId = case head (Set.toList nodes) of
   where
     nodes = _eNodes . (! eId) . _eClass $ eg
 
+getAllExpressionsFrom :: EGraph -> EClassId -> [Fix SRTree]
+getAllExpressionsFrom eg eId = concatMap f (Set.toList nodes)
+  where
+    f n = case n of
+            Bin op l r -> Prelude.map Fix $ (Bin op) <$> (getAllExpressionsFrom eg l) <*> (getAllExpressionsFrom eg r)
+            Uni f t    -> (Fix . Uni f) <$> (getAllExpressionsFrom eg t)
+            Var ix     -> [Fix $ Var ix]
+            Const x    -> [Fix $ Const x]
+            Param ix   -> [Fix $ Param ix]
+    nodes = _eNodes . (! eId) . _eClass $ eg
+
 getRndExpressionFrom :: EGraph -> EClassId -> State StdGen (Fix SRTree)
 getRndExpressionFrom eg eId = do n <- randomFrom nodes
                                  Fix <$> case n of
