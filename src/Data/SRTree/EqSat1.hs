@@ -192,8 +192,8 @@ makeAnalysis enode =
 fromTree :: Fix SRTree -> (EClassId, EGraph)
 fromTree tree = cataM sequence' add tree `runState` emptyGraph
 
-fromTrees :: [Fix SRTree] -> (EClassId, EGraph)
-fromTrees = Prelude.foldr (\t (v, eg) -> fromTreeWith eg t) (0, emptyGraph)
+fromTrees :: [Fix SRTree] -> ([EClassId], EGraph)
+fromTrees = Prelude.foldr (\t (rs, eg) -> let (r, eg') = fromTreeWith eg t in (r:rs, eg')) ([], emptyGraph)
 
 fromTreeWith :: EGraph -> Fix SRTree -> (EClassId, EGraph)
 fromTreeWith eg tree = cataM sequence' add tree `runState` eg

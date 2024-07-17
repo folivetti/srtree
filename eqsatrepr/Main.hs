@@ -9,6 +9,9 @@ import Control.Monad.State.Lazy
 import System.Random
 import Data.SRTree.Recursion ( cata )
 import Control.Monad
+import Control.Monad.Reader
+import qualified Data.SRTree.Random as RT
+import Data.List ( nub )
 
 initialPop :: HyperParams -> Rng ([Fix SRTree])
 initialPop hyperparams = do
@@ -90,21 +93,26 @@ data HyperParams =
 
 
 countSubTrees eg = sum $ map (length . getAllExpressionsFrom eg) (IM.keys $ _eClass eg)
-countRootTrees eg = sum $ map (length . getAllExpressionsFrom eg) (findRootClasses eg)
-terms = [var 0, param 0]
+countRootTrees rs eg = sum $ map (length . getAllExpressionsFrom eg) rs -- (findRootClasses eg)
+
+terms = [var 0, var 1, var 2, param 0, param 1, param 2, param 3]
 nonterms = [Right (+), Right (-), Right (*), Right (/), Right (\l r -> abs l ** r), Left (1/)]
 
+calcRedundancy :: Int -> IO ()
 calcRedundancy nPop = do
     let hp = HP 2 4 10 nPop 2 1.0 0.25 terms nonterms
+        p  = RT.P [0, 1, 2, 3, 4, 5] (0, 3) (1, 3) [Log]
     g <- getStdGen
-    pop <- evalStateT (initialPop hp) g
+    --pop <- evalStateT (initialPop hp) g
+    pop <- (`evalStateT` g)  <$> replicateM nPop $ runReaderT (RT.randomTree 10) p
     let nSubs = sum $ map (countSubTrees . snd . fromTrees . (:[])) pop
-        (_, popEg) = fromTrees pop
+        (rs, popEg) = fromTrees pop
         nSubsSingle = countSubTrees popEg
+        rsN         = nub rs
     putStr "Ratio of subtrees: "
     putStrLn $ show nSubsSingle <> "/" <> show nSubs <> " = " <> show (fromIntegral nSubsSingle / fromIntegral nSubs)
-    let nSubsR = sum $ map (countRootTrees . snd . fromTrees . (:[])) pop
-        nSubsSingleR = countRootTrees popEg
+    let nSubsR = sum $ map (\p -> let (rs', eg') = fromTree p in countRootTrees [rs'] eg') pop
+        nSubsSingleR = countRootTrees rsN popEg
     putStr "Ratio of rooted trees: "
     putStrLn $ show nSubsSingleR <> "/" <> show nSubsR <> " = " <> show (fromIntegral nSubsSingleR / fromIntegral nSubsR)
 
@@ -121,6 +129,7 @@ main = do
         eg' = (calculateHeights) `execState` eg
         nPop = 10000
         hp = HP 3 7 100 nPop 2 1.0 0.25 terms nonterms
+        p  = RT.P [0] (-3, 3) (-3, 3) []
     g <- getStdGen
     pop <- evalStateT (initialPop hp) g
     putStr "Parents of x0: "
