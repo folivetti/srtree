@@ -301,6 +301,13 @@ replaceChildren _      (Param ix)   = Param ix
 replaceChildren _      (Const x)    = Const x
 {-# INLINE replaceChildren #-}
 
+getOperator :: SRTree a -> SRTree ()
+getOperator (Bin op _ _) = Bin op () ()
+getOperator (Uni f _) = Uni f () 
+getOperator (Var ix) = Var ix 
+getOperator (Param ix) = Param ix 
+getOperator (Const x) = Const x 
+
 getEClass :: EClassId -> EGraphST EClass
 getEClass c = gets ((! c) . _eClass)
 {-# INLINE getEClass #-}

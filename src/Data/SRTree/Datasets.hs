@@ -173,7 +173,7 @@ processData csv params hasHeader = ((x_train, y_train, x_val, y_val) , varnames)
     nrows             = length csv - fromEnum hasHeader
     (header, content) = if hasHeader
                            then (zip (map B.strip $ head csv) [0..], tail csv)
-                           else (map (\i -> (B.pack ('x' : show i), i)) [0 .. ncols], csv)
+                           else (map (\i -> (B.pack ('x' : show i), i)) [0 .. ncols-1], csv)
     varnames          = intercalate "," [B.unpack v | c <- ixs
                                         , let v = fst . fromJust $ find ((==c).snd) header
                                         ]
