@@ -13,7 +13,7 @@
 --
 -----------------------------------------------------------------------------
 
-module Data.SRTree.EqSat1 where
+module Data.SRTree.Egraph where
 
 import Data.SRTree
 import Data.SRTree.Eval

@@ -1,7 +1,7 @@
 module Main where
 
 import Data.SRTree 
-import Data.SRTree.EqSat1 
+import Data.SRTree.Egraph
 import Data.SRTree.Print 
 import qualified Data.Map as Map
 import qualified Data.IntMap as IM
@@ -12,8 +12,21 @@ import Control.Monad
 import Control.Monad.Reader
 import qualified Data.SRTree.Random as RT
 import Data.List ( nub )
+import Data.SRTree.EqSatDB
 
-initialPop :: HyperParams -> Rng ([Fix SRTree])
+x = Fixed (Bin Add (VarPat 'x') (VarPat 'x'))
+y = Fixed (Bin Mul (VarPat 'y') x)
+t = sin (var 1 * (var 0 + var 0)) - var 3
+(root, eg) = fromTrees [t]
+db = createDB eg
+(q, r) = compileToQuery x
+(q2, r2) = compileToQuery y
+m1 = genericJoin db q 
+m2 = genericJoin db q2 
+q2' = updateVar (Right 256) (Left 3) q2
+
+
+initialPop :: HyperParams -> Rng [Fix SRTree]
 initialPop hyperparams = do
    let depths = [3 .. _maxDepth hyperparams]
    pop <- forM depths $ \md ->
