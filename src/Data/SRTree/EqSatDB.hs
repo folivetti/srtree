@@ -96,13 +96,14 @@ populate (Just tId) (eid:eids) = let keys = Set.insert eid (_keys tId)
                                      val = fromMaybe (trie eid IntMap.empty) $ populate nextTrie eids
                                   in Just $ IntTrie keys (IntMap.insert eid val (_trie tId))
                                       
-applyMatch :: Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST ()
-applyMatch rule match = do eg <- get
-                           let conds = getConditions rule
-                           when (all (\c -> isValidConditions c match eg) conds) $
-                              do new_eclass <- reprPrat (fst match) (target rule)
-                                 _ <- merge (getInt (snd match)) new_eclass
-                                 pure ()
+applyMatch :: CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST ()
+applyMatch costFun rule match =
+  do eg <- get
+     let conds = getConditions rule
+     when (all (\c -> isValidConditions c match eg) conds) $
+       do new_eclass <- reprPrat costFun (fst match) (target rule)
+          _ <- merge costFun (getInt (snd match)) new_eclass
+          pure ()
 
 target :: Rule -> Pattern
 target (r :| _)   = target r
@@ -118,10 +119,10 @@ getConditions :: Rule -> [Condition]
 getConditions (r :| c) = c : getConditions r
 getConditions _ = []
 
-reprPrat :: Map ClassOrVar ClassOrVar -> Pattern -> EGraphST EClassId
-reprPrat subst (VarPat c)     = pure $ getInt $ subst Map.! (Right $ fromEnum c)
-reprPrat subst (Fixed target) = do newChildren <- mapM (reprPrat subst) (getElems target)
-                                   add (replaceChildren newChildren target)
+reprPrat :: CostFun -> Map ClassOrVar ClassOrVar -> Pattern -> EGraphST EClassId
+reprPrat costFun subst (VarPat c)     = pure $ getInt $ subst Map.! (Right $ fromEnum c)
+reprPrat costFun subst (Fixed target) = do newChildren <- mapM (reprPrat costFun subst) (getElems target)
+                                           add costFun (replaceChildren newChildren target)
 
 -- TODO: how is that used in practice?
 isValidConditions :: Condition -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraph -> Bool
@@ -176,30 +177,34 @@ getElems _           = []
 -- matched subgraph
 genericJoin :: DB -> Query -> [Map ClassOrVar ClassOrVar]
 genericJoin db atoms = let vars = orderedVars atoms -- order the vars, starting with the most frequently occuring
-                       in nub $ go atoms vars -- TODO: investigate why we need nub
+                       in go atoms vars -- TODO: investigate why we need nub
   where
     -- for each variable
     --   for each possible e-class id for that variable
     --      replace the var id with this e-class id, and
     --      recurse to find the possible matches for the next atom
-    go atoms [] = [Map.empty | _ <- atoms]
+    go atoms [] = [Map.empty] -- | _ <- atoms]
+    go atoms (x:vars) = [Map.insert x classId y | classId <- domainX db x atoms
+                                                , y <- go (updateVar x classId atoms) vars]
+                                                {-
     go atoms (x:vars) = do classId <- domainX db x atoms
                            let newAtoms = updateVar x classId atoms
-                           y <- go newAtoms vars
-                           pure $ Map.insert x classId y
-
+                           y <- traceShow ("<<<<", go newAtoms vars) $ go newAtoms vars
+                           traceShow (x, classId, y) $ pure $ Map.insert x classId y
+                           -}
 
 -- | returns the e-class id for a certain variable that
 -- matches the pattern described by the atoms
 domainX :: DB -> ClassOrVar -> Query -> [ClassOrVar]
-domainX db var atoms = map Left 
-                     $ intersectAtoms var db          -- find the intersection of possible keys by each atom
-                     $ filter (elemOfAtom var) atoms  -- look only in the atoms with this var
+domainX db var atoms = let ss = (map Left
+                                  $ intersectAtoms var db          -- find the intersection of possible keys by each atom
+                                  $ filter (elemOfAtom var) atoms) :: [ClassOrVar]  -- look only in the atoms with this var
+                       in ss
 
 -- | returns all e-class id that can matches this sequence of atoms
 intersectAtoms :: ClassOrVar -> DB -> Query -> [EClassId]
 intersectAtoms _ _ [] = []
-intersectAtoms var db (a:atoms) = Set.toList $ foldr (\atom acc -> Set.intersection acc $ go atom) (go a) atoms 
+intersectAtoms var db (a:atoms) = Set.toList $ foldr (\atom acc -> Set.intersection acc $ go atom) (go a) atoms
   where 
       go (Atom r t) = let op = getOperator t
                        in if op `Map.member` db -- if the e-graph contains the operator
@@ -240,16 +245,19 @@ intersectTries var xs trie (i:ids) =
                                     then Just $ _keys trie
                                     -- oterwise, put i under investigation and check the next occurrences
                                     -- returning the intersection
-                                    else Just $ foldr (\(k,v) acc -> let s = intersectTries var (Map.insert i k xs) v ids 
-                                                           in if isNothing s
-                                                                 then acc
-                                                                 else Set.insert k acc) Set.empty $ IntMap.toList (_trie trie)
+                                    else Just $ IntMap.foldrWithKey (\k v acc ->
+                                                    case intersectTries var (Map.insert i k xs) v ids of
+                                                      Nothing -> acc
+                                                      _       -> Set.insert k acc) Set.empty (_trie trie)
                             -- if it is not the var of interest
                             -- assign and test all possible e-class ids to it
                             -- and move forward
-                            else Just $ foldr (\(k,v) acc -> case intersectTries var (Map.insert i k xs) v ids of
-                                                               Nothing -> acc
-                                                               Just s  -> Set.union acc s) Set.empty $ IntMap.toList (_trie trie)
+                            else Just $ IntMap.foldrWithKey (\k v acc ->
+                                                case intersectTries var (Map.insert i k xs) v ids of
+                                                  Nothing -> acc
+                                                  Just s  -> Set.union acc s
+                                                     ) Set.empty (_trie trie)
+
 
 
 -- | updates all occurrence of var with the new id x
@@ -264,7 +272,7 @@ updateVar var x = map replace
 -- only check if it is a pattern variable, else returns true
 isDiffFrom :: Int -> ClassOrVar -> Bool
 isDiffFrom x y = case y of 
-                   Left _ -> True
+                   Left _ -> False
                    Right z -> x /= z 
 
 -- | checks if v is an element of an atom
@@ -272,11 +280,11 @@ elemOfAtom :: ClassOrVar -> Atom -> Bool
 elemOfAtom v (Atom root tree) =
     case root of 
       Left _  -> v `elem` getElems tree
-      Right x -> Right x == v 
+      Right x -> Right x == v || v `elem` getElems tree
 
 -- | sorts the variables in a query by the most frequently occurring
 orderedVars :: Query -> [ClassOrVar]
-orderedVars atoms = sortBy (comparing varCost) $ nub [a | atom <- atoms, a <- getIdsFrom atom, isRight a] 
+orderedVars atoms = sortBy (comparing varCost) $ nub [a | atom <- atoms, a <- getIdsFrom atom, isRight a]
   where
     getIdsFrom (Atom r t) = r : getElems t
     isRight (Right _) = True 

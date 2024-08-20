@@ -61,6 +61,7 @@ library
       Data.SRTree.Derivative
       Data.SRTree.Egraph
       Data.SRTree.EqSat
+      Data.SRTree.EqSat1
       Data.SRTree.EqSatDB
       Data.SRTree.Eval
       Data.SRTree.Internal

@@ -13,17 +13,68 @@ import Control.Monad.Reader
 import qualified Data.SRTree.Random as RT
 import Data.List ( nub )
 import Data.SRTree.EqSatDB
+import Data.SRTree.EqSat1
 
-x = Fixed (Bin Add (VarPat 'x') (VarPat 'x'))
-y = Fixed (Bin Mul (VarPat 'y') x)
-t = sin (var 1 * (var 0 + var 0)) - var 3
-(root, eg) = fromTrees [t]
-db = createDB eg
-(q, r) = compileToQuery x
-(q2, r2) = compileToQuery y
-m1 = genericJoin db q 
-m2 = genericJoin db q2 
-q2' = updateVar (Right 256) (Left 3) q2
+isZero :: Pattern -> Map.Map ClassOrVar ClassOrVar -> EGraph -> Bool
+isZero (VarPat c) subst eg =
+    let cid = getInt $ subst Map.! (Right $ fromEnum c)
+    in case (_consts . _info) (_eClass eg IM.! cid) of
+         ConstVal x -> True
+         _ -> False
+isZero _ _ _ = False
+
+{-
+isDiv x y = do val <- from x
+               val <- from y
+               pure $ val x `mod` val y == 0
+-}
+
+myCost :: SRTree Int -> Int
+myCost (Var _) = 1
+myCost (Const _) = 1
+myCost (Param _) = 1
+myCost (Bin op l r) = 2 + l + r
+myCost (Uni _ t) = 3 + t
+
+test :: IO ()
+test =  do
+    let x = Fixed (Bin Add (VarPat 'x') (VarPat 'x')) -- x+x
+        y = Fixed (Bin Mul (VarPat 'y') x) -- y*(x+x)
+        z = Fixed (Bin Mul (VarPat 'y') x) :=> Fixed (Bin Mul (Fixed (Bin Mul (Fixed (Const 2)) (VarPat 'y'))) (VarPat 'x'))  -- :| isZero (VarPat 'y') -- (2*y)*x
+        w1 = Fixed (Bin Mul (VarPat 'x') (VarPat 'y'))
+        w2 = Fixed (Bin Add w1 w1)
+        w = Fixed (Bin Mul (VarPat 'y') w2) -- y * (x*y + x*y) = y^2 * x
+        rl = w :=> Fixed (Bin Mul (Fixed (Uni Square (VarPat 'y'))) (VarPat 'x'))
+        t = sin (Fix (Const 5) * (var 0 + var 0)) - (var 3 * ((var 4 * var 3) + (var 4 * var 3)))
+        -- 5 * (x+x) => (2*5) * x | 5 * (x+x)
+        (root, eg) = fromTrees myCost [t]
+        (best, eg') = eqSat t [z, rl] myCost `runState` eg
+
+        db = createDB eg'
+        (q, r) = compileToQuery x
+        (q2, r2) = compileToQuery y
+        (q3, r3) = compileToQuery (source z)
+        m1 = genericJoin db q
+        m2 = genericJoin db q3
+        subst = match db (source z)
+        -- eg' = (applyMatch z (head subst) >> rebuild) `execState` eg
+        --eg' = eqSat t [z] (\_ _ -> 1) `execState` eg
+
+    putStrLn ""
+    print q3
+    putStrLn ""
+    mapM_ (putStrLn . showExpr) $ getAllExpressionsFrom eg' (head root)
+    putStrLn ""
+    mapM_ print $ _eClass eg'
+
+    putStrLn ""
+    --print m2
+    putStr "Subs: "
+    print subst
+    putStrLn ""
+    mapM_ print $ Map.toList db
+    putStrLn ""
+    putStrLn $ showExpr best
 
 
 initialPop :: HyperParams -> Rng [Fix SRTree]
@@ -118,13 +169,13 @@ calcRedundancy nPop = do
     g <- getStdGen
     --pop <- evalStateT (initialPop hp) g
     pop <- (`evalStateT` g)  <$> replicateM nPop $ runReaderT (RT.randomTree 10) p
-    let nSubs = sum $ map (countSubTrees . snd . fromTrees . (:[])) pop
-        (rs, popEg) = fromTrees pop
+    let nSubs = sum $ map (countSubTrees . snd . fromTrees myCost . (:[])) pop
+        (rs, popEg) = fromTrees myCost pop
         nSubsSingle = countSubTrees popEg
         rsN         = nub rs
     putStr "Ratio of subtrees: "
     putStrLn $ show nSubsSingle <> "/" <> show nSubs <> " = " <> show (fromIntegral nSubsSingle / fromIntegral nSubs)
-    let nSubsR = sum $ map (\p -> let (rs', eg') = fromTree p in countRootTrees [rs'] eg') pop
+    let nSubsR = sum $ map (\p -> let (rs', eg') = fromTree myCost p in countRootTrees [rs'] eg') pop
         nSubsSingleR = countRootTrees rsN popEg
     putStr "Ratio of rooted trees: "
     putStrLn $ show nSubsSingleR <> "/" <> show nSubsR <> " = " <> show (fromIntegral nSubsSingleR / fromIntegral nSubsR)
@@ -136,7 +187,7 @@ main = do
         t3 = 3.2 * var 0 / (var 0 + 12.0)
         t4 = var 0 + sin (var 0)
         t5 = 1.5 + exp 5.2
-        (v, eg) = fromTrees [t3,t1,t2,t4,t5]
+        (v, eg) = fromTrees myCost [t3,t1,t2,t4,t5]
         roots = findRootClasses eg
         ecId = _eNodeToEClass eg Map.! (Var 0)
         eg' = (calculateHeights) `execState` eg

@@ -51,12 +51,13 @@ data EClass = EClass { _eClassId :: Int                 -- e-class id (maybe we 
                      , _parents  :: [(EClassId, ENode)] -- parents (e-class, e-node)'s
                      , _height   :: Int                 -- height
                      , _info     :: EClassData          -- data
-                     } deriving Show
+                     } deriving (Show, Eq)
 
 data Consts   = NotConst | ParamIx Int | ConstVal Double deriving (Show, Eq)
 data Property = Positive | Negative | NonZero | Real deriving (Show, Eq)
 
 data EClassData = EData { _cost   :: Cost
+                        , _best   :: ENode
                         , _consts :: Consts
                         -- , _properties :: Property
                         } deriving (Show, Eq)
@@ -65,8 +66,8 @@ makeLenses ''EGraph
 makeLenses ''EClass
 makeLenses ''EClassData
 
-add :: ENode -> EGraphST EClassId
-add enode =
+add :: CostFun -> ENode -> EGraphST EClassId
+add costFun enode =
   do enode'  <- canonize enode                                             -- canonize e-node
      doExist <- gets ((Map.member enode') . _eNodeToEClass)                -- check if canonical e-node exists
      if doExist
@@ -77,9 +78,10 @@ add enode =
                         . over eNodeToEClass (Map.insert enode' curId)     -- associate new e-node with id
                         . over worklist ((curId, enode'):)                 -- add e-node and id into worklist
                 forM_ (children enode') (addParents curId enode')          -- update the children's parent list
-                info <- makeAnalysis enode'
+                info <- makeAnalysis costFun enode'
                 let newClass = EClass curId (Set.singleton enode') [] 0 info -- create e-class
                 modify' $ over eClass (insert curId newClass)              -- insert new e-class into e-graph
+                modifyEClass costFun curId
                 pure curId
   where
     addParents :: EClassId -> ENode -> EClassId -> EGraphST ()
@@ -88,41 +90,41 @@ add enode =
          let ec' = ec{ _parents = (cId, node):_parents ec }
          modify' $ over eClass (insert c ec')
 
-rebuild :: EGraphST ()
-rebuild =
+rebuild :: CostFun -> EGraphST ()
+rebuild costFun =
   do wl <- gets _worklist
      al <- gets _analysis
      modify' $ over worklist (const [])
              . over analysis (const [])
-     forM_ wl (uncurry repair)
-     forM_ al (uncurry repairAnalysis)
+     forM_ wl (uncurry (repair costFun))
+     forM_ al (uncurry (repairAnalysis costFun))
 
-repair :: EClassId -> ENode -> EGraphST ()
-repair ecId enode =
+repair :: CostFun -> EClassId -> ENode -> EGraphST ()
+repair costFun ecId enode =
   do modify' $ over eNodeToEClass (Map.delete enode)
      enode'  <- canonize enode
      ecId'   <- canonical ecId
      doExist <- gets ((Map.member enode') . _eNodeToEClass)
      if doExist
        then do ecIdCanon <- gets ((Map.! enode') . _eNodeToEClass)
-               _ <- merge ecIdCanon ecId'
+               _ <- merge costFun ecIdCanon ecId'
                pure ()
        else modify' $ over eNodeToEClass (Map.insert enode' ecId')
 
-repairAnalysis :: EClassId -> ENode -> EGraphST ()
-repairAnalysis ecId enode =
+repairAnalysis :: CostFun -> EClassId -> ENode -> EGraphST ()
+repairAnalysis costFun ecId enode =
   do ecId'  <- canonical ecId
      eclass <- getEClass ecId'
-     info   <- makeAnalysis enode
+     info   <- makeAnalysis costFun enode
      let newData = joinData (_info eclass) info
          eclass' = eclass { _info = newData }
      when ((_info eclass) /= newData) $
        do modify' $ over analysis (_parents eclass <>)
                   . over eClass (insert ecId' eclass')
-          modifyEClass ecId'
+          modifyEClass costFun ecId'
 
-merge :: EClassId -> EClassId -> EGraphST EClassId
-merge c1 c2 =
+merge :: CostFun -> EClassId -> EClassId -> EGraphST EClassId
+merge costFun c1 c2 =
   do c1' <- canonical c1
      c2' <- canonical c2
      if c1' == c2'                                     -- if they are already merge, return canonical
@@ -146,7 +148,7 @@ merge c1 c2 =
            $ modify' $ over analysis ((_parents ledC) <>)     --   insert parents into analysis
          when (_info newC /= _info subC)
            $ modify' $ over analysis ((_parents subC) <>)
-         modifyEClass led
+         modifyEClass costFun led
          pure led
 
     getLeaderSub =
@@ -159,22 +161,23 @@ merge c1 c2 =
                   else (c2, ec2, c1, ec1)
 
 -- modify an e-class, e.g., add constant e-node and prune non-leaves
-modifyEClass :: EClassId -> EGraphST ()
-modifyEClass ecId =
+modifyEClass :: CostFun -> EClassId -> EGraphST ()
+modifyEClass costFun ecId =
   do ec <- getEClass ecId
      when (((_consts . _info) ec) /= NotConst) $
        do let en = case ((_consts . _info) ec) of
                      ParamIx ix -> Param ix
                      ConstVal x -> Const x
           c <- calculateCost costFun en
-          let infoEc = (_info ec){ _cost = c }
+          let infoEc = (_info ec){ _cost = c, _best = en }
           modify' $ over eClass (insert ecId ec{_eNodes = Set.singleton en, _info = infoEc})
 
 -- join data from two e-classes
 joinData :: EClassData -> EClassData -> EClassData
-joinData (EData c1 cn1) (EData c2 cn2) =
-  EData (min c1 c2) (combineConsts cn1 cn2)
+joinData (EData c1 b1 cn1) (EData c2 b2 cn2) =
+  EData (min c1 c2) b (combineConsts cn1 cn2)
   where
+    b = if c1 <= c2 then b1 else b2
     combineConsts (ConstVal x) (ConstVal y)
       | abs (x-y) < 1e-9 = ConstVal $ (x+y)/2
       | otherwise        = error "Combining different values"
@@ -183,20 +186,20 @@ joinData (EData c1 cn1) (EData c2 cn2) =
     combineConsts x NotConst = x
     combineConsts x y = error (show x <> " " <> show y)
 
-makeAnalysis :: ENode -> EGraphST EClassData
-makeAnalysis enode =
+makeAnalysis :: CostFun -> ENode -> EGraphST EClassData
+makeAnalysis costFun enode =
   do consts <- calculateConsts enode
      cost   <- calculateCost costFun enode
-     pure $ EData cost consts
+     pure $ EData cost enode consts
 
-fromTree :: Fix SRTree -> (EClassId, EGraph)
-fromTree tree = cataM sequence' add tree `runState` emptyGraph
+fromTree :: CostFun -> Fix SRTree -> (EClassId, EGraph)
+fromTree costFun tree = cataM sequence' (add costFun) tree `runState` emptyGraph
 
-fromTrees :: [Fix SRTree] -> ([EClassId], EGraph)
-fromTrees = Prelude.foldr (\t (rs, eg) -> let (r, eg') = fromTreeWith eg t in (r:rs, eg')) ([], emptyGraph)
+fromTrees :: CostFun -> [Fix SRTree] -> ([EClassId], EGraph)
+fromTrees costFun = Prelude.foldr (\t (rs, eg) -> let (r, eg') = fromTreeWith costFun eg t in (r:rs, eg')) ([], emptyGraph)
 
-fromTreeWith :: EGraph -> Fix SRTree -> (EClassId, EGraph)
-fromTreeWith eg tree = cataM sequence' add tree `runState` eg
+fromTreeWith :: CostFun -> EGraph -> Fix SRTree -> (EClassId, EGraph)
+fromTreeWith costFun eg tree = cataM sequence' (add costFun) tree `runState` eg
 
 findRootClasses :: EGraph -> [EClassId]
 findRootClasses = Prelude.map fst . Prelude.filter isParent . toList . _eClass
@@ -320,13 +323,6 @@ calculateCost f t =
   do let cs = children t
      costs <- traverse (\c -> (_cost . _info) <$> getEClass c) cs
      pure . f $ replaceChildren costs t
-
-costFun :: CostFun
-costFun (Const _)   = 1
-costFun (Param _)   = 1
-costFun (Var _)     = 1
-costFun (Bin _ l r) = 2 + l + r
-costFun (Uni _ t)   = 3 + t
 
 calculateConsts :: SRTree EClassId -> EGraphST Consts
 calculateConsts t =
