@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Main where
 
 import Data.SRTree 
@@ -38,15 +39,15 @@ myCost (Uni _ t) = 3 + t
 
 test :: IO ()
 test =  do
-    let x = Fixed (Bin Add (VarPat 'x') (VarPat 'x')) -- x+x
-        y = Fixed (Bin Mul (VarPat 'y') x) -- y*(x+x)
-        z = Fixed (Bin Mul (VarPat 'y') x) :=> Fixed (Bin Mul (Fixed (Bin Mul (Fixed (Const 2)) (VarPat 'y'))) (VarPat 'x'))  -- :| isZero (VarPat 'y') -- (2*y)*x
-        w1 = Fixed (Bin Mul (VarPat 'x') (VarPat 'y'))
-        w2 = Fixed (Bin Add w1 w1)
-        w = Fixed (Bin Mul (VarPat 'y') w2) -- y * (x*y + x*y) = y^2 * x
-        rl = w :=> Fixed (Bin Mul (Fixed (Uni Square (VarPat 'y'))) (VarPat 'x'))
-        t = sin (Fix (Const 5) * (var 0 + var 0)) - (var 3 * ((var 4 * var 3) + (var 4 * var 3)))
-        -- 5 * (x+x) => (2*5) * x | 5 * (x+x)
+    let x = "x" + "x"
+        y = "y" * x
+        z = y :=> (2 * "y") * "x" -- :| isZero "y"
+        w1 = "x" * "y"
+        w2 = w1 + w1
+        w = "y" * w2
+        rl = w :=> square "y" * "x" where square = Fixed . Uni Square
+        t = sin (5 * (var 0 + var 0)) - (var 3 * ((var 4 * var 3) + (var 4 * var 3)))
+
         (root, eg) = fromTrees myCost [t]
         (best, eg') = eqSat t [z, rl] myCost `runState` eg
 

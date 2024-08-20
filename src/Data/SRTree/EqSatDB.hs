@@ -18,6 +18,7 @@ import Data.SRTree.Egraph
 import Data.Maybe ( fromMaybe, isNothing, mapMaybe )
 import Data.List ( nub, sortBy, intercalate )
 import Data.Ord ( comparing )
+import Data.String ( IsString(..) )
 
 -- The database maps a symbol to an IntTrie
 -- The IntTrie stores the possible paths from a certain e-class 
@@ -31,12 +32,20 @@ data IntTrie = IntTrie { _keys :: Set EClassId, _trie :: IntMap IntTrie } -- der
 -- A Pattern is either a fixed-point of a tree or an
 -- index to a pattern variable. The pattern variable matches anything. 
 -- TODO: instance of Num, Floating, etc. May need to change var to string.
-data Pattern = Fixed (SRTree Pattern) | VarPat Char deriving Show -- Fixed structure of a pattern or a variable that matches anything 
+data Pattern = Fixed (SRTree Pattern) | VarPat Char deriving Show -- Fixed structure of a pattern or a variable that matches anything
 
+instance IsString Pattern where
+  fromString []     = error "empty string in VarPat"
+  fromString [c] | n >= 65 && n <= 122 = VarPat c where n = fromEnum c
+  fromString s      = error $ "invalid string in VarPat: " <> s
 -- A rule is either a directional rule where pat1 can be replaced by pat2, a bidirectional rule 
 -- where pat1 can be replaced or replace pat2, or a pattern with a conditional function 
 -- describing when to apply the rule 
 data Rule = Pattern :=> Pattern | Pattern :==: Pattern | Rule :| Condition
+
+infix 3 :=>
+infix 3 :==:
+infix 2 :|
 
 -- A Query is a list of Atoms 
 type Query = [Atom] 
@@ -57,6 +66,73 @@ instance Show IntTrie where
                            tries = intercalate "," (map (\(k,v) -> show k <> " -> " <> show v) $ IntMap.toList t)
                        in "{" <> keys <> "} - {" <> tries <> "}"
 
+
+instance Num Pattern where
+  l + r = Fixed $ Bin Add l r
+  {-# INLINE (+) #-}
+  l - r = Fixed $ Bin Sub l r
+  {-# INLINE (-) #-}
+  l * r = Fixed $ Bin Mul l r
+  {-# INLINE (*) #-}
+
+  abs = Fixed . Uni Abs
+  {-# INLINE abs #-}
+
+  negate t = Fixed (Const (-1)) * t
+  {-# INLINE negate #-}
+
+  signum t = case t of
+               Fixed (Const x) -> Fixed . Const $ signum x
+               _               -> Fixed (Const 0)
+  fromInteger x = Fixed $ Const (fromInteger x)
+  {-# INLINE fromInteger #-}
+
+instance Fractional Pattern where
+  l / r = Fixed $ Bin Div l r
+  {-# INLINE (/) #-}
+
+  fromRational = Fixed . Const . fromRational
+  {-# INLINE fromRational #-}
+
+instance Floating Pattern where
+  pi      = Fixed $ Const  pi
+  {-# INLINE pi #-}
+  exp     = Fixed . Uni Exp
+  {-# INLINE exp #-}
+  log     = Fixed . Uni Log
+  {-# INLINE log #-}
+  sqrt    = Fixed . Uni Sqrt
+  {-# INLINE sqrt #-}
+  sin     = Fixed . Uni Sin
+  {-# INLINE sin #-}
+  cos     = Fixed . Uni Cos
+  {-# INLINE cos #-}
+  tan     = Fixed . Uni Tan
+  {-# INLINE tan #-}
+  asin    = Fixed . Uni ASin
+  {-# INLINE asin #-}
+  acos    = Fixed . Uni ACos
+  {-# INLINE acos #-}
+  atan    = Fixed . Uni ATan
+  {-# INLINE atan #-}
+  sinh    = Fixed . Uni Sinh
+  {-# INLINE sinh #-}
+  cosh    = Fixed . Uni Cosh
+  {-# INLINE cosh #-}
+  tanh    = Fixed . Uni Tanh
+  {-# INLINE tanh #-}
+  asinh   = Fixed . Uni ASinh
+  {-# INLINE asinh #-}
+  acosh   = Fixed . Uni ACosh
+  {-# INLINE acosh #-}
+  atanh   = Fixed . Uni ATanh
+  {-# INLINE atanh #-}
+
+  l ** r  = Fixed $ Bin Power l r
+  {-# INLINE (**) #-}
+
+  logBase l r = log l / log r
+  {-# INLINE logBase #-}
 
 -- | `createDB` creates a database of patterns from an e-graph
 -- it simply calls addToDB for every pair (e-node, e-class id) from 
@@ -124,7 +200,7 @@ reprPrat costFun subst (VarPat c)     = pure $ getInt $ subst Map.! (Right $ fro
 reprPrat costFun subst (Fixed target) = do newChildren <- mapM (reprPrat costFun subst) (getElems target)
                                            add costFun (replaceChildren newChildren target)
 
--- TODO: how is that used in practice?
+-- | returns `True` if the condition of a rule is valid for that match
 isValidConditions :: Condition -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraph -> Bool
 isValidConditions cond match eg = cond (fst match) eg
 

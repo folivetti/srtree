@@ -81,8 +81,8 @@ add costFun enode =
                 info <- makeAnalysis costFun enode'
                 let newClass = EClass curId (Set.singleton enode') [] 0 info -- create e-class
                 modify' $ over eClass (insert curId newClass)              -- insert new e-class into e-graph
-                modifyEClass costFun curId
-                pure curId
+                modifyEClass costFun curId                                 -- simplify eclass if it evaluates to a number
+                pure curId                                                 -- returns the e-class id
   where
     addParents :: EClassId -> ENode -> EClassId -> EGraphST ()
     addParents cId node c =
@@ -90,6 +90,8 @@ add costFun enode =
          let ec' = ec{ _parents = (cId, node):_parents ec }
          modify' $ over eClass (insert c ec')
 
+-- | rebuilds the e-graph after inserting or merging
+-- e-classes
 rebuild :: CostFun -> EGraphST ()
 rebuild costFun =
   do wl <- gets _worklist
@@ -99,6 +101,9 @@ rebuild costFun =
      forM_ wl (uncurry (repair costFun))
      forM_ al (uncurry (repairAnalysis costFun))
 
+-- | repairs e-node by canonizing its children
+-- if the canonized e-node already exists in
+-- e-graph, merge the e-classes
 repair :: CostFun -> EClassId -> ENode -> EGraphST ()
 repair costFun ecId enode =
   do modify' $ over eNodeToEClass (Map.delete enode)
@@ -111,6 +116,8 @@ repair costFun ecId enode =
                pure ()
        else modify' $ over eNodeToEClass (Map.insert enode' ecId')
 
+-- | repair the analysis of the e-class
+-- considering the new added e-node
 repairAnalysis :: CostFun -> EClassId -> ENode -> EGraphST ()
 repairAnalysis costFun ecId enode =
   do ecId'  <- canonical ecId
@@ -123,6 +130,7 @@ repairAnalysis costFun ecId enode =
                   . over eClass (insert ecId' eclass')
           modifyEClass costFun ecId'
 
+-- | merge to equivalnt e-classes
 merge :: CostFun -> EClassId -> EClassId -> EGraphST EClassId
 merge costFun c1 c2 =
   do c1' <- canonical c1
@@ -186,26 +194,32 @@ joinData (EData c1 b1 cn1) (EData c2 b2 cn2) =
     combineConsts x NotConst = x
     combineConsts x y = error (show x <> " " <> show y)
 
+-- | Calculate e-node data (constant values and cost)
 makeAnalysis :: CostFun -> ENode -> EGraphST EClassData
 makeAnalysis costFun enode =
   do consts <- calculateConsts enode
      cost   <- calculateCost costFun enode
      pure $ EData cost enode consts
 
+-- | Creates an e-graph from an expression tree
 fromTree :: CostFun -> Fix SRTree -> (EClassId, EGraph)
 fromTree costFun tree = cataM sequence' (add costFun) tree `runState` emptyGraph
 
+-- | Builds an e-graph from multiple independent trees
 fromTrees :: CostFun -> [Fix SRTree] -> ([EClassId], EGraph)
 fromTrees costFun = Prelude.foldr (\t (rs, eg) -> let (r, eg') = fromTreeWith costFun eg t in (r:rs, eg')) ([], emptyGraph)
 
+-- | insert new tree into an existing e-graph
 fromTreeWith :: CostFun -> EGraph -> Fix SRTree -> (EClassId, EGraph)
 fromTreeWith costFun eg tree = cataM sequence' (add costFun) tree `runState` eg
 
+-- | returns all the root e-classes (e-class without parents)
 findRootClasses :: EGraph -> [EClassId]
 findRootClasses = Prelude.map fst . Prelude.filter isParent . toList . _eClass
   where
     isParent (k, v) = Prelude.null (_parents v) || fst (head (_parents v)) == k
 
+-- | returns one expression rooted at e-class `eId`
 getExpressionFrom :: EGraph -> EClassId -> Fix SRTree
 getExpressionFrom eg eId = case head (Set.toList nodes) of
                                 Bin op l r -> Fix $ Bin op (getExpressionFrom eg l) (getExpressionFrom eg r)
@@ -216,6 +230,7 @@ getExpressionFrom eg eId = case head (Set.toList nodes) of
   where
     nodes = _eNodes . (! eId) . _eClass $ eg
 
+-- | returns all expressions rooted at e-class `eId`
 getAllExpressionsFrom :: EGraph -> EClassId -> [Fix SRTree]
 getAllExpressionsFrom eg eId = concatMap f (Set.toList nodes)
   where
@@ -227,6 +242,7 @@ getAllExpressionsFrom eg eId = concatMap f (Set.toList nodes)
             Param ix   -> [Fix $ Param ix]
     nodes = _eNodes . (! eId) . _eClass $ eg
 
+-- | returns a random expression rooted at e-class `eId`
 getRndExpressionFrom :: EGraph -> EClassId -> State StdGen (Fix SRTree)
 getRndExpressionFrom eg eId = do n <- randomFrom nodes
                                  Fix <$> case n of
@@ -241,20 +257,22 @@ getRndExpressionFrom eg eId = do n <- randomFrom nodes
     randomFrom xs   = do n <- randomRange (0, length xs - 1)
                          pure $ xs !! n
 
+-- | update the heights of each e-class
 calculateHeights :: EGraphST ()
-calculateHeights = do queue   <- gets findRootClasses
-                      classes <- gets (Prelude.map fst . toList . _eClass)
-                      let nClasses = length classes
-                      forM_ classes (setHeight nClasses)
-                      forM_ queue (setHeight 0)
-                      go queue (Set.fromList queue) 1
+calculateHeights =
+  do queue   <- gets findRootClasses
+     classes <- gets (Prelude.map fst . toList . _eClass)
+     let nClasses = length classes
+     forM_ classes (setHeight nClasses) -- set all heights to max possible height (number of e-classes)
+     forM_ queue (setHeight 0)          -- set root e-classes height to zero
+     go queue (Set.fromList queue) 1    -- next height is 1
   where
     setHeight x eId =
       do ec <- getEClass eId
          let ec' = over height (const x) ec
          modify' $ over eClass (insert eId ec')
 
-    setMinHeight x eId =
+    setMinHeight x eId = -- set height to the minimum between current and x
       do h <- _height <$> getEClass eId
          setHeight (min h x) eId
 
@@ -263,11 +281,12 @@ calculateHeights = do queue   <- gets findRootClasses
 
     go [] _    _ = pure ()
     go qs tabu h =
-      do children <- (Set.\\ tabu) . Set.fromList . concat <$> forM qs getChildren
+      do children <- (Set.\\ tabu) . Set.fromList . concat <$> forM qs getChildren -- rerieve all unvisited children
          let childrenL = Set.toList children
-         forM_ childrenL (setMinHeight h)
-         go childrenL (Set.union tabu children) (h+1)
+         forM_ childrenL (setMinHeight h) -- set the height of the children as the minimum between current and h
+         go childrenL (Set.union tabu children) (h+1) -- move one breadth search style
 
+-- | gets the canonical id of an e-class
 canonical :: EClassId -> EGraphST EClassId
 canonical eclassId =
   do m <- gets _canonicalMap
@@ -278,6 +297,7 @@ canonical eclassId =
         | otherwise        = go m (m ! ecId)  -- otherwise, check the next id in the sequence
 {-# INLINE canonical #-}
 
+-- | canonize the e-node children
 canonize :: ENode -> EGraphST ENode
 canonize = sequence' . fmap canonical  -- applies canonical to the children
 {-# INLINE canonize #-}
@@ -311,19 +331,23 @@ getOperator (Var ix) = Var ix
 getOperator (Param ix) = Param ix 
 getOperator (Const x) = Const x 
 
+-- | gets an e-class with id `c`
 getEClass :: EClassId -> EGraphST EClass
 getEClass c = gets ((! c) . _eClass)
 {-# INLINE getEClass #-}
 
+-- | returns an empty e-graph
 emptyGraph :: EGraph
 emptyGraph = EGraph empty Map.empty empty [] [] 0
 
+-- | calculates the cost of a node
 calculateCost :: CostFun -> SRTree EClassId -> EGraphST Cost
 calculateCost f t =
   do let cs = children t
      costs <- traverse (\c -> (_cost . _info) <$> getEClass c) cs
      pure . f $ replaceChildren costs t
 
+-- | check whether an e-node evaluates to a const
 calculateConsts :: SRTree EClassId -> EGraphST Consts
 calculateConsts t =
   do let cs = children t
