@@ -181,6 +181,17 @@ applyMatch costFun rule match =
           _ <- merge costFun (getInt (snd match)) new_eclass
           pure ()
 
+applyMergeOnlyMatch :: CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST ()
+applyMergeOnlyMatch costFun rule match =
+  do eg <- get
+     let conds = getConditions rule
+     when (all (\c -> isValidConditions c match eg) conds) $
+       do maybe_eid <- classOfENode costFun (fst match) (target rule)
+          case maybe_eid of
+            Nothing  -> pure ()
+            Just eid -> do _ <- merge costFun (getInt (snd match)) eid
+                           pure ()
+
 target :: Rule -> Pattern
 target (r :| _)   = target r
 target (_ :=> t)  = t
@@ -195,6 +206,32 @@ getConditions :: Rule -> [Condition]
 getConditions (r :| c) = c : getConditions r
 getConditions _ = []
 
+-- | gets the e-node of the target of the rule
+-- TODO: add consts and modify
+classOfENode :: CostFun -> Map ClassOrVar ClassOrVar -> Pattern -> EGraphST (Maybe EClassId)
+classOfENode costFun subst (VarPat c)     = do let maybeEid = getInt <$> subst Map.!? (Right $ fromEnum c)
+                                               case maybeEid of
+                                                 Nothing  -> pure Nothing
+                                                 Just eid -> Just <$> canonical eid
+classOfENode costFun subst (Fixed (Const x)) = Just <$> add costFun (Const x)
+classOfENode costFun subst (Fixed target) = do newChildren <- mapM (classOfENode costFun subst) (getElems target)
+                                               case sequence newChildren of
+                                                 Nothing -> pure Nothing
+                                                 Just cs -> do let new_enode = replaceChildren cs target
+                                                               areConsts <- mapM isConst cs
+                                                               if and areConsts
+                                                                 then do eid <- add costFun new_enode
+                                                                         rebuild costFun -- eid new_enode
+                                                                         pure (Just eid)
+                                                                 else gets ((Map.!? new_enode) . _eNodeToEClass)
+
+isConst :: EClassId -> EGraphST Bool
+isConst eid = do ec <- gets ((IntMap.! eid) . _eClass)
+                 case (_consts . _info) ec of
+                   ConstVal _ -> pure True
+                   _          -> pure False
+
+-- | adds the target of the rule into the e-graph
 reprPrat :: CostFun -> Map ClassOrVar ClassOrVar -> Pattern -> EGraphST EClassId
 reprPrat costFun subst (VarPat c)     = pure $ getInt $ subst Map.! (Right $ fromEnum c)
 reprPrat costFun subst (Fixed target) = do newChildren <- mapM (reprPrat costFun subst) (getElems target)

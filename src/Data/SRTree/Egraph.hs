@@ -81,8 +81,8 @@ add costFun enode =
                 info <- makeAnalysis costFun enode'
                 let newClass = EClass curId (Set.singleton enode') [] 0 info -- create e-class
                 modify' $ over eClass (insert curId newClass)              -- insert new e-class into e-graph
-                modifyEClass costFun curId                                 -- simplify eclass if it evaluates to a number
-                pure curId                                                 -- returns the e-class id
+                newId <- modifyEClass costFun curId                                 -- simplify eclass if it evaluates to a number
+                pure newId                                                 -- returns the e-class id
   where
     addParents :: EClassId -> ENode -> EClassId -> EGraphST ()
     addParents cId node c =
@@ -128,7 +128,8 @@ repairAnalysis costFun ecId enode =
      when ((_info eclass) /= newData) $
        do modify' $ over analysis (_parents eclass <>)
                   . over eClass (insert ecId' eclass')
-          modifyEClass costFun ecId'
+          _ <- modifyEClass costFun ecId'
+          pure ()
 
 -- | merge to equivalnt e-classes
 merge :: CostFun -> EClassId -> EClassId -> EGraphST EClassId
@@ -169,16 +170,24 @@ merge costFun c1 c2 =
                   else (c2, ec2, c1, ec1)
 
 -- modify an e-class, e.g., add constant e-node and prune non-leaves
-modifyEClass :: CostFun -> EClassId -> EGraphST ()
+modifyEClass :: CostFun -> EClassId -> EGraphST EClassId
 modifyEClass costFun ecId =
   do ec <- getEClass ecId
-     when (((_consts . _info) ec) /= NotConst) $
+     if (((_consts . _info) ec) /= NotConst)
+      then
        do let en = case ((_consts . _info) ec) of
                      ParamIx ix -> Param ix
                      ConstVal x -> Const x
           c <- calculateCost costFun en
           let infoEc = (_info ec){ _cost = c, _best = en }
+          maybeEid <- gets ((Map.!? en) . _eNodeToEClass)
           modify' $ over eClass (insert ecId ec{_eNodes = Set.singleton en, _info = infoEc})
+          case maybeEid of
+            Nothing   -> pure ecId
+            Just eid' -> merge costFun eid' ecId
+              -- en'    = Set.insert en $ _eNodes ec
+      else pure ecId
+
 
 -- join data from two e-classes
 joinData :: EClassData -> EClassData -> EClassData

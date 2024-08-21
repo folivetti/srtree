@@ -37,6 +37,23 @@ myCost (Param _) = 1
 myCost (Bin op l r) = 2 + l + r
 myCost (Uni _ t) = 3 + t
 
+testMerge :: IO ()
+testMerge = do
+    let rl = "y" * ("x" + "x") :=> (2 * "y") * "x"
+        t1 = sin (5 * (var 0 + var 0)) - (var 3 * ((var 4 * var 3) + (var 4 * var 3)))
+        t2 = 10 * var 0 -- sin (5 * (var 0 + var 0)) - (var 3 * ((var 4 * var 3) + (var 4 * var 3)))
+        (root, eg) = fromTrees myCost [t1,t2]
+        db = createDB eg
+        (q, r) = compileToQuery (source rl)
+        m = genericJoin db q
+        subst = match db (source rl)
+        eg' = (applyMergeOnlyMatch myCost rl (head subst) >> rebuild myCost) `execState` eg
+    mapM_ print $ _eClass  eg
+    putStrLn "" >> putStrLn ""
+    mapM_ print $ _eClass  eg'
+    putStrLn "" >> putStrLn ""
+    mapM_ (putStrLn . showExpr) $ getAllExpressionsFrom eg' (head root)
+
 test :: IO ()
 test =  do
     let x = "x" + "x"
