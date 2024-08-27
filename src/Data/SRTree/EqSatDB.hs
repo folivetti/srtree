@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 module Data.SRTree.EqSatDB where 
 
 import Data.SRTree
@@ -46,6 +47,11 @@ data Rule = Pattern :=> Pattern | Pattern :==: Pattern | Rule :| Condition
 infix 3 :=>
 infix 3 :==:
 infix 2 :|
+
+instance Show Rule where
+  show (a :=> b) = show a <> " => " <> show b
+  show (a :==: b) = show a <> " == " <> show b
+  show (a :| b) = show a <> " | <cond>"
 
 -- A Query is a list of Atoms 
 type Query = [Atom] 
@@ -171,21 +177,32 @@ populate (Just tId) (eid:eids) = let keys = Set.insert eid (_keys tId)
                                      nextTrie = _trie tId IntMap.!? eid 
                                      val = fromMaybe (trie eid IntMap.empty) $ populate nextTrie eids
                                   in Just $ IntTrie keys (IntMap.insert eid val (_trie tId))
-                                      
+
+canonizeMap ::(Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST (Map ClassOrVar ClassOrVar, ClassOrVar)
+canonizeMap (subst, cv) = (,cv) . Map.fromList <$> (traverse f $ Map.toList subst)
+  where
+    f :: (ClassOrVar, ClassOrVar) -> EGraphST (ClassOrVar, ClassOrVar)
+    f (e1, Left e2) = do e2' <- canonical e2
+                         pure (e1, Left e2')
+    f (e1, e2)      = pure (e1, e2)
+
 applyMatch :: CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST ()
-applyMatch costFun rule match =
+applyMatch costFun rule match' =
   do eg <- get
      let conds = getConditions rule
-     when (all (\c -> isValidConditions c match eg) conds) $
+     match <- canonizeMap match'
+     when ((isValidHeight match eg) && (all (\c -> isValidConditions c match eg) conds)) $
        do new_eclass <- reprPrat costFun (fst match) (target rule)
-          _ <- merge costFun (getInt (snd match)) new_eclass
+          --traceShow ("merging", snd match, new_eclass) $
+          merge costFun (getInt (snd match)) new_eclass
           pure ()
 
 applyMergeOnlyMatch :: CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST ()
-applyMergeOnlyMatch costFun rule match =
+applyMergeOnlyMatch costFun rule match' =
   do eg <- get
      let conds = getConditions rule
-     when (all (\c -> isValidConditions c match eg) conds) $
+     match <- canonizeMap match'
+     when ((isValidHeight match eg) && (all (\c -> isValidConditions c match eg) conds)) $
        do maybe_eid <- classOfENode costFun (fst match) (target rule)
           case maybe_eid of
             Nothing  -> pure ()
@@ -233,9 +250,16 @@ isConst eid = do ec <- gets ((IntMap.! eid) . _eClass)
 
 -- | adds the target of the rule into the e-graph
 reprPrat :: CostFun -> Map ClassOrVar ClassOrVar -> Pattern -> EGraphST EClassId
-reprPrat costFun subst (VarPat c)     = pure $ getInt $ subst Map.! (Right $ fromEnum c)
+reprPrat costFun subst (VarPat c)     = canonical $ getInt $ subst Map.! (Right $ fromEnum c)
 reprPrat costFun subst (Fixed target) = do newChildren <- mapM (reprPrat costFun subst) (getElems target)
                                            add costFun (replaceChildren newChildren target)
+
+isValidHeight :: (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraph -> Bool
+isValidHeight match eg = h < 6
+  where
+    h = case snd match of
+          Left ec -> _height (_eClass eg IntMap.! (canonical' ec eg))
+          Right _ -> 0
 
 -- | returns `True` if the condition of a rule is valid for that match
 isValidConditions :: Condition -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraph -> Bool
@@ -348,7 +372,7 @@ intersectTries var xs trie (i:ids) =
                     -- and the e-class id is part of the trie
                     then if xs Map.! i `Set.member` _keys trie
                             -- match the next id with the next trie
-                            then intersectTries var xs (_trie trie IntMap.! (xs Map.! i)) ids 
+                            then intersectTries var xs (_trie trie IntMap.! (xs Map.! i)) ids
                             else Nothing
                     else if Right x == var
                             -- not under investigation and is the var of interest
