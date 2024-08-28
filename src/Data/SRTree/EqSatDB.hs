@@ -2,21 +2,16 @@
 module Data.SRTree.EqSatDB where 
 
 import Data.SRTree
-import Data.SRTree.Eval
-import Data.SRTree.Recursion ( cataM )
-import Control.Monad
+import Control.Monad ( when )
 import Control.Monad.State
-import Control.Lens ( (+~), (-~), makeLenses, (^.), (.~), (&), element, over )
 import Data.Set ( Set )
 import Data.Map ( Map )
 import Data.IntMap ( IntMap )
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 import qualified Data.IntMap as IntMap
-import System.Random
-import Debug.Trace
 import Data.SRTree.Egraph
-import Data.Maybe ( fromMaybe, isNothing, mapMaybe )
+import Data.Maybe ( fromMaybe )
 import Data.List ( nub, sortBy, intercalate )
 import Data.Ord ( comparing )
 import Data.String ( IsString(..) )
@@ -32,21 +27,25 @@ data IntTrie = IntTrie { _keys :: Set EClassId, _trie :: IntMap IntTrie } -- der
 
 -- A Pattern is either a fixed-point of a tree or an
 -- index to a pattern variable. The pattern variable matches anything. 
--- TODO: instance of Num, Floating, etc. May need to change var to string.
 data Pattern = Fixed (SRTree Pattern) | VarPat Char deriving Show -- Fixed structure of a pattern or a variable that matches anything
 
+-- The instance for `IsString` for a `Pattern` is 
+-- valid only for a single letter char from a-zA-Z. 
+-- The patterns can be written as "x" + "y", for example,
+-- and it will translate to `Fixed (Bin Add (VarPat 120) (VarPat 121)`.
 instance IsString Pattern where
   fromString []     = error "empty string in VarPat"
   fromString [c] | n >= 65 && n <= 122 = VarPat c where n = fromEnum c
   fromString s      = error $ "invalid string in VarPat: " <> s
+
 -- A rule is either a directional rule where pat1 can be replaced by pat2, a bidirectional rule 
 -- where pat1 can be replaced or replace pat2, or a pattern with a conditional function 
 -- describing when to apply the rule 
 data Rule = Pattern :=> Pattern | Pattern :==: Pattern | Rule :| Condition
 
-infix 3 :=>
-infix 3 :==:
-infix 2 :|
+infix  3 :=>
+infix  3 :==:
+infixl 2 :|
 
 instance Show Rule where
   show (a :=> b) = show a <> " => " <> show b
@@ -56,15 +55,18 @@ instance Show Rule where
 -- A Query is a list of Atoms 
 type Query = [Atom] 
 
+-- A `Condition` is a function that takes a substution map,
+-- an e-graph and returns whether the pattern attends the condition.
 type Condition = Map ClassOrVar ClassOrVar -> EGraph -> Bool
 
 -- An Atom is composed of either an e-class id or pattern variable id
--- and the tree that generated that pattern 
+-- and the tree that generated that pattern. Left is e-class id and Right is a VarPat.
 type ClassOrVar = Either EClassId Int
 data Atom = Atom ClassOrVar (SRTree ClassOrVar) deriving Show
 
 unFixPat :: Pattern -> SRTree Pattern
 unFixPat (Fixed p) = p 
+{-# INLINE unFixPat #-}
 
 -- Shows the IntTrie as {keys} -> {show IntTries}
 instance Show IntTrie where
@@ -255,7 +257,7 @@ reprPrat costFun subst (Fixed target) = do newChildren <- mapM (reprPrat costFun
                                            add costFun (replaceChildren newChildren target)
 
 isValidHeight :: (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraph -> Bool
-isValidHeight match eg = h < 6
+isValidHeight match eg = h < 15
   where
     h = case snd match of
           Left ec -> _height (_eClass eg IntMap.! (canonical' ec eg))

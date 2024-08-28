@@ -68,6 +68,7 @@ library
       Data.SRTree.Print
       Data.SRTree.Random
       Data.SRTree.Recursion
+      Data.SRTree.Simplify
       Text.ParseSR
       Text.ParseSR.IO
   other-modules:
@@ -120,6 +121,39 @@ executable eqsatrepr
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , nlopt-haskell
+    , random ==1.2.*
+    , split
+    , srtree
+    , statistics
+    , text
+    , transformers
+    , vector >=0.12 && <0.14
+    , zlib
+  default-language: Haskell2010
+
+executable srsimplify
+  main-is: Main.hs
+  other-modules:
+      Paths_srtree
+  hs-source-dirs:
+      srsimplify
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2 -optc-O3
+  build-depends:
+      attoparsec
+    , attoparsec-expr
+    , base >=4.16 && <5
+    , bytestring ==0.11.*
+    , containers ==0.6.*
+    , deriving-compat
+    , dlist ==1.0.*
+    , filepath
+    , graphviz
+    , ieee
+    , lens
+    , massiv >=1.0.4.0 && <1.1
+    , mtl >=2.2 && <2.4
+    , nlopt-haskell
+    , optparse-applicative >=0.17 && <0.19
     , random ==1.2.*
     , split
     , srtree

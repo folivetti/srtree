@@ -30,6 +30,8 @@ import qualified Data.IntMap as IntMap
 import System.Random
 import Data.Ratio
 import Debug.Trace
+import Data.AEq ( AEq((~==)) )
+
 
 type EClassId   = Int -- DO NOT CHANGE THIS without changing the next line! This will break the use of IntMap for speed
 type ClassIdMap = IntMap
@@ -200,6 +202,7 @@ joinData (EData c1 b1 cn1) (EData c2 b2 cn2) =
     combineConsts (ConstVal x) (ConstVal y)
       | abs (x-y) < 1e-9   = ConstVal $ (x+y)/2
       | isNaN x && isNaN y = ConstVal x
+      | x ~== y = ConstVal $ (x+y)/2
       | isInfinite x && isInfinite y = ConstVal x
       | otherwise          = error $ "Combining different values: " <> show x <> " " <> show y
     combineConsts (ParamIx ix) (ParamIx iy) = ParamIx (min ix iy)

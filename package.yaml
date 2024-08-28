@@ -84,6 +84,18 @@ executables:
     - -optc-O3
     dependencies:
     - srtree
+  srsimplify:
+    main:                Main.hs
+    source-dirs:         srsimplify
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -O2
+    - -optc-O3
+    dependencies:
+    - optparse-applicative >= 0.17 && < 0.19
+    - srtree
 
 tests:
   srtree-test:
