@@ -185,7 +185,7 @@ modifyEClass costFun ecId =
           c <- calculateCost costFun en
           let infoEc = (_info ec){ _cost = c, _best = en }
           maybeEid <- gets ((Map.!? en) . _eNodeToEClass)
-          modify' $ over eClass (insert ecId ec{_eNodes = Set.singleton en, _info = infoEc})
+          modify' $ over eClass (insert ecId ec{_eNodes = Set.singleton en , _info = infoEc})
           case maybeEid of
             Nothing   -> pure ecId
             Just eid' -> merge costFun eid' ecId
@@ -200,11 +200,14 @@ joinData (EData c1 b1 cn1) (EData c2 b2 cn2) =
   where
     b = if c1 <= c2 then b1 else b2
     combineConsts (ConstVal x) (ConstVal y)
-      | abs (x-y) < 1e-9   = ConstVal $ (x+y)/2
+      | abs (x-y) < 1e-7   = ConstVal $ (x+y)/2
       | isNaN x && isNaN y = ConstVal x
       | x ~== y = ConstVal $ (x+y)/2
+      | abs (x / y) < 1 + 1e-6 || abs (y / x) < 1 + 1e-6 = ConstVal $ min x y
       | isInfinite x && isInfinite y = ConstVal x
-      | otherwise          = error $ "Combining different values: " <> show x <> " " <> show y
+      | isInfinite x && isNaN y = ConstVal y
+      | isNaN x && isInfinite y = ConstVal x
+      | otherwise          = error $ "Combining different values: " <> show x <> " " <> show y <> " " <> show (x/y)
     combineConsts (ParamIx ix) (ParamIx iy) = ParamIx (min ix iy)
     combineConsts NotConst x = x
     combineConsts x NotConst = x
@@ -381,8 +384,11 @@ calculateCost f t =
 calculateConsts :: SRTree EClassId -> EGraphST Consts
 calculateConsts t =
   do let cs = children t
+     eg <- get
      consts <- traverse (\c -> (_consts . _info) <$> getEClass c) cs
-     pure . combineConsts $ replaceChildren consts t
+     case (combineConsts $ replaceChildren consts t) of
+          ConstVal x | isNaN x -> pure (ConstVal x)
+          a -> pure a
 
 combineConsts :: SRTree Consts -> Consts
 combineConsts (Const x)    = ConstVal x

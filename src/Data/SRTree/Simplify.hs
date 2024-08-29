@@ -20,6 +20,22 @@ isConstPt (VarPat c) subst eg =
          _ -> False
 isConstPt _ _ _ = False
 
+isConstPos :: Pattern -> Map.Map ClassOrVar ClassOrVar -> EGraph -> Bool
+isConstPos (VarPat c) subst eg =
+    let cid = getInt $ subst Map.! (Right $ fromEnum c)
+    in case (_consts . _info) (_eClass eg IM.! cid) of
+         ConstVal x -> x > 0
+         _ -> False
+isConstPos _ _ _ = False
+
+isNotZero :: Pattern -> Map.Map ClassOrVar ClassOrVar -> EGraph -> Bool
+isNotZero (VarPat c) subst eg =
+    let cid = getInt $ subst Map.! (Right $ fromEnum c)
+    in case (_consts . _info) (_eClass eg IM.! cid) of
+         ConstVal x -> abs x < 1e-9
+         _ -> True
+isNotZero _ _ _ = True
+
 notZero (VarPat c) subst eg =
   let cid = getInt $ subst Map.! (Right $ fromEnum c)
    in case (_consts . _info) (_eClass eg IM.! cid) of
@@ -40,13 +56,13 @@ rewriteBasic =
     , ("x" * "y") + ("x" * "z") :=> "x" * ("y" + "z")
     , "x" - ("y" + "z") :=> ("x" - "y") - "z"
     , "x" - ("y" - "z") :=> ("x" - "y") + "z"
-    , ("x" * "y") / "z" :=> ("x" / "z") * "y"
-    , "x" * ("y" / "z") :=> ("x" / "z") * "y"
-    , "x" / ("y" * "z") :=> ("x" / "z") / "y"
-    , (("w" * "x") / ("z" * "y") :=> ("w" / "z") * ("x" / "y") :| isConstPt "w") :| isConstPt "z"
-    , ((("x" * "y") + ("z" * "w")) :=> "x" * ("y" + ("z" / "x") * "w") :| isConstPt "x") :| isConstPt "z"
-    , ((("x" * "y") - ("z" * "w")) :=> "x" * ("y" - ("z" / "x") * "w") :| isConstPt "x") :| isConstPt "z"
-    , ((("x" * "y") * ("z" * "w")) :=> ("x" * "z") * ("y" * "w") :| isConstPt "x") :| isConstPt "z"
+    , ("x" * "y") / "z" :=> ("x" / "z") * "y" :| isNotZero "z"
+    , "x" * ("y" / "z") :=> ("x" / "z") * "y" :| isNotZero "z"
+    , "x" / ("y" * "z") :=> ("x" / "z") / "y" :| isNotZero "z"
+    , ("w" * "x") / ("z" * "y") :=> ("w" / "z") * ("x" / "y") :| isConstPt "w" :| isConstPt "z" :| isNotZero "z"
+    , (("x" * "y") + ("z" * "w")) :=> "x" * ("y" + ("z" / "x") * "w") :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
+    , (("x" * "y") - ("z" * "w")) :=> "x" * ("y" - ("z" / "x") * "w") :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
+    , (("x" * "y") * ("z" * "w")) :=> ("x" * "z") * ("y" * "w") :| isConstPt "x" :| isConstPt "z"
     ]
 
 rewritesFun =
@@ -55,13 +71,13 @@ rewritesFun =
     , log (exp "x")  :=> "x"
     , exp (log "x")  :=> "x"
     , "x" ** (1/2)   :=> sqrt "x"
-    ,  log ("x" * "y") :=> log "x" + log "y"
-    , log ("x" / "y") :=> log "x" - log "y"
+    , log ("x" * "y") :=> log "x" + log "y" :| isConstPos "x"
+    , log ("x" / "y") :=> log "x" - log "y" :| isConstPos "x"
     , log ("x" ** "y") :=> "y" * log "x"
     , sqrt ("y" * "x") :=> sqrt "y" * sqrt "x"
     , sqrt ("y" / "x") :=> sqrt "y" / sqrt "x"
-    , abs ("x" * "y") :=> abs "x" * abs "y"
-    ,  sqrt ("z" * ("x" - "y")) :=> sqrt (negate "z") * sqrt ("y" - "x")
+    , abs ("x" * "y") :=> abs "x" * abs "y" :| isConstPt "x"
+    , sqrt ("z" * ("x" - "y")) :=> sqrt (negate "z") * sqrt ("y" - "x")
     , sqrt ("z" * ("x" + "y")) :=> sqrt "z" * sqrt ("x" + "y")
     ]
 
