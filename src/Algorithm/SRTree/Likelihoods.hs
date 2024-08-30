@@ -1,5 +1,16 @@
 {-# LANGUAGE ViewPatterns #-}
-{-# LANGUAGE TypeApplications #-}
+-----------------------------------------------------------------------------
+-- |
+-- Module      :  Algorithm.SRTree.Likelihoods 
+-- Copyright   :  (c) Fabricio Olivetti 2021 - 2024
+-- License     :  BSD3
+-- Maintainer  :  fabricio.olivetti@gmail.com
+-- Stability   :  experimental
+-- Portability :  ConstraintKinds
+--
+-- Functions to calculate different likelihood functions, their gradient, and Hessian matrices.
+--
+-----------------------------------------------------------------------------
 module Algorithm.SRTree.Likelihoods
   ( Distribution (..)
   , PVector
@@ -17,16 +28,13 @@ module Algorithm.SRTree.Likelihoods
   )
     where
 
-import Data.SRTree (SRTree (..), Fix(..), floatConstsToParam, relabelParams)
-import Algorithm.SRTree.AD -- ( reverseModeUnique )
-import Data.SRTree.Eval ( evalTree, PVector, SRVector, SRMatrix, SRMatrix, PVector )
-import Data.SRTree.Derivative ( deriveByParam )
-import Data.Maybe ( fromMaybe )
-
-import qualified Data.Massiv.Array as M 
-import Data.Massiv.Array hiding (map, read, all, take, replicate, zip, tail)
-
-import Debug.Trace ( trace, traceShow )
+import Algorithm.SRTree.AD ( forwardMode, reverseModeUnique ) -- ( reverseModeUnique )
+import Data.Massiv.Array hiding (all, map, read, replicate, tail, take, zip)
+import qualified Data.Massiv.Array as M
+import Data.Maybe (fromMaybe)
+import Data.SRTree (Fix (..), SRTree (..), floatConstsToParam, relabelParams)
+import Data.SRTree.Derivative (deriveByParam)
+import Data.SRTree.Eval (PVector, SRMatrix, SRVector, evalTree)
 
 -- | Supported distributions for negative log-likelihood
 data Distribution = Gaussian | Bernoulli | Poisson

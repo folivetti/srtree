@@ -1,25 +1,27 @@
-{-# language BangPatterns #-}
-{-# language FlexibleInstances #-}
-{-# language OverloadedStrings #-}
-{-# language ImportQualifiedPost #-}
-{-# language ViewPatterns #-}
+-----------------------------------------------------------------------------
+-- |
+-- Module      :  Algorithm.SRTree.Opt 
+-- Copyright   :  (c) Fabricio Olivetti 2021 - 2024
+-- License     :  BSD3
+-- Maintainer  :  fabricio.olivetti@gmail.com
+-- Stability   :  experimental
+-- Portability :  ConstraintKinds
+--
+-- Functions to optimize the parameters of an expression.
+--
+-----------------------------------------------------------------------------
 module Algorithm.SRTree.Opt
---    ( optimize, sse, mse, rmse, PVector, SRMatrix, minimizeNLL, minimizeNLLWithFixedParam, minimizeGaussian, minimizeBinomial, minimizePoisson, nll, Distribution (..), gradNLL, fisherNLL, hessianNLL )
     where
 
-import Data.SRTree ( SRTree (..), Fix(..), floatConstsToParam, relabelParams )
-import Data.SRTree.Eval ( evalTree )
-import Algorithm.SRTree.AD ( reverseModeUnique )
 import Algorithm.SRTree.Likelihoods
-import Debug.Trace ( trace )
-import Data.SRTree.Print ( showExpr )
-import Data.Massiv.Array 
 import Algorithm.SRTree.NonlinearOpt
-import Data.Bifunctor ( second, bimap )
-import Control.Monad.ST
+import Data.Bifunctor (bimap, second)
+import Data.Massiv.Array
+import Data.SRTree (Fix (..), SRTree (..), floatConstsToParam, relabelParams)
+import Data.SRTree.Eval (evalTree)
 import qualified Data.Vector.Storable as VS
-import Debug.Trace ( trace )
 
+-- | minimizes the negative log-likelihood of the expression
 minimizeNLL :: Distribution -> Maybe Double -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
 minimizeNLL dist msErr niter xss ys tree t0
   | niter == 0 = (t0, f)
@@ -40,6 +42,7 @@ minimizeNLL dist msErr niter xss ys tree t0
                   Right sol -> solutionParams sol
                   Left e    -> t0'
 
+-- | minimizes the likelihood assuming repeating parameters in the expression 
 minimizeNLLNonUnique :: Distribution -> Maybe Double -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
 minimizeNLLNonUnique dist msErr niter xss ys tree t0
   | niter == 0 = (t0, f)
@@ -59,6 +62,7 @@ minimizeNLLNonUnique dist msErr niter xss ys tree t0
                   Right sol -> solutionParams sol
                   Left e    -> t0'
 
+-- | minimizes the function while keeping the parameter ix fixed (used to calculate the profile)
 minimizeNLLWithFixedParam :: Distribution -> Maybe Double -> Int -> SRMatrix -> PVector -> Fix SRTree -> Int -> PVector -> PVector
 minimizeNLLWithFixedParam dist msErr niter xss ys tree ix t0
   | niter == 0 = t0
@@ -80,15 +84,19 @@ minimizeNLLWithFixedParam dist msErr niter xss ys tree ix t0
                   Right sol -> solutionParams sol
                   Left e    -> t0'
 
+-- | minimizes using Gaussian likelihood 
 minimizeGaussian :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
 minimizeGaussian = minimizeNLL Gaussian Nothing
 
+-- | minimizes using Binomial likelihood 
 minimizeBinomial :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
 minimizeBinomial = minimizeNLL Bernoulli Nothing
 
+-- | minimizes using Poisson likelihood 
 minimizePoisson :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
 minimizePoisson = minimizeNLL Poisson Nothing
 
+-- estimates the standard error if not provided 
 estimateSErr :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Int -> Maybe Double
 estimateSErr Gaussian Nothing  xss ys theta0 t nIter = Just err
   where

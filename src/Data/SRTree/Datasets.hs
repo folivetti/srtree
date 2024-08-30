@@ -1,9 +1,10 @@
 {-# language ImportQualifiedPost #-}
 {-# language ViewPatterns #-}
+{-# language OverloadedStrings #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.Datasets
--- Copyright   :  (c) Fabricio Olivetti 2021 - 2021
+-- Copyright   :  (c) Fabricio Olivetti 2021 - 2024
 -- License     :  BSD3
 -- Maintainer  :  fabricio.olivetti@gmail.com
 -- Stability   :  experimental
@@ -16,18 +17,24 @@
 module Data.SRTree.Datasets ( loadDataset )
     where
 
+import Codec.Compression.GZip (decompress)
 import Data.ByteString.Char8 qualified as B
 import Data.ByteString.Lazy qualified as BS
-import Data.List (intercalate, delete, find)
+import Data.List (delete, find, intercalate)
+import Data.Massiv.Array
+  ( Array,
+    Comp (Seq),
+    Ix2 ((:.)),
+    S (..),
+    Sz (Sz1),
+    (<!),
+  )
+import Data.Massiv.Array qualified as M
+import Data.Maybe (fromJust)
+import Data.SRTree.Eval (PVector, SRMatrix)
 import Data.Vector qualified as V
-import Codec.Compression.GZip ( decompress )
 import System.FilePath (takeExtension)
 import Text.Read (readMaybe)
-import Data.Maybe (fromJust)
-
-import Data.Massiv.Array qualified as M 
-import Data.Massiv.Array hiding (map, read, all, take, replicate, zip, tail)
-import Data.SRTree.Eval ( SRMatrix, PVector )
 
 -- | Loads a list of list of bytestrings to a matrix of double
 loadMtx :: [[B.ByteString]] -> Array S Ix2 Double
@@ -42,12 +49,17 @@ isGZip = (== ".gz") . takeExtension
 -- | Detects the separator automatically by 
 --   checking whether the use of each separator generates
 --   the same amount of SRMatrix in every row and at least two SRMatrix.
+--
+--  >>> detectSep ["x1,x2,x3,x4"] 
+-- ','
 detectSep :: [B.ByteString] -> Char
 detectSep xss = go seps
   where
     seps = [' ','\t','|',':',';',',']
     xss' = map B.strip xss
 
+    -- consistency check whether all rows have the same
+    -- number of columns when spliting by this sep 
     allSameLen []     = True
     allSameLen (y:ys) = y /= 1 && all (==y) ys
 
@@ -58,6 +70,9 @@ detectSep xss = go seps
                    else go cs
 {-# INLINE detectSep #-}
 
+-- | reads a file and returns a list of list of `ByteString`
+-- corresponding to each element of the matrix.
+-- The first row can be a header. 
 readFileToLines :: FilePath -> IO [[B.ByteString]]
 readFileToLines filename = do
   content <- removeBEmpty . toLines . toChar8 . unzip <$> BS.readFile filename

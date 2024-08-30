@@ -1,16 +1,28 @@
 {-# language OverloadedStrings #-}
+-----------------------------------------------------------------------------
+-- |
+-- Module      :  Text.ParseSR
+-- Copyright   :  (c) Fabricio Olivetti 2021 - 2024
+-- License     :  BSD3
+-- Maintainer  :  fabricio.olivetti@gmail.com
+-- Stability   :  experimental
+-- Portability :  ConstraintKinds
+--
+-- Functions to parse a string representing an expression
+--
+-----------------------------------------------------------------------------
 module Text.ParseSR ( parseSR, showOutput, SRAlgs(..), Output(..) ) 
     where
 
+import Control.Applicative ((<|>))
 import Data.Attoparsec.ByteString.Char8
 import Data.Attoparsec.Expr
 import qualified Data.ByteString.Char8 as B
-import Control.Applicative ( (<|>) )
-import qualified Data.SRTree.Print as P
-import Data.List ( sortOn )
-import Data.Char ( toLower )
-import Debug.Trace ( trace )
+import Data.Char (toLower)
+import Data.List (sortOn)
 import Data.SRTree
+import qualified Data.SRTree.Print as P
+import Debug.Trace (trace)
 
 -- * Data types
 
@@ -35,6 +47,9 @@ showOutput TIKZ   = P.showTikz
 showOutput LATEX  = P.showLatex
 
 -- | Calls the corresponding parser for a given `SRAlgs`
+--
+-- >>> fmap (showOutput MATH) $ parseSR OPERON "lambda,theta" False "lambda ^ 2 - sin(theta*3*lambda)"
+-- Right "((x0 ^ 2.0) - Sin(((x1 * 3.0) * x0)))"
 parseSR :: SRAlgs -> B.ByteString -> Bool -> B.ByteString -> Either String (Fix SRTree)
 parseSR HL     header reparam = eitherResult . (`feed` "") . parse (parseHL reparam $ splitHeader header) . putEOL . B.strip
 parseSR BINGO  header reparam = eitherResult . (`feed` "") . parse (parseBingo reparam $ splitHeader header) . putEOL . B.strip

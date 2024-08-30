@@ -1,11 +1,11 @@
 {-# language FlexibleInstances, DeriveFunctor #-}
 {-# language ScopedTypeVariables #-}
 {-# language RankNTypes #-}
-{-# language ViewPatterns #-}
+{-# language OverloadedStrings #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.Internal 
--- Copyright   :  (c) Fabricio Olivetti 2021 - 2021
+-- Copyright   :  (c) Fabricio Olivetti 2021 - 2024
 -- License     :  BSD3
 -- Maintainer  :  fabricio.olivetti@gmail.com
 -- Stability   :  experimental
@@ -40,9 +40,11 @@ module Data.SRTree.Internal
          )
          where
 
-import Data.SRTree.Recursion ( Fix (..), cata, cataM )
-import Control.Monad.State
+import Control.Monad.State (MonadState (get), State, evalState, modify)
+import Data.SRTree.Recursion (Fix (..), cata, cataM)
 import qualified Data.Set as S
+import Data.String (IsString (..))
+import Text.Read (readMaybe)
 
 -- | Tree structure to be used with Symbolic Regression algorithms.
 -- This structure is a fixed point of a n-ary tree. 
@@ -50,8 +52,8 @@ data SRTree val =
    Var Int     -- ^ index of the variables
  | Param Int   -- ^ index of the parameter
  | Const Double -- ^ constant value, can be converted to a parameter
- -- | IConst Int   -- ^ TODO: integer constant
- -- | RConst Ratio  -- ^ TODO: rational constant
+ -- | IConst Int   -- TODO: integer constant
+ -- | RConst Ratio  -- TODO: rational constant
  | Uni Function val -- ^ univariate function
  | Bin Op val val -- ^ binary operator
  deriving (Show, Eq, Ord, Functor)
@@ -94,6 +96,22 @@ param ix = Fix (Param ix)
 -- | create a tree with a single node representing a constant value
 constv :: Double -> Fix SRTree
 constv x = Fix (Const x)
+
+-- | the instance of `IsString` allows us to
+-- create a tree using a more practical notation:
+--
+-- >>> :t  "x0" + "t0" * sin("x1" * "t1")
+-- Fix SRTree
+--
+instance IsString (Fix SRTree) where 
+    fromString [] = error "empty string for SRTree"
+    fromString ('x':ix) = case readMaybe ix of 
+                            Just iy -> Fix (Var iy)
+                            Nothing -> error "wrong format for variable. It should be xi where i is an index. Ex.: \"x0\", \"x1\"."
+    fromString ('t':ix) = case readMaybe ix of 
+                            Just iy -> Fix (Param iy)
+                            Nothing -> error "wrong format for parameter. It should be ti where i is an index. Ex.: \"t0\", \"t1\"."
+    fromString _        = error "A string can represent a variable or a parameter following the format xi or ti, respectivelly, where i is the index. Ex.: \"x0\", \"t0\"."
 
 instance Num (Fix SRTree) where
   Fix (Const 0) + r = r
@@ -193,6 +211,10 @@ arity = cata alg
 {-# INLINE arity #-}
 
 -- | Get the children of a node. Returns an empty list in case of a leaf node.
+--
+-- >>> map showExpr . getChildren $ "x0" + 2 
+-- ["x0", 2]
+--
 getChildren :: Fix SRTree -> [Fix SRTree]
 getChildren (Fix (Var {})) = []
 getChildren (Fix (Param {})) = []
@@ -202,6 +224,9 @@ getChildren (Fix (Bin _ l r)) = [l, r]
 {-# INLINE getChildren #-}
 
 -- | Count the number of nodes in a tree.
+--
+-- >>> countNodes $ "x0" + 2
+-- 3
 countNodes :: Num a => Fix SRTree -> a
 countNodes = cata alg
   where
@@ -213,6 +238,9 @@ countNodes = cata alg
 {-# INLINE countNodes #-}
 
 -- | Count the number of `Var` nodes
+--
+-- >>> countVarNodes $ "x0" + 2 * ("x0" - sin "x1")
+-- 3
 countVarNodes :: Num a => Fix SRTree -> a
 countVarNodes = cata alg
   where
@@ -224,6 +252,9 @@ countVarNodes = cata alg
 {-# INLINE countVarNodes #-}
 
 -- | Count the number of `Param` nodes
+--
+-- >>> countParams $ "x0" + "t0" * sin ("t1" + "x1") - "t0"
+-- 3
 countParams :: Num a => Fix SRTree -> a
 countParams = cata alg
   where
@@ -235,6 +266,9 @@ countParams = cata alg
 {-# INLINE countParams #-}
 
 -- | Count the number of const nodes
+--
+-- >>> countConsts $ "x0"* 2 + 3 * sin "x0"
+-- 2
 countConsts :: Num a => Fix SRTree -> a
 countConsts = cata alg
   where
@@ -246,6 +280,9 @@ countConsts = cata alg
 {-# INLINE countConsts #-}
 
 -- | Count the occurrences of variable indexed as `ix`
+--
+-- >>> countOccurrences 0 $ "x0"* 2 + 3 * sin "x0" + "x1"
+-- 2
 countOccurrences :: Num a => Int -> Fix SRTree -> a
 countOccurrences ix = cata alg
   where
@@ -256,6 +293,10 @@ countOccurrences ix = cata alg
       alg (Bin _ l r) = l + r
 {-# INLINE countOccurrences #-}
 
+-- | counts the number of unique tokens 
+--
+-- >>> countUniqueTokens $ "x0" + ("x1" * "x0" - sin ("x0" ** 2))
+-- 8
 countUniqueTokens :: Num a => Fix SRTree -> a
 countUniqueTokens = len . cata alg
   where
@@ -267,8 +308,12 @@ countUniqueTokens = len . cata alg
     alg (Bin op l r)    = (S.singleton op, mempty, mempty, mempty, mempty) <> l <> r
 {-# INLINE countUniqueTokens #-}
 
+-- | return the number of unique variables 
+-- 
+-- >>> numberOfVars $ "x0" + 2 * ("x0" - sin "x1")
+-- 2
 numberOfVars :: Num a => Fix SRTree -> a
-numberOfVars = foldr (\_ acc -> acc + 1) 0 . cata alg
+numberOfVars = fromIntegral . S.size . cata alg
   where
     alg (Uni f t)    = t
     alg (Bin op l r) = l <> r
@@ -276,6 +321,11 @@ numberOfVars = foldr (\_ acc -> acc + 1) 0 . cata alg
     alg _            = mempty
 {-# INLINE numberOfVars #-}
 
+-- | returns the integer constants. We assume an integer constant 
+-- as those values in which `floor x == ceiling x`.
+--
+-- >>> getIntConsts $ "x0" + 2 * "x1" ** 3 - 3.14
+-- [2.0,3.0]
 getIntConsts :: Fix SRTree -> [Double]
 getIntConsts = cata alg
   where
@@ -287,6 +337,9 @@ getIntConsts = cata alg
 {-# INLINE getIntConsts #-}
 
 -- | Relabel the parameters indices incrementaly starting from 0
+--
+-- >>> showExpr . relabelParams $ "x0" + "t0" * sin ("t1" + "x1") - "t0" 
+-- "x0" + "t0" * sin ("t1" + "x1") - "t2" 
 relabelParams :: Fix SRTree -> Fix SRTree
 relabelParams t = cataM leftToRight alg t `evalState` 0
   where
@@ -308,6 +361,9 @@ relabelParams t = cataM leftToRight alg t `evalState` 0
 
 -- | Change constant values to a parameter, returning the changed tree and a list
 -- of parameter values
+--
+-- >>> snd . constsToParam $ "x0" * 2 + 3.14 * sin (5 * "x1")
+-- [2.0,3.14,5.0]
 constsToParam :: Fix SRTree -> (Fix SRTree, [Double])
 constsToParam = first relabelParams . cata alg
   where
@@ -325,6 +381,9 @@ constsToParam = first relabelParams . cata alg
 
 -- | Same as `constsToParam` but does not change constant values that
 -- can be converted to integer without loss of precision
+--
+-- >>> snd . floatConstsToParam $ "x0" * 2 + 3.14 * sin (5 * "x1")
+-- [3.14]
 floatConstsToParam :: Fix SRTree -> (Fix SRTree, [Double])
 floatConstsToParam = first relabelParams . cata alg
   where
@@ -339,6 +398,9 @@ floatConstsToParam = first relabelParams . cata alg
       alg (Bin f l r) = combine ((Fix .) . Bin f) l r -- (Fix (Bin f (fst l) (fst r)), snd l <> snd r)
 
 -- | Convert the parameters into constants in the tree
+--
+-- >>> showExpr . paramsToConst [1.1, 2.2, 3.3] $ "x0" + "t0" * sin ("t1" * "x0" - "t2")
+-- x0 + 1.1 * sin(2.2 * x0 - 3.3)
 paramsToConst :: [Double] -> Fix SRTree -> Fix SRTree
 paramsToConst theta = cata alg
   where

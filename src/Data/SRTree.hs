@@ -1,7 +1,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree 
--- Copyright   :  (c) Fabricio Olivetti 2021 - 2021
+-- Copyright   :  (c) Fabricio Olivetti 2021 - 2024
 -- License     :  BSD3
 -- Maintainer  :  fabricio.olivetti@gmail.com
 -- Stability   :  experimental

@@ -1,7 +1,9 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.Print 
--- Copyright   :  (c) Fabricio Olivetti 2021 - 2021
+-- Copyright   :  (c) Fabricio Olivetti 2021 - 2024
 -- License     :  BSD3
 -- Maintainer  :  fabricio.olivetti@gmail.com
 -- Stability   :  experimental
@@ -22,24 +24,30 @@ module Data.SRTree.Print
          )
          where
 
-import Control.Monad.Reader ( asks, runReader, Reader )
-import Data.Char ( toLower )
-
+import Control.Monad.Reader (Reader, asks, runReader)
+import Data.Char (toLower)
 import Data.SRTree.Internal
-import Data.SRTree.Recursion
+import Data.SRTree.Recursion (cata)
 
+-- | convert a tree into a string in math notation 
+--
+-- >>> showExpr $ "x0" + sin ( tanh ("t0" + 2) )
+-- "(x0 + Sin(Tanh((t0 + 2.0))))"
 showExpr :: Fix SRTree -> String
-showExpr = cata alg
-  where
-    alg (Var ix)     = 'x' : show ix
-    alg (Param ix)   = 't' : show ix
-    alg (Const c)    = show c
-    alg (Bin op l r) = concat ["(", l, " ", showOp op, " ", r, ")"]
-    alg (Uni f t)    = concat [show f, "(", t, ")"]
+showExpr = cata $
+  \case 
+    Var ix     -> 'x' : show ix
+    Param ix   -> 't' : show ix
+    Const c    -> show c
+    Bin op l r -> concat ["(", l, " ", showOp op, " ", r, ")"]
+    Uni f t    -> concat [show f, "(", t, ")"]
 
+-- | prints the expression 
 printExpr :: Fix SRTree -> IO ()
 printExpr = putStrLn . showExpr 
 
+-- how to display an operator 
+showOp :: Op -> String
 showOp Add   = "+"
 showOp Sub   = "-"
 showOp Mul   = "*"
@@ -48,16 +56,20 @@ showOp Power = "^"
 {-# INLINE showOp #-}
 
 -- | Displays a tree as a numpy compatible expression.
+--
+-- >>> showPython $ "x0" + sin ( tanh ("t0" + 2) )
+-- "(x[:, 0] + np.sin(np.tanh((t[:, 0] + 2.0))))"
 showPython :: Fix SRTree -> String
-showPython = cata alg
-  where
-    alg (Var ix)     = concat ["x[:, ", show ix, "]"]
-    alg (Param ix)   = concat ["t[:, ", show ix, "]"]
-    alg (Const c)    = show c
-    alg (Bin Power l r) = concat [l, " ** ", r]
-    alg (Bin op l r) = concat ["(", l, " ", showOp op, " ", r, ")"]
-    alg (Uni f t)    = concat [pyFun f, "(", t, ")"]
+showPython = cata $
+  \case
+    Var ix        -> concat ["x[:, ", show ix, "]"]
+    Param ix      -> concat ["t[:, ", show ix, "]"]
+    Const c       -> show c
+    Bin Power l r -> concat [l, " ** ", r]
+    Bin op l r    -> concat ["(", l, " ", showOp op, " ", r, ")"]
+    Uni f t       -> concat [pyFun f, "(", t, ")"]
           
+  where
     pyFun Id     = ""
     pyFun Abs    = "np.abs"
     pyFun Sin    = "np.sin"
@@ -77,38 +89,44 @@ showPython = cata alg
     pyFun Log    = "np.log"
     pyFun Exp    = "np.exp"
 
+-- | print the expression in numpy notation
 printPython :: Fix SRTree -> IO ()
 printPython = putStrLn . showPython
 
--- | Displays a tree as a sympy compatible expression.
+-- | Displays a tree as a LaTeX compatible expression.
+--
+-- >>> showLatex $ "x0" + sin ( tanh ("t0" + 2) )
+-- "\\left(x_{, 0} + \\operatorname{sin}(\\operatorname{tanh}(\\left(\\theta_{, 0} + 2.0\\right)))\\right)"
 showLatex :: Fix SRTree -> String
-showLatex = cata alg
-  where
-    alg (Var ix)     = concat ["x_{, ", show ix, "}"]
-    alg (Param ix)   = concat ["\\theta_{, ", show ix, "}"]
-    alg (Const c)    = show c
-    alg (Bin Power l r) = concat [l, "^{", r, "}"]
-    alg (Bin op l r) = concat ["\\left(", l, " ", showOp op, " ", r, "\\right)"]
-    alg (Uni Abs t)  = concat ["\\left |", t, "\\right |"]
-    alg (Uni f t)    = concat [showLatexFun f, "(", t, ")"]
+showLatex = cata $
+  \case
+    Var ix        -> concat ["x_{, ", show ix, "}"]
+    Param ix      -> concat ["\\theta_{, ", show ix, "}"]
+    Const c       -> show c
+    Bin Power l r -> concat [l, "^{", r, "}"]
+    Bin op l r    -> concat ["\\left(", l, " ", showOp op, " ", r, "\\right)"]
+    Uni Abs t     -> concat ["\\left |", t, "\\right |"]
+    Uni f t       -> concat [showLatexFun f, "(", t, ")"]
 
 showLatexFun :: Function -> String
 showLatexFun f = mconcat ["\\operatorname{", map toLower $ show f, "}"]
 {-# INLINE showLatexFun #-}
 
+-- | prints expression in LaTeX notation. 
 printLatex :: Fix SRTree -> IO ()
 printLatex = putStrLn . showLatex
 
 -- | Displays a tree in Tikz format
 showTikz :: Fix SRTree -> String
-showTikz = cata alg
+showTikz = cata $
+  \case 
+    Var ix     -> concat ["[$x_{, ", show ix, "}$]\n"]
+    Param ix   -> concat ["[$\\theta_{, ", show ix, "}$]\n"]
+    Const c    -> concat ["[$", show (roundN 2 c), "$]\n"]
+    Bin op l r -> concat ["[", showOpTikz op, l, r, "]\n"]
+    Uni f t    -> concat ["[", map toLower $ show f, t, "]\n"]
   where
     roundN n x = let ten = 10^n in (/ ten) . fromIntegral . round $ x*ten
-    alg (Var ix)     = concat ["[$x_{, ", show ix, "}$]\n"]
-    alg (Param ix)   = concat ["[$\\theta_{, ", show ix, "}$]\n"]
-    alg (Const c)    = concat ["[$", show (roundN 2 c), "$]\n"]
-    alg (Bin op l r) = concat ["[", showOpTikz op, l, r, "]\n"]
-    alg (Uni f t)    = concat ["[", map toLower $ show f, t, "]\n"]
 
     showOpTikz Add = "+\n"
     showOpTikz Sub = "-\n"
@@ -116,4 +134,6 @@ showTikz = cata alg
     showOpTikz Div = "÷\n"
     showOpTikz Power = "\\^{}\n"
 
+-- | prints the tree in TikZ format 
+printTikz :: Fix SRTree -> IO ()
 printTikz = putStrLn . showTikz

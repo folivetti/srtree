@@ -2,7 +2,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.Random 
--- Copyright   :  (c) Fabricio Olivetti 2021 - 2021
+-- Copyright   :  (c) Fabricio Olivetti 2021 - 2024
 -- License     :  BSD3
 -- Maintainer  :  fabricio.olivetti@gmail.com
 -- Stability   :  experimental
@@ -29,13 +29,11 @@ module Data.SRTree.Random
          )
          where
 
-import System.Random 
-import Control.Monad.State 
-import Control.Monad.Reader 
+import Control.Monad.Reader (ReaderT, asks, runReaderT)
+import Control.Monad.State ( MonadState(state), MonadTrans(lift), StateT )
 import Data.Maybe (fromJust)
-
 import Data.SRTree.Internal
-import Data.SRTree.Recursion
+import System.Random (Random (random, randomR), StdGen, mkStdGen)
 
 -- * Class definition of properties that a certain parameter type has.
 --
@@ -149,6 +147,11 @@ randomNonTerminal = do
     6 -> pure . Fix $ Bin Power 0 0
     
 -- | Returns a random tree with a limited budget, the parameter `p` must have every property.
+--
+-- >>> let treeGen = runReaderT (randomTree 12) (P [0,1] (-10, 10) (2, 3) [Log, Exp])
+-- >>> tree <- evalStateT treeGen (mkStdGen 52)
+-- >>> showExpr tree
+-- "(-2.7631152121655838 / Exp((x0 / ((x0 * -7.681722660704317) - Log(3.378309080134594)))))"
 randomTree :: HasEverything p => Int -> RndTree p
 randomTree 0      = do
   coin <- lift toss
@@ -163,6 +166,11 @@ randomTree budget = do
     2 -> replaceChildren node <$> randomTree (budget `div` 2) <*> randomTree (budget `div` 2)
     
 -- | Returns a random tree with a approximately a number `n` of nodes, the parameter `p` must have every property.
+--
+-- >>> let treeGen = runReaderT (randomTreeBalanced 10) (P [0,1] (-10, 10) (2, 3) [Log, Exp])
+-- >>> tree <- evalStateT treeGen (mkStdGen 42)
+-- >>> showExpr tree
+-- "Exp(Log((((7.784360517385774 * x0) - (3.6412224491658223 ^ x1)) ^ ((x0 ^ -4.09764995657091) + Log(-7.710216839988497)))))"
 randomTreeBalanced :: HasEverything p => Int -> RndTree p
 randomTreeBalanced n | n <= 1 = do
   coin <- lift toss

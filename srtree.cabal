@@ -5,8 +5,8 @@ cabal-version: 1.12
 -- see: https://github.com/sol/hpack
 
 name:           srtree
-version:        1.0.0.5
-synopsis:       A general framework to work with Symbolic Regression expression trees.
+version:        2.0.0.0
+synopsis:       A general library to work with Symbolic Regression expression trees.
 description:    A Symbolic Regression Tree data structure to work with mathematical expressions with support to first order derivative and simplification;
 category:       Math, Data, Data Structures
 homepage:       https://github.com/folivetti/srtree#readme
@@ -27,6 +27,10 @@ source-repository head
 
 library
   exposed-modules:
+      Algorithm.EqSat
+      Algorithm.EqSat.Egraph
+      Algorithm.EqSat.EqSatDB
+      Algorithm.EqSat.Simplify
       Algorithm.Massiv.Utils
       Algorithm.SRTree.AD
       Algorithm.SRTree.ConfidenceIntervals
@@ -34,41 +38,14 @@ library
       Algorithm.SRTree.ModelSelection
       Algorithm.SRTree.NonlinearOpt
       Algorithm.SRTree.Opt
-      Data.Equality.Analysis
-      Data.Equality.Analysis.Monadic
-      Data.Equality.Extraction
-      Data.Equality.Graph
-      Data.Equality.Graph.Classes
-      Data.Equality.Graph.Classes.Id
-      Data.Equality.Graph.Dot
-      Data.Equality.Graph.Internal
-      Data.Equality.Graph.Lens
-      Data.Equality.Graph.Monad
-      Data.Equality.Graph.Nodes
-      Data.Equality.Graph.ReprUnionFind
-      Data.Equality.Language
-      Data.Equality.Matching
-      Data.Equality.Matching.Database
-      Data.Equality.Matching.Pattern
-      Data.Equality.Saturation
-      Data.Equality.Saturation.Rewrites
-      Data.Equality.Saturation.Scheduler
-      Data.Equality.Utils
-      Data.Equality.Utils.IntToIntMap
-      Data.Equality.Utils.SizedList
       Data.SRTree
       Data.SRTree.Datasets
       Data.SRTree.Derivative
-      Data.SRTree.Egraph
-      Data.SRTree.EqSat
-      Data.SRTree.EqSat1
-      Data.SRTree.EqSatDB
       Data.SRTree.Eval
       Data.SRTree.Internal
       Data.SRTree.Print
       Data.SRTree.Random
       Data.SRTree.Recursion
-      Data.SRTree.Simplify
       Text.ParseSR
       Text.ParseSR.IO
   other-modules:
@@ -83,6 +60,7 @@ library
     , containers ==0.6.*
     , deriving-compat
     , dlist ==1.0.*
+    , exceptions
     , filepath
     , graphviz
     , ieee
@@ -114,6 +92,7 @@ executable eqsatrepr
     , containers ==0.6.*
     , deriving-compat
     , dlist ==1.0.*
+    , exceptions
     , filepath
     , graphviz
     , ieee
@@ -146,6 +125,7 @@ executable srsimplify
     , containers ==0.6.*
     , deriving-compat
     , dlist ==1.0.*
+    , exceptions
     , filepath
     , graphviz
     , ieee
@@ -182,6 +162,7 @@ executable srtools
     , containers ==0.6.*
     , deriving-compat
     , dlist ==1.0.*
+    , exceptions
     , filepath
     , graphviz
     , ieee
@@ -217,6 +198,7 @@ executable tinygp
     , containers ==0.6.*
     , deriving-compat
     , dlist ==1.0.*
+    , exceptions
     , filepath
     , graphviz
     , ieee
@@ -252,6 +234,7 @@ test-suite srtree-test
     , containers ==0.6.*
     , deriving-compat
     , dlist ==1.0.*
+    , exceptions
     , filepath
     , graphviz
     , ieee

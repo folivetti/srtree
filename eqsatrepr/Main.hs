@@ -2,7 +2,7 @@
 module Main where
 
 import Data.SRTree 
-import Data.SRTree.Egraph
+import Algorithm.EqSat.Egraph
 import Data.SRTree.Print 
 import qualified Data.Map as Map
 import qualified Data.IntMap as IM
@@ -13,8 +13,8 @@ import Control.Monad
 import Control.Monad.Reader
 import qualified Data.SRTree.Random as RT
 import Data.List ( nub )
-import Data.SRTree.EqSatDB
-import Data.SRTree.EqSat1
+import Algorithm.EqSat.EqSatDB
+import Algorithm.EqSat
 
 isConstPt :: Pattern -> Map.Map ClassOrVar ClassOrVar -> EGraph -> Bool
 isConstPt (VarPat c) subst eg =

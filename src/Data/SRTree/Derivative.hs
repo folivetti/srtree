@@ -1,7 +1,8 @@
+{-# LANGUAGE OverloadedStrings #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.Derivative 
--- Copyright   :  (c) Fabricio Olivetti 2021 - 2021
+-- Copyright   :  (c) Fabricio Olivetti 2021 - 2024
 -- License     :  BSD3
 -- Maintainer  :  fabricio.olivetti@gmail.com
 -- Stability   :  experimental
@@ -19,13 +20,18 @@ module Data.SRTree.Derivative
         where
 
 import Data.SRTree.Internal
-import Data.SRTree.Eval
-import Data.SRTree.Recursion ( Fix (..), mutu )
+import Data.SRTree.Recursion (Fix (..), mutu)
+import Data.Attoparsec.ByteString.Char8 (double)
 
 -- | Creates the symbolic partial derivative of a tree by variable `dx` (if `p` is `False`)
 -- or parameter `dx` (if `p` is `True`).
 -- This uses mutual recursion where the first recursion (alg1) holds the derivative w.r.t. 
 -- the current node and the second (alg2) holds the original tree.
+--
+-- >>> showExpr . deriveBy False 0 $ 2 * "x0" * "x1"
+-- "(2.0 * x1)"
+-- >>> showExpr . deriveBy True 1 $ 2 * "x0" * "t0" - sqrt ("t1" * "x0")
+-- "(-1.0 * ((1.0 / (2.0 * Sqrt((t1 * x0)))) * x0))"
 deriveBy :: Bool -> Int -> Fix SRTree -> Fix SRTree
 deriveBy p dx = fst (mutu alg1 alg2)
   where
@@ -47,6 +53,9 @@ deriveBy p dx = fst (mutu alg1 alg2)
 
 -- | Derivative of each supported function
 -- For a function h(f) it returns the derivative dh/df
+--
+-- >>> derivative Log 2.0
+-- 0.5
 derivative :: Floating a => Function -> a -> a
 derivative Id      = const 1
 derivative Abs     = \x -> x / abs x
@@ -70,6 +79,9 @@ derivative Log     = recip
 {-# INLINE derivative #-}
 
 -- | Second-order derivative of supported functions
+--
+-- >>> doubleDerivative Log 2.0
+-- -0.25
 doubleDerivative :: Floating a => Function -> a -> a
 doubleDerivative Id      = const 0
 doubleDerivative Abs     = const 0

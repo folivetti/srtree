@@ -1,19 +1,31 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
+-----------------------------------------------------------------------------
+-- |
+-- Module      :  Algorithm.SRTree.ModelSelection 
+-- Copyright   :  (c) Fabricio Olivetti 2021 - 2024
+-- License     :  BSD3
+-- Maintainer  :  fabricio.olivetti@gmail.com
+-- Stability   :  experimental
+-- Portability :  ConstraintKinds
+--
+-- Helper functions for model selection criteria
+--
+-----------------------------------------------------------------------------
 
 module Algorithm.SRTree.ModelSelection where
 
-import qualified Data.Vector.Storable as VS
-import qualified Data.Massiv.Array as A
-import Data.Massiv.Array ( Sz(..), Ix2(..), (!-!) )
-import Data.SRTree
-import Data.SRTree.Eval ( evalTree )
-import Data.SRTree.Recursion ( cata ) 
-import Algorithm.SRTree.Opt
+import Algorithm.Massiv.Utils ( det )
 import Algorithm.SRTree.Likelihoods
-import Algorithm.Massiv.Utils
+    ( PVector, SRMatrix, fisherNLL, hessianNLL, nll, Distribution )
+import Data.Massiv.Array (Ix2 (..), Sz (..), (!-!))
+import qualified Data.Massiv.Array as A
+import Data.SRTree
+import Data.SRTree.Eval (evalTree)
+import Data.SRTree.Recursion (cata)
+import qualified Data.Vector.Storable as VS
 
-import Debug.Trace ( trace, traceShow )
 
 -- | Bayesian information criterion
 bic :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
@@ -31,6 +43,7 @@ aic dist mSErr xss ys theta tree = 2 * (p + 1) + 2 * nll dist mSErr xss ys tree 
     (A.Sz (fromIntegral -> n)) = A.size ys
 {-# INLINE aic #-}
 
+-- | Evidence 
 evidence :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
 evidence dist mSErr xss ys theta tree = (1 - b) * nll dist mSErr xss ys tree theta - p / 2 * log b
   where
@@ -51,6 +64,8 @@ mdl dist mSErr xss ys theta tree = nll' dist mSErr xss ys theta' tree
     isSignificant v f = abs (v / sqrt(12 / f) ) >= 1
 {-# INLINE mdl #-}
 
+-- | MDL Lattice as described in
+-- Bartlett, Deaglan, Harry Desmond, and Pedro Ferreira. "Priors for symbolic regression." Proceedings of the Companion Conference on Genetic and Evolutionary Computation. 2023.
 mdlLatt :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
 mdlLatt dist mSErr xss ys theta tree = nll' dist mSErr xss ys theta' tree
                                      + logFunctional tree
@@ -69,6 +84,7 @@ mdlFreq dist mSErr xss ys theta tree = nll dist mSErr xss ys tree theta
                                      + logParameters dist mSErr xss ys theta tree
 {-# INLINE mdlFreq #-}
 
+-- log of the functional complexity
 logFunctional :: Fix SRTree -> Double
 logFunctional tree = countNodes tree * log (countUniqueTokens tree') 
                    + foldr (\c acc -> log (abs c) + acc) 0 consts 
@@ -80,6 +96,7 @@ logFunctional tree = countNodes tree * log (countUniqueTokens tree')
     signs          = sum [1 | a <- getIntConsts tree, a < 0] -- TODO: will we use that?
 {-# INLINE logFunctional #-}
 
+-- same as above but weighted by frequency 
 logFunctionalFreq  :: Fix SRTree -> Double
 logFunctionalFreq tree = treeToNat tree' 
                        + foldr (\c acc -> log (abs c) + acc) 0 consts  
@@ -89,6 +106,7 @@ logFunctionalFreq tree = treeToNat tree'
     consts = getIntConsts tree
 {-# INLINE logFunctionalFreq #-}
 
+-- log of the parameters complexity
 logParameters :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
 logParameters dist mSErr xss ys theta tree = -(p / 2) * log 3 + 0.5 * logFisher + logTheta
   where
@@ -104,9 +122,9 @@ logParameters dist mSErr xss ys theta tree = -(p / 2) * log 3 + 0.5 * logFisher 
 
     isSignificant v f = abs (v / sqrt(12 / f) ) >= 1
 
-
+-- same as above but for the Lattice 
 logParametersLatt :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
-logParametersLatt dist mSErr xss ys theta tree = traceShow detFisher $ 0.5 * p * (1 - log 3) + 0.5 * log detFisher
+logParametersLatt dist mSErr xss ys theta tree = 0.5 * p * (1 - log 3) + 0.5 * log detFisher
   where
     fisher = fisherNLL dist mSErr xss ys tree theta
     detFisher = det $ hessianNLL dist mSErr xss ys tree theta
@@ -126,11 +144,12 @@ nll' dist mSErr xss ys theta tree = nll dist mSErr xss ys tree theta
 {-# INLINE nll' #-}
 
 treeToNat :: Fix SRTree -> Double
-treeToNat = cata alg
+treeToNat = cata $
+  \case
+    Uni f t    -> funToNat f + t
+    Bin op l r -> opToNat op + l + r
+    _          -> 0.6610799229372109
   where
-    alg (Uni f t)    = funToNat f + t
-    alg (Bin op l r) = opToNat op + l + r
-    alg _            = 0.6610799229372109
 
     opToNat :: Op -> Double
     opToNat Add = 2.500842464597881

@@ -57,8 +57,16 @@ outer arr1 arr2
       Sz1 m2 = size arr2
 {-# INLINE outer #-}
 
-det :: SRMatrix -> Double
+det :: SRMatrix -> Double 
 det mtx
+  | m==0 || n==0 = 1
+  | otherwise    = (^2) $ Prelude.product [l ! (i :. i) | i <- [0 .. m-1]]
+  where
+    Sz (m :. n)  = size mtx
+    (l, _) = unsafePerformIO (lu mtx)
+      
+detChol :: SRMatrix -> Double
+detChol mtx
   | m==0 || n==0 = 1
   | otherwise    = (^2) $ Prelude.product [cho ! (i :. i) | i <- [0 .. m-1]]
   where
@@ -103,7 +111,7 @@ cholesky arr
                        let delta = cur - tot
                        if i == j
                           then if delta <= 0
-                                 then throwM $ NegDef -- SizeMismatchException (size arr) (size arr) -- look at a better exception
+                                 then throwM NegDef -- SizeMismatchException (size arr) (size arr) -- look at a better exception
                                  else UMA.unsafeLinearWrite l (rowI + j) (sqrt delta)
                           else UMA.unsafeLinearWrite l (rowI + j) (delta / xjj)
 {-# INLINE cholesky #-}

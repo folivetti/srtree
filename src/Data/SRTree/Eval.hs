@@ -1,7 +1,8 @@
+{-# LANGUAGE LambdaCase #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.Eval 
--- Copyright   :  (c) Fabricio Olivetti 2021 - 2021
+-- Copyright   :  (c) Fabricio Olivetti 2021 - 2024
 -- License     :  BSD3
 -- Maintainer  :  fabricio.olivetti@gmail.com
 -- Stability   :  experimental
@@ -26,19 +27,20 @@ module Data.SRTree.Eval
         )
         where
 
+import Data.Massiv.Array
 import qualified Data.Massiv.Array as M
-import Data.Massiv.Array 
-import qualified Data.Vector as V 
-
 import Data.SRTree.Internal
-import Data.SRTree.Recursion ( Fix (..), cata )
-import GHC.Generics (M1)
+import Data.SRTree.Recursion (Fix (..), cata)
+import qualified Data.Vector as V
 
+-- | Vector of target values 
 type SRVector = M.Array D Ix1 Double
+-- | Vector of parameter values. Needs to be strict to be readily accesible.
 type PVector  = M.Array S Ix1 Double
+-- | Matrix of features values 
 type SRMatrix = M.Array S Ix2 Double 
 
-
+-- Improve quality of life with Num and Floating instances for our matrices 
 instance Index ix => Num (M.Array D ix Double) where
     (+) = (!+!)
     (-) = (!-!)
@@ -71,20 +73,22 @@ instance Index ix => Fractional (M.Array D ix Double) where
     (/) = (!/!)
     recip = recipA
 
+-- returns a vector with the same number of rows as xss and containing a single repeated value.
 replicateAs :: SRMatrix -> Double -> SRVector
 replicateAs xss c = let (Sz (m :. _)) = M.size xss in M.replicate (getComp xss) (Sz m) c
 
 -- | Evaluates the tree given a vector of variable values, a vector of parameter values and a function that takes a Double and change to whatever type the variables have. This is useful when working with datasets of many values per variables.
 evalTree :: SRMatrix -> PVector -> Fix SRTree -> SRVector
-evalTree xss params = cata alg
-  where
-      alg (Var ix)     = xss <! ix
-      alg (Param ix)   = replicateAs xss $ params ! ix
-      alg (Const c)    = replicateAs xss c
-      alg (Uni g t)    = evalFun g t
-      alg (Bin op l r) = evalOp op l r
+evalTree xss params = cata $ 
+    \case 
+      Var ix     -> xss <! ix
+      Param ix   -> replicateAs xss $ params ! ix
+      Const c    -> replicateAs xss c
+      Uni g t    -> evalFun g t
+      Bin op l r -> evalOp op l r
 {-# INLINE evalTree #-}
 
+-- evaluates an operator 
 evalOp :: Floating a => Op -> a -> a -> a
 evalOp Add = (+)
 evalOp Sub = (-)
@@ -93,6 +97,7 @@ evalOp Div = (/)
 evalOp Power = (**)
 {-# INLINE evalOp #-}
 
+-- evaluates a function 
 evalFun :: Floating a => Function -> a -> a
 evalFun Id = id
 evalFun Abs = abs
@@ -115,7 +120,7 @@ evalFun Log = log
 evalFun Exp = exp
 {-# INLINE evalFun #-}
 
--- | Cubic root
+-- Cubic root
 cbrt :: Floating a => a -> a
 cbrt x = signum x * abs x ** (1/3)
 {-# INLINE cbrt #-}
@@ -144,6 +149,7 @@ inverseFunc Exp    = Log
 inverseFunc x      = error $ show x ++ " has no support for inverse function"
 {-# INLINE inverseFunc #-}
 
+-- | evals the inverse of a function
 evalInverse :: Floating a => Function -> a -> a
 evalInverse Id     = id
 evalInverse Sin    = asin
@@ -165,6 +171,7 @@ evalInverse Log    = exp
 evalInverse Exp    = log
 evalInverse Abs    = abs -- we assume abs(x) = sqrt(x^2) so y = sqrt(x^2) => x^2 = y^2 => x = sqrt(y^2) = x = abs(y)
 
+-- | evals the right inverse of an operator 
 invright :: Floating a => Op -> a -> (a -> a)
 invright Add v   = subtract v
 invright Sub v   = (+v)
@@ -172,6 +179,7 @@ invright Mul v   = (/v)
 invright Div v   = (*v)
 invright Power v = (**(1/v))
 
+-- | evals the left inverse of an operator 
 invleft :: Floating a => Op -> a -> (a -> a)
 invleft Add v   = subtract v
 invleft Sub v   = (+v) . negate -- y = v - r => r = v - y

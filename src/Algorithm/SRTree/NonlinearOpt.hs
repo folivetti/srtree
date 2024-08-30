@@ -102,7 +102,6 @@ module Algorithm.SRTree.NonlinearOpt (
 
 import qualified Numeric.Optimization.NLOPT.Bindings as N
 
-import Data.Bifunctor ( first )
 import Data.List.NonEmpty (NonEmpty(..))
 
 import qualified Data.Vector.Storable as V

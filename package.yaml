@@ -1,6 +1,6 @@
 name:                srtree
-version:             1.0.0.5
-synopsis:            A general framework to work with Symbolic Regression expression trees.
+version:             2.0.0.0
+synopsis:            A general library to work with Symbolic Regression expression trees.
 github:              "folivetti/srtree"
 license:             BSD3
 author:              "Fabricio Olivetti de França"
@@ -43,6 +43,7 @@ dependencies:
 - graphviz
 - ieee
 - lens 
+- exceptions 
 
 library:
   source-dirs: src
@@ -109,5 +110,4 @@ tests:
     - srtree
     - ad
     - HUnit
-
 

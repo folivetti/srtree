@@ -1,49 +1,71 @@
 {-# language ViewPatterns, ScopedTypeVariables, MultiWayIf, FlexibleContexts #-}
+-----------------------------------------------------------------------------
+-- |
+-- Module      :  Algorithm.SRTree.ConfidenceIntervals 
+-- Copyright   :  (c) Fabricio Olivetti 2021 - 2024
+-- License     :  BSD3
+-- Maintainer  :  fabricio.olivetti@gmail.com
+-- Stability   :  experimental
+-- Portability :  ConstraintKinds
+--
+-- Functions to optimize the parameters of an expression.
+--
+-----------------------------------------------------------------------------
 module Algorithm.SRTree.ConfidenceIntervals where
 
 import qualified Data.Massiv.Array as A
 import Data.Massiv.Array (Ix2(..), (*.), (!+!), (!*!))
-import Statistics.Distribution hiding (Distribution)
-import Statistics.Distribution.StudentT
-import Statistics.Distribution.FDistribution
-import Statistics.Distribution.ChiSquared
+import Data.Massiv.Array.Numeric ( identityMatrix )
+import Statistics.Distribution ( ContDistr(quantile) )
+import Statistics.Distribution.StudentT ( studentT )
+import Statistics.Distribution.FDistribution ( fDistribution )
 import qualified Data.Vector.Storable as VS
-import qualified Data.Vector as V
 import Data.SRTree
 import Data.SRTree.Eval
-import Data.SRTree.Print
-import Data.SRTree.Recursion ( cata, extract )
-import Algorithm.SRTree.AD
+import Data.SRTree.Recursion ( cata )
 import Algorithm.SRTree.Likelihoods
 import Algorithm.SRTree.Opt
+    ( minimizeNLLNonUnique, minimizeNLLWithFixedParam )
 import Data.List ( sortOn, nubBy )
+import Data.Maybe ( fromMaybe )
 import Algorithm.SRTree.NonlinearOpt
 import Algorithm.Massiv.Utils
 import System.IO.Unsafe ( unsafePerformIO )
+import Control.Monad.Catch ( catch )
 
 import Debug.Trace ( trace, traceShow )
 
+-- | profile likelihood algorithms: Bates (classical), ODE (faster), Constrained (fastest)
+-- The Constrained approach returns only the endpoints.
 data PType = Bates | ODE | Constrained deriving (Show, Read)
 
+-- | Confidence Interval using Laplace approximation or profile likelihood.
 data CIType = Laplace BasicStats | Profile BasicStats [ProfileT]
 
+-- | Basic stats of the data: covariance of parameters, correlation, standard errors 
 data BasicStats = MkStats { _cov    :: SRMatrix
                           , _corr   :: SRMatrix
                           , _stdErr :: PVector
                           } deriving (Eq, Show)
 
+-- | a confience interval is composed of the point estimate (`est_`), lower bound (`_lower_`)
+-- and upper bound (`upper_`)
 data CI = CI { est_   :: Double
              , lower_ :: Double
              , upper_ :: Double
              } deriving (Eq, Show, Read)
 
+--  | A profile likelihood is composed of a vector of tau values that traces the likelihood, 
+--  the matrix of thetas for each profile, the local optima, and two splines that converts 
+--  taus to theta and vice-versa. 
 data ProfileT = ProfileT { _taus      :: PVector
                          , _thetas    :: SRMatrix
                          , _opt       :: Double
                          , _tau2theta :: Double -> Double
                          , _theta2tau :: Double -> Double
-                         } 
+                         }
 
+-- shows the CI with n places 
 showCI :: Int -> CI -> String
 showCI n (CI x l h) = show (rnd l) <> " <= " <> show (rnd x) <> " <= " <> show (rnd h)
   where
@@ -51,24 +73,30 @@ showCI n (CI x l h) = show (rnd l) <> " <= " <> show (rnd x) <> " <= " <> show (
 printCI :: Int -> CI -> IO ()
 printCI n = putStrLn . showCI n
 
+-- | Calculates the confidence interval of the parameters using 
+-- Laplace approximation or Profile likelihood
 paramCI :: CIType -> Int -> PVector -> Double -> [CI]
 paramCI (Laplace stats) nSamples theta alpha = zipWith3 CI (A.toList theta) lows highs
   where
+    -- the Laplace approximation is theta +/- t(1-alpha/2) * standard error 
     (A.Sz k) = A.size theta
-    t      = quantile (studentT . fromIntegral $ nSamples - k) (1 - alpha / 2.0)
-    stdErr = _stdErr stats
-    lows   = A.toList $ A.zipWith (-) theta $ A.map (*t) stdErr
-    highs  = A.toList $ A.zipWith (+) theta $ A.map (*t) stdErr
+    t        = quantile (studentT . fromIntegral $ nSamples - k) (1 - alpha / 2.0)
+    stdErr   = _stdErr stats
+    lows     = A.toList $ A.zipWith (-) theta $ A.map (*t) stdErr
+    highs    = A.toList $ A.zipWith (+) theta $ A.map (*t) stdErr
 
 paramCI (Profile stats profiles) nSamples _ alpha = zipWith3 CI theta lows highs
   where
+    -- for the profile likelihood we use the square root of the F-distribution with (1-alpha)
     k        = length theta
     t        = sqrt $ quantile (fDistribution k (fromIntegral $ nSamples - k)) (1 - alpha)
     stdErr   = _stdErr stats
-    lows     = map (\p -> _tau2theta p (-t)) profiles
-    highs    = map (\p -> _tau2theta p t) profiles
+    lows     = map (`_tau2theta` (-t)) profiles
+    highs    = map (`_tau2theta` t) profiles
     theta    = map _opt profiles
 
+-- | calculates the prediction confidence interval using Laplace approximation or profile likelihood. 
+--
 predictionCI :: CIType -> Distribution -> (SRMatrix -> PVector) -> (SRMatrix -> [PVector]) -> (CI -> PVector -> Fix SRTree -> (Double -> Double, Double)) -> SRMatrix -> Fix SRTree -> PVector -> Double -> [CI] -> [CI]
 predictionCI (Laplace stats) _ predFun jacFun _ xss tree theta alpha _ = zipWith3 CI yhat lows highs
   where
@@ -76,7 +104,7 @@ predictionCI (Laplace stats) _ predFun jacFun _ xss tree theta alpha _ = zipWith
     jac' :: A.Matrix A.S Double
     jac'     = A.fromLists' A.Seq $ map A.toList $ jacFun xss
     jac :: [PVector]
-    jac      = A.toList $ A.outerSlices $ A.computeAs A.S $ A.transpose $ jac'
+    jac      = A.toList $ A.outerSlices $ A.computeAs A.S $ A.transpose jac'
     n        = length yhat
     (A.Sz k) = A.size theta
     t        = quantile (studentT . fromIntegral $ n - k) (1 - alpha / 2.0)
@@ -84,7 +112,7 @@ predictionCI (Laplace stats) _ predFun jacFun _ xss tree theta alpha _ = zipWith
     lows     = zipWith (-) yhat $ map (*t) resStdErr
     highs    = zipWith (+) yhat $ map (*t) resStdErr
 
-    getResStdError row = sqrt $ (A.!.!) row $ A.fromList A.Seq $ map ((A.!.!) row) covs
+    getResStdError row = sqrt $ (A.!.!) row $ A.fromList A.Seq $ map (row A.!.!) covs
     resStdErr          = map getResStdError jac
 
 predictionCI (Profile _ _) dist predFun _ profFun xss tree theta alpha estPIs = zipWith3 f estPIs yhat $ take 10 xss'
@@ -98,17 +126,19 @@ predictionCI (Profile _ _) dist predFun _ profFun xss tree theta alpha estPIs = 
 
     theta0  = calcTheta0 dist tree
     xss'    = A.toList $ A.outerSlices xss
-    
+
     f estPI yh xs =
               let t'            = replaceParam0 tree $ evalVar xs theta0
                   (spline, yh') = profFun estPI (A.fromStorableVector A.Seq (theta' VS.// [(0, yh)])) t'
               in CI yh' (spline (-t)) (spline t)
 
+-- inverse function of the distributions 
 inverseDist :: Floating p => Distribution -> p -> p
 inverseDist Gaussian y  = y
-inverseDist Bernoulli y = log(y/(1-y))
+inverseDist Bernoulli y = log (y/(1-y))
 inverseDist Poisson y   = log y
 
+-- rewrite the tree by fixing theta 0 to optimal value 
 replaceParam0 :: Fix SRTree -> Fix SRTree -> Fix SRTree
 replaceParam0 tree t0 = cata alg tree
   where
@@ -120,7 +150,7 @@ replaceParam0 tree t0 = cata alg tree
     alg (Bin op l r) = Fix $ Bin op l r
 
 evalVar :: PVector -> Fix SRTree -> Fix SRTree
-evalVar xs = cata alg 
+evalVar xs = cata alg
   where
     alg (Var ix)     = Fix $ Const (xs A.! ix)
     alg (Param ix)   = Fix $ Param ix
@@ -147,10 +177,11 @@ calcTheta0 dist tree = case cata alg tree of
                          Right vl -> case r of
                                        Left  g -> Left $ g . invleft op vl
                                        Right vr -> Right $ evalOp op vl vr
--- here
+
+-- calculate the profile likelihood of every parameter 
 getAllProfiles :: PType -> Distribution -> Maybe Double -> SRMatrix -> PVector -> Fix SRTree -> PVector -> PVector -> [CI] -> Double -> [ProfileT]
 getAllProfiles ptype dist mSErr xss ys tree theta stdErr estCIs alpha = reverse (getAll 0 [])
-  where 
+  where
     (A.Sz k)   = A.size theta
     (A.Sz n)   = A.size ys
     tau_max    = sqrt $ quantile (fDistribution k (n - k)) (1 - 0.01)
@@ -166,15 +197,16 @@ getAllProfiles ptype dist mSErr xss ys tree theta stdErr estCIs alpha = reverse 
                                   Left t  -> getAllProfiles ptype dist mSErr xss ys tree t stdErr estCIs alpha
                                   Right p -> getAll (ix + 1) (p : acc)
 
-getProfile :: Distribution 
-           -> Maybe Double 
+-- calculates the profile likelihood of a single parameter 
+getProfile :: Distribution
+           -> Maybe Double
            -> SRMatrix
            -> PVector
-           -> Fix SRTree 
+           -> Fix SRTree
            -> PVector
            -> Double
            -> Double
-           -> Int 
+           -> Int
            -> Either PVector ProfileT
 getProfile dist mSErr xss ys tree theta stdErr_i tau_max ix
   | stdErr_i == 0.0 = pure $ ProfileT (A.fromList A.Seq [-tau_max, tau_max]) (A.fromLists' A.Seq [theta', theta']) (theta A.! ix) (const (theta A.! ix)) (const tau_max)
@@ -204,7 +236,7 @@ getProfile dist mSErr xss ys tree theta stdErr_i tau_max ix
         t_delta     = (theta_opt A.! ix) + delta * (t + inv_slope)
         theta_delta = updateS theta_opt [(ix, t_delta)]
         theta_t     = minimizer theta_delta
-        zv          = (A.computeAs A.S $ snd $ gradNLL dist mSErr xss ys tree theta_t) A.! ix
+        zv          = A.computeAs A.S (snd $ gradNLL dist mSErr xss ys tree theta_t) A.! ix
         zvs         = snd $ gradNLL dist mSErr xss ys tree theta_t
         inv_slope'  = min 4.0 . max 0.0625 . abs $ (tau / (stdErr_i * zv))
         nll_cond    = nll dist mSErr xss ys tree theta_t
@@ -237,6 +269,7 @@ getProfileCnstr dist mSErr xss ys tree theta stdErr_i tau_max ix
     rightPt  = getPoint False
     tau2theta tau = if tau < 0 then leftPt else rightPt
 
+getEndPoint :: Distribution -> Maybe Double -> A.Array A.S Ix2 Double -> A.Array A.S A.Ix1 Double -> Fix SRTree -> A.Array A.S A.Ix1 Double -> Double -> Int -> Bool -> Double
 getEndPoint dist mSErr xss ys tree theta tau_max ix isLeft =
   case minimizeAugLag problem (A.toStorableVector theta_opt) of
             Right sol -> solutionParams sol VS.! ix
@@ -248,7 +281,7 @@ getEndPoint dist mSErr xss ys tree theta tau_max ix isLeft =
     nll_opt   = nll dist mSErr xss ys tree theta_opt
     loss_crit = nll_opt + tau_max
 
-    loss      = (subtract loss_crit) . nll dist mSErr xss ys tree . A.fromStorableVector A.Seq
+    loss      = subtract loss_crit . nll dist mSErr xss ys tree . A.fromStorableVector A.Seq
     obj       = (if isLeft then id else negate) . (VS.! ix)
 
     stop       = ObjectiveRelativeTolerance 1e-4 :| []
@@ -262,20 +295,20 @@ getEndPoint dist mSErr xss ys tree theta tau_max ix isLeft =
 -- Based on
 -- Jian-Shen Chen & Robert I Jennrich (2002) Simple Accurate Approximation of Likelihood Profiles,
 -- Journal of Computational and Graphical Statistics, 11:3, 714-732, DOI: 10.1198/106186002493
-getProfileODE :: Distribution 
-           -> Maybe Double 
+getProfileODE :: Distribution
+           -> Maybe Double
            -> SRMatrix
            -> PVector
-           -> Fix SRTree 
+           -> Fix SRTree
            -> PVector
-           -> Double 
+           -> Double
            -> CI
-           -> Double 
-           -> Int 
+           -> Double
+           -> Int
            -> Either PVector ProfileT
 getProfileODE dist mSErr xss ys tree theta stdErr_i estCI tau_max ix
   | stdErr_i == 0.0 = pure dflt
-  | otherwise = let (A.fromList A.Seq -> taus, A.fromLists' A.Seq . map (A.toList) -> thetas) = solLeft <> ([0], [theta_opt]) <> solRight
+  | otherwise = let (A.fromList A.Seq -> taus, A.fromLists' A.Seq . map A.toList -> thetas) = solLeft <> ([0], [theta_opt]) <> solRight
                     (tau2theta, theta2tau) = createSplines taus thetas stdErr_i tau_max ix
                 in pure $ ProfileT taus thetas optTh tau2theta theta2tau
   where
@@ -288,12 +321,10 @@ getProfileODE dist mSErr xss ys tree theta stdErr_i estCI tau_max ix
     optTh     = theta_opt A.! ix
     p'        = p+1
     (A.Sz1 p) = A.size theta
-    sErr = case mSErr of
-                Nothing -> 1
-                Just z  -> z
-    getHess t = hessianNLL dist mSErr xss ys tree t
+    sErr      = fromMaybe 1 mSErr
+    getHess   = hessianNLL dist mSErr xss ys tree
 
-    odeFun gamma _ u = 
+    odeFun gamma _ u =
         let grad     = grader u
             w        = hessianNLL dist mSErr xss ys tree u
             m        = A.makeArray A.Seq (A.Sz (p' :. p'))
@@ -313,7 +344,7 @@ getProfileODE dist mSErr xss ys tree theta stdErr_i estCI tau_max ix
     solRight = scanOn 1 tsHi
     solLeft  = scanOn (-1) tsLo
     calcTau s t = let nll_i = nll dist mSErr xss ys tree $ snd t
-                      z     = signum (((snd t) A.! ix) - optTh) * sqrt (2 * nll_i - 2 * nll_opt)
+                      z     = signum ((snd t A.! ix) - optTh) * sqrt (2 * nll_i - 2 * nll_opt)
                    in if z == 0 || isNaN z then ([], []) else ([z], [snd t])
 
 rk :: (Double -> PVector -> PVector) -> (Double, PVector) -> Double -> (Double, PVector)
@@ -337,13 +368,17 @@ getStatsFromModel dist mSErr xss ys tree theta = MkStats cov corr stdErr
     (A.Sz1 n) = A.size ys
     nParams = fromIntegral k
     ssr  = sse xss ys tree theta
+    ident = A.computeAs A.S $ identityMatrix nParams
 
     -- only for gaussian
     sErr  = sqrt $ ssr / fromIntegral (n - k)
 
     hess    = hessianNLL dist mSErr xss ys tree theta
-    cov     = unsafePerformIO (invChol hess)
-    
+    -- cov     = catch (unsafePerformIO (invChol hess)) (\e -> trace "cov NegDef" $ pure ident)
+    fexcept :: (A.PrimMonad m, A.MonadThrow m, A.MonadIO m) => A.SomeException -> m SRMatrix
+    fexcept e = trace "cov NegDef" $ pure ident
+    cov     = unsafePerformIO $ catch (invChol hess) fexcept
+
     stdErr   = A.makeArray A.Seq (A.Sz1 k) (\ix -> sqrt $ cov A.! (ix :. ix))
     stdErrSq = case outer stdErr stdErr of
                  Left _  -> error "stdErr size mismatch?"
@@ -397,7 +432,7 @@ approximateContour nParams nPoints profs ix1 ix2 alpha = go 0
 
     applyIfNeg (x, y) = if y < 0 then (-x, -y) else (x ,y)
     points   = sortOn fst
-             $ [applyIfNeg ((x+y)/2, x - y) | (x, y) <- angles] 
+             $ [applyIfNeg ((x+y)/2, x - y) | (x, y) <- angles]
             <> (\(x,y) -> [(x + 2*pi, y)]) (head points)
 
     -- generate the points of the curve

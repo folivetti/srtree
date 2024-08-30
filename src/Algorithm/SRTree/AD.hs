@@ -7,7 +7,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.AD 
--- Copyright   :  (c) Fabricio Olivetti 2021 - 2021
+-- Copyright   :  (c) Fabricio Olivetti 2021 - 2024
 -- License     :  BSD3
 -- Maintainer  :  fabricio.olivetti@gmail.com
 -- Stability   :  experimental
@@ -24,43 +24,44 @@ module Algorithm.SRTree.AD
          , forwardModeUniqueJac
          ) where
 
-import Data.SRTree.Internal
-import Data.SRTree.Eval
-import Data.SRTree.Derivative
-import Data.SRTree.Recursion
-
+import Control.Monad (forM_)
+import Control.Monad.ST ( runST )
+import Data.Bifunctor (bimap, first, second)
+import qualified Data.DList as DL
+import Data.Massiv.Array hiding (forM_, map, replicate, zipWith)
 import qualified Data.Massiv.Array as M
 import qualified Data.Massiv.Array.Unsafe as UMA
-import Data.Massiv.Array hiding (map, zipWith, replicate, forM_)
-import Data.Massiv.Core.Operations ( unsafeLiftArray )
-import qualified Data.Vector as V 
-
-import qualified Data.DList as DL
-import Data.Bifunctor (bimap, first, second)
-import Control.Monad ( forM_ )
-import Debug.Trace ( traceShow, trace )
+import Data.Massiv.Core.Operations (unsafeLiftArray)
+import Data.SRTree.Derivative ( derivative )
+import Data.SRTree.Eval
+    ( SRVector, evalFun, evalOp, SRMatrix, PVector, replicateAs )
+import Data.SRTree.Internal
+import Data.SRTree.Print (showExpr)
+import Data.SRTree.Recursion ( cataM, cata, accu )
+import qualified Data.Vector as V
+import Debug.Trace (trace, traceShow)
 import GHC.IO (unsafePerformIO)
-import Control.Monad.ST
-import Algorithm.SRTree.NonlinearOpt
 
-import Data.SRTree.Print ( showExpr )
-
+applyUni :: (Index ix, Source r e, Floating e, Floating b) => Function -> Either (Array r ix e) b -> Either (Array D ix e) b
 applyUni f (Left t)  =
     Left $ M.map (evalFun f) t
 applyUni f (Right t) =
     Right $ evalFun f t
 {-# INLINE applyUni #-}
 
+applyDer :: (Index ix, Source r e, Floating e, Floating b) => Function -> Either (Array r ix e) b -> Either (Array D ix e) b
 applyDer f (Left t)  =
     Left $ M.map (derivative f) t
 applyDer f (Right t) =
     Right $ derivative f t
 {-# INLINE applyDer #-}
 
+negate' :: (Index ix, Source r e, Num e, Num b) => Either (Array r ix e) b -> Either (Array D ix e) b
 negate' (Left t) = Left $ M.map negate t
 negate' (Right t) = Right $ negate t
 {-# INLINE negate' #-}
 
+applyBin :: (Index ix, Floating b) => Op -> Either (Array D ix b) b -> Either (Array D ix b) b -> Either (Array D ix b) b
 applyBin op (Left ly) (Left ry) =
     Left $ case op of
              Add -> ly !+! ry
@@ -77,11 +78,14 @@ applyBin op (Right ly) (Right ry) =
     Right $ evalOp op ly ry
 {-# INLINE applyBin #-}
 
+-- | get the value of a certain index if it is an array (Left) 
+-- or returns the value itself if it is a scalar.
+(!??) :: (Manifest r e, Index ix) => Either (Array r ix e) e -> ix -> e
 (Left y) !?? ix  = y ! ix
 (Right y) !?? ix = y
 {-# INLINE (!??) #-}
 
--- | Calculates the numerical derivative of a tree using forward mode
+-- | Calculates the results of the error vector multiplied by the Jacobian of an expression using forward mode
 -- provided a vector of variable values `xss`, a vector of parameter values `theta` and
 -- a function that changes a Double value to the type of the variable values.
 -- uses unsafe operations to use mutable array instead of a tape
@@ -92,20 +96,28 @@ forwardMode xss theta err tree = let (yhat, jacob) = runST $ cataM lToR alg tree
     (Sz p)               = M.size theta
     (Sz (m :. n))        = M.size xss
     cmp                  = getComp xss
+    -- | if the tree does not use a variable 
+    -- it will return a single scalar, fromEither fixes this
     fromEither (Left y)  = y
     fromEither (Right y) = M.replicate cmp (Sz m) y
 
-    alg (Var ix) = do tape <- M.newMArray (Sz2 m p) 0
-                      tape' <- UMA.unsafeFreeze cmp tape
-                      pure (Left $ (xss <! ix), tape')
+    -- if it is a variable, returns the value of that variable and an array of zeros (Jacobian)
+    alg (Var ix) = do tape  <- M.newMArray (Sz2 m p) 0 
+                                 >>= UMA.unsafeFreeze cmp
+                      pure (Left (xss <! ix), tape)
 
+    -- if it is a constant, returns the value of the constant and array of zeros 
     alg (Const c) = do tape <- M.newMArray (Sz2 m p) 0
-                       tape' <- UMA.unsafeFreeze cmp tape
-                       pure (Right c, tape')
-    alg (Param ix) = do tape <- M.makeMArrayS (Sz2 m p) (\(i :. j) -> pure $ if j==ix then 1 else 0)
-                        tape' <- UMA.unsafeFreeze cmp tape
-                        pure (Right (theta ! ix), tape')
+                                 >>= UMA.unsafeFreeze cmp
+                       pure (Right c, tape)
 
+    -- if it is a parameter, returns the value of the parameter and the jacobian with a one in the corresponding column
+    alg (Param ix) = do tape <- M.makeMArrayS (Sz2 m p) (\(i :. j) -> pure $ if j==ix then 1 else 0)
+                                 >>= UMA.unsafeFreeze cmp
+                        pure (Right (theta ! ix), tape)
+
+    -- 1. applies the derivative of f in the evaluated child 
+    -- 2. replaces the value of the Jacobian at (i, j) with yi * J[i, j]
     alg (Uni f (t, tape')) = do let y = computeAs S . fromEither $ applyDer f t
                                 tape <- UMA.unsafeThaw tape'
                                 forM_ [0 .. m-1] $ \i -> do
@@ -115,6 +127,9 @@ forwardMode xss theta err tree = let (yhat, jacob) = runST $ cataM lToR alg tree
                                         UMA.unsafeWrite tape (i :. j) (yi * v)
                                 tapeF <- UMA.unsafeFreeze cmp tape
                                 pure (applyUni f t, tapeF)
+    -- li, ri are the corresponding values of the evaluated left and right children 
+    -- vl, vr are the corresponding value of the Jacobian at (i, j) 
+    -- applies the corresponding derivative of each binary operator 
     alg (Bin op (l, tl') (r, tr')) = do
         tl <- UMA.unsafeThaw tl'
         tr <- UMA.unsafeThaw tr'
@@ -172,7 +187,7 @@ forwardModeUnique xss theta err = second (toGrad . DL.toList) . cata alg
 data TupleF a b = Single a | T a b | Branch a b b deriving Functor -- hi, I'm a tree
 type Tuple a = Fix (TupleF a)
 
--- | Same as above, but using reverse mode, that is much faster.
+-- | Same as above, but using reverse mode, that is even faster.
 reverseModeUnique :: SRMatrix
                   -> PVector
                   -> SRVector
