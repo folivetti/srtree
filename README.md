@@ -35,9 +35,9 @@ optimizing parameters, and model selection metrics.
 
 Together with this library, we provide example applications (please refer to their corresponding README files):
 
-- [srsimplify](srsimplify/README.md): a parser and simplification tool supporting the output of many popular SR algorithms.
-- [srtools](srtools/README.md): a tool that can be used to evaluate symbolic regression expressions and create nice reports with confidence intervals. 
-- [tinygp](tinygp/README.md): a simple GP implementation based on tinyGP.
+- [srsimplify](apps/srsimplify/README.md): a parser and simplification tool supporting the output of many popular SR algorithms.
+- [srtools](apps/srtools/README.md): a tool that can be used to evaluate symbolic regression expressions and create nice reports with confidence intervals. 
+- [tinygp](apps/tinygp/README.md): a simple GP implementation based on tinyGP.
 
 ## Organization
 

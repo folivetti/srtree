@@ -26,6 +26,8 @@ type FitFun = Individual -> Individual
 
 data Individual = Individual { _tree :: Fix SRTree, _fit :: Double, _params :: PVector }
 
+instance Show Individual where 
+    show (Individual t f p) = showExpr t <> "," <> show f <> "," <> show p 
 
 toss :: Rng Bool
 toss = state random
