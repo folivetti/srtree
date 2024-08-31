@@ -51,7 +51,7 @@ library:
 executables:
   tinygp:
     main:                Main.hs
-    source-dirs:         tinygp
+    source-dirs:         apps/tinygp
     ghc-options:
     - -threaded
     - -rtsopts
@@ -59,10 +59,11 @@ executables:
     - -O2
     - -optc-O3
     dependencies:
+    - optparse-applicative >= 0.17 && < 0.19
     - srtree
   srtools:
     main:                Main.hs
-    source-dirs:         srtools
+    source-dirs:         apps/srtools
     ghc-options:
     - -threaded
     - -rtsopts
@@ -76,7 +77,7 @@ executables:
     - normaldistribution
   eqsatrepr:
     main:                Main.hs
-    source-dirs:         eqsatrepr
+    source-dirs:         apps/eqsatrepr
     ghc-options:
     - -threaded
     - -rtsopts
@@ -87,7 +88,7 @@ executables:
     - srtree
   srsimplify:
     main:                Main.hs
-    source-dirs:         srsimplify
+    source-dirs:         apps/srsimplify
     ghc-options:
     - -threaded
     - -rtsopts

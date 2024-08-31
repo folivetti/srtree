@@ -24,6 +24,6 @@ main = do
     opts = info (opt <**> helper)
             ( fullDesc <> progDesc "Optimize the parameters of\
                                    \ Symbolic Regression expressions."
-           <> header "srtree-opt - a CLI tool to (re)optimize the numeric\
+           <> header "srtools - a CLI tool to (re)optimize the numeric\
                      \ parameters of symbolic regression expressions"
             )

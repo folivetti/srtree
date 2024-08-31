@@ -99,5 +99,5 @@ main = do
     opts = info (opt <**> helper)
             ( fullDesc <> progDesc "Simplify an expression\
                                    \ using equality saturation."
-           <> header "simplify - a CLI tool to simplify\
+           <> header "srsimplify - a CLI tool to simplify\
                      \ symbolic regression expressions with equality saturation." )
