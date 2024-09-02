@@ -60,7 +60,7 @@ main :: IO ()
 main = do
   args <- execParser opts
   g <- getStdGen
-  ((x, y, _, _), _) <- loadDataset (dataset args) True
+  ((x, y, _, _), _, _) <- loadDataset (dataset args) True
   let hp = HP 2 4 25 (popSize args) 2 (pc args) (pm args) terms nonterms 
       (Sz2 _ nFeats) = size x
       terms = [var ix | ix <- [0 .. nFeats-1]] <> [param ix | ix <- [0 .. 5]]

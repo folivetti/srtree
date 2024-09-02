@@ -1,4 +1,5 @@
 {-# language BlockArguments #-}
+{-# language LambdaCase #-}
 module IO where
 
 import System.IO ( hClose, hPutStrLn, openFile, stderr, stdout, IOMode(WriteMode), Handle )
@@ -7,7 +8,7 @@ import Data.List ( intercalate )
 import Control.Monad ( unless, forM_ )
 import System.Random ( StdGen )
 
-import Data.SRTree ( SRTree, Fix (..), floatConstsToParam )
+import Data.SRTree ( SRTree (..), Fix (..), var, floatConstsToParam )
 import Algorithm.SRTree.Opt ( estimateSErr )
 import Algorithm.SRTree.Likelihoods ( Distribution (..) )
 import Algorithm.SRTree.ConfidenceIntervals ( printCI, BasicStats(_stdErr, _corr), CI )
@@ -15,6 +16,7 @@ import qualified Data.SRTree.Print as P
 
 import Args ( Args(outfile, alpha,msErr,dist,niter) )
 import Report
+import Data.SRTree.Recursion ( cata )
 
 import Debug.Trace ( trace, traceShow )
 
@@ -54,8 +56,8 @@ processTree args seed dset tree ix = (basic, sseOrig, sseOpt, info, cis)
     cis     = getCI args' dset basic (alpha args')
 
 -- print the results to a csv format (except CI)
-printResults :: Args -> StdGen -> Datasets -> [Either String (Fix SRTree)] -> IO ()
-printResults args seed dset exprs = do
+printResults :: Args -> StdGen -> Datasets -> [String] -> [Either String (Fix SRTree)] -> IO ()
+printResults args seed dset varnames exprs  = do
   hStat <- openWriteWithDefault stdout (outfile args)
   hPutStrLn hStat csvHeader 
   forM_ (zip [0..] exprs) 
@@ -63,14 +65,14 @@ printResults args seed dset exprs = do
          case tree of
            Left  err -> hPutStrLn stderr ("invalid expression: " <> err)
            Right t   -> let treeData = processTree args seed dset t ix
-                         in hPutStrLn hStat (toCsv treeData)
+                        in hPutStrLn hStat (toCsv treeData varnames)
   unless (null (outfile args)) (hClose hStat)
 
 -- change the stats into a string
-toCsv :: (BasicInfo, SSE, SSE, Info, e) -> String
-toCsv (basic, sseOrig, sseOpt, info, _) = intercalate "," (sBasic <> sSSEOrig <> sSSEOpt <> sInfo)
+toCsv :: (BasicInfo, SSE, SSE, Info, e) -> [String] -> String
+toCsv (basic, sseOrig, sseOpt, info, _) varnames = intercalate "," (sBasic <> sSSEOrig <> sSSEOpt <> sInfo)
   where
-    sBasic    = [ show (_index basic), show (_fname basic), P.showExpr (_expr basic)
+    sBasic    = [ show (_index basic), show (_fname basic), P.showExprWithVars varnames (_expr basic)
                 , show (_nNodes basic), show (_nParams basic)
                 , intercalate ";" (map show (_params basic))
                 ]
@@ -80,9 +82,39 @@ toCsv (basic, sseOrig, sseOpt, info, _) = intercalate "," (sBasic <> sSSEOrig <>
               <> [intercalate ";" (map show (_fisher info))]
     showF p f = show (f p)
 
+-- get trees of transformed features
+getTransformedFeatures :: Fix SRTree -> (Fix SRTree, [Fix SRTree])
+getTransformedFeatures = cata $
+  \case
+     Var   ix                   -> (Fix $ Var ix, [])
+     Param ix                   -> (Fix $ Param ix, [])
+     Const  x                   -> (Fix $ Const x, [])
+     Uni    f (t, vars)         -> (Fix $ Uni f t, vars)
+     Bin   op (l, vs1) (r, vs2) -> case (hasNoParam l, hasNoParam r) of
+                                     (False, True)  -> let vs = vs1 <> vs2
+                                                       in (Fix $ Bin op l (var $ length vs), vs <> [r])
+                                     (True, False)  -> let vs = vs1 <> vs2
+                                                       in (Fix $ Bin op (var $ length vs) r, vs <> [l])
+                                     (    _,    _)   -> (Fix $ Bin op l r, vs1 <> vs2) -- vs1 == vs2 == []
+
+ where
+   hasNoParam = cata $
+     \case
+        Var ix     -> True
+        Param ix   -> False
+        Const x    -> if floor x == ceiling x then True else False
+        Uni f t    -> t
+        Bin op l r -> l && r
+
+allAreVars :: [Fix SRTree] -> Bool
+allAreVars = all isOnlyVar
+  where
+    isOnlyVar (Fix (Var _)) = True
+    isOnlyVar _             = False
+
 -- print the information on screen (including CIs)
-printResultsScreen :: Args -> StdGen -> Datasets -> [Either String (Fix SRTree)] -> IO ()
-printResultsScreen args seed dset exprs = do
+printResultsScreen :: Args -> StdGen -> Datasets -> [String] -> String -> [Either String (Fix SRTree)] -> IO ()
+printResultsScreen args seed dset varnames targt exprs = do
   forM_ (zip [0..] exprs) 
     \(ix, tree) -> 
         case tree of
@@ -95,9 +127,20 @@ printResultsScreen args seed dset exprs = do
     sdecim n  = show . decim n
     nplaces   = 4
 
+
     printToScreen ix (basic, _, sseOpt, info, (sts, cis, pis_tr, pis_val, pis_te)) =
-      do putStrLn $ "=================== EXPR " <> show ix <> " =================="
-         putStrLn $ P.showExpr (_expr basic)
+      do let (transformedT, newvars) = getTransformedFeatures (_expr basic)
+             varnames' = ['z': show ix | ix <- [0 .. length newvars - 1]]
+         putStrLn $ "=================== EXPR " <> show ix <> " =================="
+         putStr   $ targt <> " ~ f(" <> intercalate ", " varnames <> ") = "
+         putStrLn $ P.showExprWithVars varnames (_expr basic)
+
+         unless (allAreVars newvars) do
+          putStrLn "\nExpression and transformed features: "
+          putStr   $ targt <> " ~ f(" <> intercalate ", " varnames' <> ") = "
+          putStrLn $ P.showExprWithVars varnames' transformedT
+          forM_ (zip varnames' newvars) \(vn, tv) -> do
+            putStrLn $ vn <> " = " <> P.showExprWithVars varnames tv
 
          putStrLn "\n---------General stats:---------\n"
          putStrLn $ "Number of nodes: " <> show (_nNodes basic)

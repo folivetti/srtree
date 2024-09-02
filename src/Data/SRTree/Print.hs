@@ -14,7 +14,9 @@
 -----------------------------------------------------------------------------
 module Data.SRTree.Print 
          ( showExpr
+         , showExprWithVars
          , printExpr
+         , printExprWithVars
          , showTikz
          , printTikz
          , showPython
@@ -42,9 +44,27 @@ showExpr = cata $
     Bin op l r -> concat ["(", l, " ", showOp op, " ", r, ")"]
     Uni f t    -> concat [show f, "(", t, ")"]
 
+-- | convert a tree into a string in math notation
+-- given named vars.
+--
+-- >>> showExprWithVar ["mu", "eps"] $ "x0" + sin ( "x1" * tanh ("t0" + 2) )
+-- "(mu + Sin(Tanh(eps * (t0 + 2.0))))"
+showExprWithVars :: [String] -> Fix SRTree -> String
+showExprWithVars varnames = cata $
+  \case
+    Var ix     -> varnames !! ix
+    Param ix   -> 't' : show ix
+    Const c    -> show c
+    Bin op l r -> concat ["(", l, " ", showOp op, " ", r, ")"]
+    Uni f t    -> concat [show f, "(", t, ")"]
+
 -- | prints the expression 
 printExpr :: Fix SRTree -> IO ()
 printExpr = putStrLn . showExpr 
+
+-- | prints the expression
+printExprWithVars :: [String] -> Fix SRTree -> IO ()
+printExprWithVars varnames = putStrLn . showExprWithVars varnames
 
 -- how to display an operator 
 showOp :: Op -> String

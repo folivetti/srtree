@@ -111,18 +111,18 @@ data Info = Info { _bic     :: Double
                  }
 
 -- load the datasets
-getDataset :: Args -> IO (Datasets, String)
+getDataset :: Args -> IO (Datasets, String, String)
 getDataset args = do
-  ((xTr, yTr, xVal, yVal), varnames) <- loadDataset (dataset args) (hasHeader args)
+  ((xTr, yTr, xVal, yVal), varnames, tgname) <- loadDataset (dataset args) (hasHeader args)
   let (A.Sz m) = A.size yVal
   let (mXVal, mYVal) = if m == 0
                          then (Nothing, Nothing)
                          else (Just xVal, Just yVal)
   (mXTe, mYTe) <- if null (test args)
                     then pure (Nothing, Nothing)
-                    else do ((xTe, yTe, _, _), _) <- loadDataset (test args) (hasHeader args)
+                    else do ((xTe, yTe, _, _), _, _) <- loadDataset (test args) (hasHeader args)
                             pure (Just xTe, Just yTe)
-  pure (DS xTr yTr mXVal mYVal mXTe mYTe, varnames)
+  pure (DS xTr yTr mXVal mYVal mXTe mYTe, varnames, tgname)
 
 getBasicStats :: Args -> StdGen -> Datasets -> Fix SRTree -> Int -> BasicInfo
 getBasicStats args seed dset tree ix

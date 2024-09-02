@@ -164,6 +164,9 @@ getRows (B.unpack -> start) (B.unpack -> end) nRows
 
 -- | `loadDataset` loads a dataset with a filename in the format:
 --   filename.ext:start_row:end_row:target:features
+--   it returns the X_train, y_train, X_test, y_test, varnames, target name 
+--   where varnames are a comma separated list of the name of the vars 
+--   and target name is the name of the target
 --
 -- where
 --
@@ -173,7 +176,7 @@ getRows (B.unpack -> start) (B.unpack -> end) nRows
 -- of the target variable
 -- **features** is a comma separated list of SRMatrix names or indices to be used as
 -- input variables of the regression model.
-loadDataset :: FilePath -> Bool -> IO ((SRMatrix, PVector, SRMatrix, PVector), String)
+loadDataset :: FilePath -> Bool -> IO ((SRMatrix, PVector, SRMatrix, PVector), String, String)
 loadDataset filename hasHeader = do  
   csv <- readFileToLines fname
   pure $ processData csv params hasHeader
@@ -181,8 +184,8 @@ loadDataset filename hasHeader = do
     (fname, params) = splitFileNameParams filename
 
 -- support function that does everything for loadDataset
-processData :: [[B.ByteString]] -> [B.ByteString] -> Bool -> ((SRMatrix, PVector, SRMatrix, PVector), String)
-processData csv params hasHeader = ((x_train, y_train, x_val, y_val) , varnames)
+processData :: [[B.ByteString]] -> [B.ByteString] -> Bool -> ((SRMatrix, PVector, SRMatrix, PVector), String, String)
+processData csv params hasHeader = ((x_train, y_train, x_val, y_val) , varnames, targetname)
   where
     ncols             = length $ head csv
     nrows             = length csv - fromEnum hasHeader
@@ -192,6 +195,7 @@ processData csv params hasHeader = ((x_train, y_train, x_val, y_val) , varnames)
     varnames          = intercalate "," [B.unpack v | c <- ixs
                                         , let v = fst . fromJust $ find ((==c).snd) header
                                         ]
+    targetname        = if hasHeader then (B.unpack . fst . fromJust . find ((==iy).snd) $ header) else "y"
     -- get rows and SRMatrix indices
     (st, end) = getRows (params !! 0) (params !! 1) nrows
     (ixs, iy) = getColumns header (params !! 2) (params !! 3)
