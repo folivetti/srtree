@@ -69,6 +69,8 @@ applyBin op (Left ly) (Left ry) =
              Mul -> ly !*! ry
              Div -> ly !/! ry
              Power -> ly .** ry
+             PowerAbs -> M.map abs (ly .** ry)
+             AQ -> ly !/! (M.map sqrt (M.map (+1) (ry !*! ry)))
 
 applyBin op (Left ly) (Right ry)  =
     Left $ unsafeLiftArray (\ x -> evalOp op x ry) ly
@@ -145,12 +147,14 @@ forwardMode xss theta err tree = let (yhat, jacob) = runST $ cataM lToR alg tree
             forM_ [0 .. p-1] $ \j -> do 
                 vl <- UMA.unsafeRead tl (i :. j)
                 vr <- UMA.unsafeRead tr (i :. j)
-                case op of 
-                  Add -> UMA.unsafeWrite tl (i :. j) (vl+vr)
-                  Sub -> UMA.unsafeWrite tl (i :. j) (vl-vr)
-                  Mul -> UMA.unsafeWrite tl (i :. j) (vl * ri + vr * li)
-                  Div -> UMA.unsafeWrite tl (i :. j) ((vl * ri - vr * li) / ri^2)
-                  Power -> UMA.unsafeWrite tl (i :. j) (li ** (ri - 1) * (ri * vl + li * log li * vr))
+                UMA.unsafeWrite tl (i :. j) $ case op of
+                  Add      -> (vl+vr)
+                  Sub      -> (vl-vr)
+                  Mul      -> (vl * ri + vr * li)
+                  Div      -> ((vl * ri - vr * li) / ri^2)
+                  Power    -> (li ** (ri - 1) * (ri * vl + li * log li * vr))
+                  PowerAbs -> (abs li ** ri) * (vr * log (abs li) + ri * vl / li)
+                  AQ       -> ((1 + ri*ri) * vl - li * ri * vr) / (1 + ri*ri) ** 1.5
         tlF <- UMA.unsafeFreeze cmp tl
         pure (applyBin op l r, tlF)
 
@@ -183,7 +187,14 @@ forwardModeUnique xss theta err = second (toGrad . DL.toList) . cata alg
       alg (Bin Power (v1, l) (v2, r)) = let dv1 = v1 ** (v2 - one)
                                             dv2 = v1 * log v1
                                          in (v1 ** v2, DL.map (*dv1) (DL.append (DL.map (*v2) l) (DL.map (*dv2) r)))
-    
+      alg (Bin PowerAbs (v1, l) (v2, r)) = let dv1 = abs v1 ** v2
+                                               dv2 = DL.map (* (log (abs v1))) r
+                                               dv3 = DL.map (*(v2 / v1)) l
+                                           in (abs v1 ** v2, DL.map (*dv1) (DL.append dv2 dv3))
+      alg (Bin AQ (v1, l) (v2, r)) = let dv1 = DL.map (*(1 + v2*v2)) l
+                                         dv2 = DL.map (*(-v1*v2)) r
+                                     in (v1/sqrt(1 + v2*v2), DL.map (/(1 + v2*v2)**1.5) $ DL.append dv1 dv2)
+
 data TupleF a b = Single a | T a b | Branch a b b deriving Functor -- hi, I'm a tree
 type Tuple a = Fix (TupleF a)
 
@@ -248,6 +259,10 @@ reverseModeUnique xss theta ys f t = unsafePerformIO $
       -- dx is the current derivative so far
       -- fx is the evaluation of the left branch
       -- gx is the evaluation of the right branch
+      --
+      -- this should return a tuple, where the left element is
+      -- dx * d op(f(x), g(x)) / d f(x) and
+      -- the right branch dx * d op (f(x), g(x)) / d g(x)
       diff Add dx fx gy = (dx, dx)
       diff Sub dx fx gy = (dx, negate' dx)
       diff Mul dx fx gy = (applyBin Mul dx gy, applyBin Mul dx fx)
@@ -255,6 +270,12 @@ reverseModeUnique xss theta ys f t = unsafePerformIO $
       diff Power dx fx gy = let dxl = applyBin Mul dx (applyBin Power fx (applyBin Sub gy (Right 1)))
                                 dv2 = applyBin Mul fx (applyUni Log fx)
                             in (applyBin Mul dxl gy, applyBin Mul dxl dv2)
+      diff PowerAbs dx fx gy = let dxl = applyBin Mul (applyBin Mul gy fx) (applyBin PowerAbs fx (applyBin Sub gy (Right 2)))
+                                   dxr = applyBin Mul (applyUni LogAbs fx) (applyBin PowerAbs fx gy)
+                               in (applyBin Mul dxl dx, applyBin Mul dxr dx)
+      diff AQ dx fx gy = let dxl = applyUni Recip (applyUni Sqrt (applyBin Add (applyUni Square gy) (Right 1)))
+                             dxy = applyBin Div (applyBin Mul fx gy) (applyUni Cube (applyUni Sqrt (applyBin Add (applyUni Square gy) (Right 1))))
+                         in (applyBin Mul dxl dx, applyBin Mul dxy dx)
 
 
       -- once we reach a leaf with a parameter, we return a singleton
@@ -293,3 +314,10 @@ forwardModeUniqueJac xss theta = snd . second (map (M.computeAs M.S) . DL.toList
       alg (Bin Power (v1, l) (v2, r)) = let dv1 = v1 ** (v2 - one)
                                             dv2 = v1 * log v1
                                          in (v1 ** v2, DL.map (*dv1) (DL.append (DL.map (*v2) l) (DL.map (*dv2) r)))
+      alg (Bin PowerAbs (v1, l) (v2, r)) = let dv1 = abs v1 ** v2
+                                               dv2 = DL.map (* (log (abs v1))) r
+                                               dv3 = DL.map (*(v2 / v1)) l
+                                           in (abs v1 ** v2, DL.map (*dv1) (DL.append dv2 dv3))
+      alg (Bin AQ (v1, l) (v2, r)) = let dv1 = DL.map (*(1 + v2*v2)) l
+                                         dv2 = DL.map (*(-v1*v2)) r
+                                     in (v1/sqrt(1 + v2*v2), DL.map (/(1 + v2*v2)**1.5) $ DL.append dv1 dv2)

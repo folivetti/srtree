@@ -35,15 +35,17 @@ import Data.Attoparsec.ByteString.Char8 (double)
 deriveBy :: Bool -> Int -> Fix SRTree -> Fix SRTree
 deriveBy p dx = fst (mutu alg1 alg2)
   where
-      alg1 (Var ix)        = if not p && ix == dx then 1 else 0
-      alg1 (Param ix)      = if p && ix == dx then 1 else 0
-      alg1 (Const _)       = 0
-      alg1 (Uni f t)       = derivative f (snd t) * fst t
-      alg1 (Bin Add l r)   = fst l + fst r
-      alg1 (Bin Sub l r)   = fst l - fst r
-      alg1 (Bin Mul l r)   = fst l * snd r + snd l * fst r
-      alg1 (Bin Div l r)   = (fst l * snd r - snd l * fst r) / snd r ** 2
-      alg1 (Bin Power l r) = snd l ** (snd r - 1) * (snd r * fst l + snd l * log (snd l) * fst r)
+      alg1 (Var ix)           = if not p && ix == dx then 1 else 0
+      alg1 (Param ix)         = if p && ix == dx then 1 else 0
+      alg1 (Const _)          = 0
+      alg1 (Uni f t)          = derivative f (snd t) * fst t
+      alg1 (Bin Add l r)      = fst l + fst r
+      alg1 (Bin Sub l r)      = fst l - fst r
+      alg1 (Bin Mul l r)      = fst l * snd r + snd l * fst r
+      alg1 (Bin Div l r)      = (fst l * snd r - snd l * fst r) / snd r ** 2
+      alg1 (Bin Power l r)    = snd l ** (snd r - 1) * (snd r * fst l + snd l * log (snd l) * fst r)
+      alg1 (Bin PowerAbs l r) = (abs (snd l) ** (snd r)) * (fst r * log (abs (snd l)) + snd r * fst l / snd l)
+      alg1 (Bin AQ l r)       = ((1 + snd r * snd r) * fst l - snd l * snd r * fst r) / (1 + snd r * snd r) ** 1.5
 
       alg2 (Var ix)    = var ix
       alg2 (Param ix)  = param ix
@@ -72,10 +74,14 @@ derivative ASinh   = recip . sqrt . (1+) . (^2)
 derivative ACosh   = \x -> 1 / (sqrt (x-1) * sqrt (x+1))
 derivative ATanh   = recip . (1-) . (^2)
 derivative Sqrt    = recip . (2*) . sqrt
+derivative SqrtAbs = \x -> x / (2.0 * abs x ** (3.0/2.0))
 derivative Cbrt    = recip . (3*) . (**(1/3)) . (^2)
 derivative Square  = (2*)
 derivative Exp     = exp
 derivative Log     = recip
+derivative LogAbs  = recip
+derivative Recip   = negate . recip . (^2)
+derivative Cube    = (3*) . (^2)
 {-# INLINE derivative #-}
 
 -- | Second-order derivative of supported functions
@@ -98,10 +104,14 @@ doubleDerivative ASinh   = \x -> x / (x^2 + 1)**(3/2) -- check
 doubleDerivative ACosh   = \x -> 1 / (sqrt (x-1) * sqrt (x+1)) -- check
 doubleDerivative ATanh   = recip . (1-) . (^2) -- check
 doubleDerivative Sqrt    = \x -> -1 / (4 * sqrt x^3)
+doubleDerivative SqrtAbs = \x -> (-x)*x/(4 * abs x ** (3.5))
 doubleDerivative Cbrt    = \x -> -2 / (9 * x * (x^2)**(1/3))
 doubleDerivative Square  = const 2
 doubleDerivative Exp     = exp
 doubleDerivative Log     = negate . recip . (^2)
+doubleDerivative LogAbs  = negate . recip . (^2)
+doubleDerivative Recip   = (*2) . recip . (^3)
+doubleDerivative Cube    = (6*)
 {-# INLINE doubleDerivative #-}
 
 -- | Symbolic derivative by a variable

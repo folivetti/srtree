@@ -17,7 +17,7 @@ import Control.Monad (when)
 import Data.Massiv.Array qualified as M
 import Debug.Trace ( traceShow, trace )
 
-data Method = Grow | Full
+data Method = Grow | Full | BTC
 
 type Rng a = StateT StdGen IO a 
 type GenUni = Fix SRTree -> Fix SRTree 
@@ -158,6 +158,7 @@ isAbs _ = False
 isInv (Fix (Bin Div (Fix (Const 1.0)) _)) = True 
 isInv _ = False 
 {-# INLINE isInv #-}
+
 mutate :: HyperParams -> Individual -> Rng Individual
 mutate hp ind = do
   let sz = countNodes' (_tree ind)

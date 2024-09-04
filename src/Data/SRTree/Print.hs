@@ -31,18 +31,34 @@ import Data.Char (toLower)
 import Data.SRTree.Internal
 import Data.SRTree.Recursion (cata)
 
+-- | converts a tree with protected operators to
+-- a conventional math tree
+removeProtection :: Fix SRTree -> Fix SRTree
+removeProtection = cata $
+  \case
+     Var ix -> Fix (Var ix)
+     Param ix -> Fix (Param ix)
+     Const x -> Fix (Const x)
+     Uni SqrtAbs t -> sqrt (abs t)
+     Uni LogAbs t -> log (abs t)
+     Uni Cube t -> t ** 3
+     Uni f t -> Fix (Uni f t)
+     Bin AQ l r -> l / sqrt (1 + r*r)
+     Bin PowerAbs l r -> abs l ** r
+     Bin op l r -> Fix (Bin op l r)
+
 -- | convert a tree into a string in math notation 
 --
 -- >>> showExpr $ "x0" + sin ( tanh ("t0" + 2) )
 -- "(x0 + Sin(Tanh((t0 + 2.0))))"
 showExpr :: Fix SRTree -> String
-showExpr = cata $
-  \case 
-    Var ix     -> 'x' : show ix
-    Param ix   -> 't' : show ix
-    Const c    -> show c
-    Bin op l r -> concat ["(", l, " ", showOp op, " ", r, ")"]
-    Uni f t    -> concat [show f, "(", t, ")"]
+showExpr = cata alg . removeProtection
+  where alg = \case
+                Var ix     -> 'x' : show ix
+                Param ix   -> 't' : show ix
+                Const c    -> show c
+                Bin op l r -> concat ["(", l, " ", showOp op, " ", r, ")"]
+                Uni f t    -> concat [show f, "(", t, ")"]
 
 -- | convert a tree into a string in math notation
 -- given named vars.
@@ -50,13 +66,13 @@ showExpr = cata $
 -- >>> showExprWithVar ["mu", "eps"] $ "x0" + sin ( "x1" * tanh ("t0" + 2) )
 -- "(mu + Sin(Tanh(eps * (t0 + 2.0))))"
 showExprWithVars :: [String] -> Fix SRTree -> String
-showExprWithVars varnames = cata $
-  \case
-    Var ix     -> varnames !! ix
-    Param ix   -> 't' : show ix
-    Const c    -> show c
-    Bin op l r -> concat ["(", l, " ", showOp op, " ", r, ")"]
-    Uni f t    -> concat [show f, "(", t, ")"]
+showExprWithVars varnames = cata alg . removeProtection
+  where alg = \case
+                Var ix     -> varnames !! ix
+                Param ix   -> 't' : show ix
+                Const c    -> show c
+                Bin op l r -> concat ["(", l, " ", showOp op, " ", r, ")"]
+                Uni f t    -> concat [show f, "(", t, ")"]
 
 -- | prints the expression 
 printExpr :: Fix SRTree -> IO ()
@@ -73,6 +89,8 @@ showOp Sub   = "-"
 showOp Mul   = "*"
 showOp Div   = "/"
 showOp Power = "^"
+showOp AQ    = "_aq_"
+showOp PowerAbs = "||^"
 {-# INLINE showOp #-}
 
 -- | Displays a tree as a numpy compatible expression.
@@ -80,16 +98,17 @@ showOp Power = "^"
 -- >>> showPython $ "x0" + sin ( tanh ("t0" + 2) )
 -- "(x[:, 0] + np.sin(np.tanh((t[:, 0] + 2.0))))"
 showPython :: Fix SRTree -> String
-showPython = cata $
-  \case
-    Var ix        -> concat ["x[:, ", show ix, "]"]
-    Param ix      -> concat ["t[:, ", show ix, "]"]
-    Const c       -> show c
-    Bin Power l r -> concat [l, " ** ", r]
-    Bin op l r    -> concat ["(", l, " ", showOp op, " ", r, ")"]
-    Uni f t       -> concat [pyFun f, "(", t, ")"]
-          
+showPython = cata alg . removeProtection
   where
+    alg = \case
+      Var ix        -> concat ["x[:, ", show ix, "]"]
+      Param ix      -> concat ["t[:, ", show ix, "]"]
+      Const c       -> show c
+      Bin Power l r -> concat [l, " ** ", r]
+      Bin op l r    -> concat ["(", l, " ", showOp op, " ", r, ")"]
+      Uni f t       -> concat [pyFun f, "(", t, ")"]
+          
+
     pyFun Id     = ""
     pyFun Abs    = "np.abs"
     pyFun Sin    = "np.sin"
@@ -108,6 +127,8 @@ showPython = cata $
     pyFun Square = "np.square"
     pyFun Log    = "np.log"
     pyFun Exp    = "np.exp"
+    pyFun Cbrt   = "np.cbrt"
+    pyFun Recip  = "np.reciprocal"
 
 -- | print the expression in numpy notation
 printPython :: Fix SRTree -> IO ()
@@ -118,15 +139,16 @@ printPython = putStrLn . showPython
 -- >>> showLatex $ "x0" + sin ( tanh ("t0" + 2) )
 -- "\\left(x_{, 0} + \\operatorname{sin}(\\operatorname{tanh}(\\left(\\theta_{, 0} + 2.0\\right)))\\right)"
 showLatex :: Fix SRTree -> String
-showLatex = cata $
-  \case
-    Var ix        -> concat ["x_{, ", show ix, "}"]
-    Param ix      -> concat ["\\theta_{, ", show ix, "}"]
-    Const c       -> show c
-    Bin Power l r -> concat [l, "^{", r, "}"]
-    Bin op l r    -> concat ["\\left(", l, " ", showOp op, " ", r, "\\right)"]
-    Uni Abs t     -> concat ["\\left |", t, "\\right |"]
-    Uni f t       -> concat [showLatexFun f, "(", t, ")"]
+showLatex = cata alg . removeProtection
+  where
+    alg = \case
+      Var ix        -> concat ["x_{, ", show ix, "}"]
+      Param ix      -> concat ["\\theta_{, ", show ix, "}"]
+      Const c       -> show c
+      Bin Power l r -> concat [l, "^{", r, "}"]
+      Bin op l r    -> concat ["\\left(", l, " ", showOp op, " ", r, "\\right)"]
+      Uni Abs t     -> concat ["\\left |", t, "\\right |"]
+      Uni f t       -> concat [showLatexFun f, "(", t, ")"]
 
 showLatexFun :: Function -> String
 showLatexFun f = mconcat ["\\operatorname{", map toLower $ show f, "}"]
@@ -138,14 +160,15 @@ printLatex = putStrLn . showLatex
 
 -- | Displays a tree in Tikz format
 showTikz :: Fix SRTree -> String
-showTikz = cata $
-  \case 
-    Var ix     -> concat ["[$x_{, ", show ix, "}$]\n"]
-    Param ix   -> concat ["[$\\theta_{, ", show ix, "}$]\n"]
-    Const c    -> concat ["[$", show (roundN 2 c), "$]\n"]
-    Bin op l r -> concat ["[", showOpTikz op, l, r, "]\n"]
-    Uni f t    -> concat ["[", map toLower $ show f, t, "]\n"]
+showTikz = cata alg . removeProtection
   where
+    alg = \case
+      Var ix     -> concat ["[$x_{, ", show ix, "}$]\n"]
+      Param ix   -> concat ["[$\\theta_{, ", show ix, "}$]\n"]
+      Const c    -> concat ["[$", show (roundN 2 c), "$]\n"]
+      Bin op l r -> concat ["[", showOpTikz op, l, r, "]\n"]
+      Uni f t    -> concat ["[", map toLower $ show f, t, "]\n"]
+
     roundN n x = let ten = 10^n in (/ ten) . fromIntegral . round $ x*ten
 
     showOpTikz Add = "+\n"

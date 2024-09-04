@@ -33,6 +33,7 @@ module Data.SRTree.Internal
          , numberOfVars
          , getIntConsts
          , relabelParams
+         , relabelVars
          , constsToParam
          , floatConstsToParam
          , paramsToConst
@@ -59,7 +60,7 @@ data SRTree val =
  deriving (Show, Eq, Ord, Functor)
 
 -- | Supported operators
-data Op = Add | Sub | Mul | Div | Power
+data Op = Add | Sub | Mul | Div | Power | PowerAbs | AQ
     deriving (Show, Read, Eq, Ord, Enum)
 
 -- | Supported functions
@@ -79,10 +80,14 @@ data Function =
   | ACosh
   | ATanh
   | Sqrt
+  | SqrtAbs
   | Cbrt
   | Square
   | Log
+  | LogAbs
   | Exp
+  | Recip
+  | Cube
      deriving (Show, Read, Eq, Ord, Enum)
 
 -- | create a tree with a single node representing a variable
@@ -152,6 +157,9 @@ instance Fractional (Fix SRTree) where
   Fix (Const c1) / Fix (Const c2) = Fix . Const $ c1/c2
   l / r                   = Fix $ Bin Div l r
   {-# INLINE (/) #-}
+
+  recip = Fix . Uni Recip
+  {-# INLINE recip #-}
 
   fromRational = Fix . Const . fromRational
   {-# INLINE fromRational #-}
@@ -355,6 +363,29 @@ relabelParams t = cataM leftToRight alg t `evalState` 0
       alg :: SRTree (Fix SRTree) -> State Int (Fix SRTree)
       alg (Var ix)    = pure $ var ix
       alg (Param ix)  = do iy <- get; modify (+1); pure (param iy)
+      alg (Const c)   = pure $ Fix $ Const c
+      alg (Uni f t)   = pure $ Fix (Uni f t)
+      alg (Bin f l r) = pure $ Fix (Bin f l r)
+
+-- | Relabel the parameters indices incrementaly starting from 0
+--
+-- >>> showExpr . relabelParams $ "x0" + "t0" * sin ("t1" + "x1") - "t0"
+-- "x0" + "t0" * sin ("t1" + "x1") - "t2"
+relabelVars :: Fix SRTree -> Fix SRTree
+relabelVars t = cataM leftToRight alg t `evalState` 0
+  where
+      -- | leftToRight (left to right) defines the sequence of processing
+      leftToRight (Uni f mt)    = Uni f <$> mt;
+      leftToRight (Bin f ml mr) = Bin f <$> ml <*> mr
+      leftToRight (Var ix)      = pure (Var ix)
+      leftToRight (Param ix)    = pure (Param ix)
+      leftToRight (Const c)     = pure (Const c)
+
+      -- | any time we reach a Param ix, it replaces ix with current state
+      -- and increments one to the state.
+      alg :: SRTree (Fix SRTree) -> State Int (Fix SRTree)
+      alg (Var ix)    = do iy <- get; modify (+1); pure (var iy)
+      alg (Param ix)  = pure $ param ix
       alg (Const c)   = pure $ Fix $ Const c
       alg (Uni f t)   = pure $ Fix (Uni f t)
       alg (Bin f l r) = pure $ Fix (Bin f l r)

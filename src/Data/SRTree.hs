@@ -28,6 +28,7 @@ module Data.SRTree
          , numberOfVars
          , getIntConsts
          , relabelParams
+         , relabelVars
          , constsToParam
          , floatConstsToParam
          , paramsToConst
@@ -53,6 +54,7 @@ import Data.SRTree.Internal
          , numberOfVars
          , getIntConsts
          , relabelParams
+         , relabelVars
          , constsToParam
          , floatConstsToParam
          , paramsToConst

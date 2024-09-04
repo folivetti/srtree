@@ -52,6 +52,7 @@ library
       Paths_srtree
   hs-source-dirs:
       src
+  ghc-options: -fwarn-incomplete-patterns
   build-depends:
       attoparsec
     , attoparsec-expr
@@ -186,6 +187,7 @@ executable tinygp
   main-is: Main.hs
   other-modules:
       GP
+      Initialization
       Paths_srtree
   hs-source-dirs:
       apps/tinygp

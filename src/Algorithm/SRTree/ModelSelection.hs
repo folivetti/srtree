@@ -157,6 +157,8 @@ treeToNat = cata $
     opToNat Mul = 1.720356134912558
     opToNat Div = 2.60436883851265
     opToNat Power = 2.527957363394847
+    opToNat PowerAbs = 2.527957363394847
+    opToNat AQ = 2.60436883851265
 
     funToNat :: Function -> Double
     funToNat Sqrt = 4.780867285331753

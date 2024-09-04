@@ -8,7 +8,7 @@ import Data.List ( intercalate )
 import Control.Monad ( unless, forM_ )
 import System.Random ( StdGen )
 
-import Data.SRTree ( SRTree (..), Fix (..), var, floatConstsToParam )
+import Data.SRTree ( SRTree (..), Fix (..), var, floatConstsToParam, relabelVars )
 import Algorithm.SRTree.Opt ( estimateSErr )
 import Algorithm.SRTree.Likelihoods ( Distribution (..) )
 import Algorithm.SRTree.ConfidenceIntervals ( printCI, BasicStats(_stdErr, _corr), CI )
@@ -138,7 +138,7 @@ printResultsScreen args seed dset varnames targt exprs = do
          unless (allAreVars newvars) do
           putStrLn "\nExpression and transformed features: "
           putStr   $ targt <> " ~ f(" <> intercalate ", " varnames' <> ") = "
-          putStrLn $ P.showExprWithVars varnames' transformedT
+          putStrLn $ P.showExprWithVars varnames' (relabelVars transformedT)
           forM_ (zip varnames' newvars) \(vn, tv) -> do
             putStrLn $ vn <> " = " <> P.showExprWithVars varnames tv
 
