@@ -1,10 +1,10 @@
 name: srtols Release
 
-on: push
+on: 
   # Trigger the workflow on the new 'v*' tag created
-  #push:
-  #  tags:
-  #    - "v*"
+  push:
+    tags:
+      - "v*"
 
 jobs:
   create_release:
