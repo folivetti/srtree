@@ -12,9 +12,9 @@
 -- Module containing the algebraic rules and simplification function.
 --
 -----------------------------------------------------------------------------
-module Algorithm.EqSat.Simplify ( simplifyEqSatDefault ) where
+module Algorithm.EqSat.Simplify ( simplifyEqSatDefault, applyMergeOnlyDftl ) where
 
-import Algorithm.EqSat (eqSat)
+import Algorithm.EqSat (eqSat, applySingleMergeOnlyEqSat)
 import Algorithm.EqSat.Egraph
 import Algorithm.EqSat.EqSatDB
   ( ClassOrVar,
@@ -53,11 +53,24 @@ isConstPos = constrainOnVal $
       ConstVal x -> x > 0 
       _          -> False
 
+isNotParam :: ConstrFun
+isNotParam = constrainOnVal $
+   \case
+      ParamIx _ -> False
+      _         -> True
+
 -- check if the matched pattern is nonzero
 isNotZero :: ConstrFun
 isNotZero = constrainOnVal $
     \case
        ConstVal x -> abs x < 1e-9
+       _          -> True
+
+-- check if the matched pattern is even 
+isEven :: ConstrFun
+isEven = constrainOnVal $
+    \case
+       ConstVal x -> ceiling x == floor x && even (round x) 
        _          -> True
 
 -- basic algebraic rules 
@@ -90,13 +103,14 @@ rewriteBasic =
 rewritesFun :: [Rule]
 rewritesFun =
     [
-      log (sqrt "x") :=> 0.5 * log "x"
+      log (sqrt "x") :=> 0.5 * log "x" :| isNotParam "x"
     , log (exp "x")  :=> "x"
     , exp (log "x")  :=> "x"
     , "x" ** (1/2)   :=> sqrt "x"
     , log ("x" * "y") :=> log "x" + log "y" :| isConstPos "x"
     , log ("x" / "y") :=> log "x" - log "y" :| isConstPos "x"
     , log ("x" ** "y") :=> "y" * log "x"
+    , sqrt ("x" ** "y") :=> "x" ** ("y" / 2) :| isEven "y"
     , sqrt ("y" * "x") :=> sqrt "y" * sqrt "x"
     , sqrt ("y" / "x") :=> sqrt "y" / sqrt "x"
     , abs ("x" * "y") :=> abs "x" * abs "y" :| isConstPt "x"
@@ -111,14 +125,14 @@ constReduction =
       0 + "x" :=> "x"
     , "x" - 0 :=> "x"
     , 1 * "x" :=> "x"
-    , 0 * "x" :=> 0
+    , 0 * "x" :=> 0 :| isNotParam "x"
     , 0 / "x" :=> 0 :| isNotZero "x"
-    , "x" - "x" :=> 0
-    , "x" / "x" :=> 1 :| isNotZero "x"
+    , "x" - "x" :=> 0 :| isNotParam "x"
+    , "x" / "x" :=> 1 :| isNotZero "x" :| isNotParam "x"
     , "x" ** 1 :=> "x"
     , 0 ** "x" :=> 0
     , 1 ** "x" :=> 1
-    , "x" * (1 / "x") :=> 1
+    , "x" * (1 / "x") :=> 1 :| isNotParam "x" :| isNotZero "x"
     , 0 - "x" :=> negate "x"
     , "x" + negate "y" :=> "x" - "y"
     , negate ("x" * "y") :=> (negate "x") * "y" :| isConstPt "x"
@@ -143,3 +157,7 @@ simplifyEqSatDefault t = eqSat t rewrites myCost 30 `evalState` emptyGraph
 -- | simplifies with custom parameters
 simplifyEqSat :: [Rule] -> CostFun -> Int -> Fix SRTree -> Fix SRTree
 simplifyEqSat rwrts costFun it t = eqSat t rwrts costFun it `evalState` emptyGraph
+
+-- | apply a single step of merge-only using default rules
+applyMergeOnlyDftl :: Monad m => CostFun -> EGraphST m ()
+applyMergeOnlyDftl costFun = applySingleMergeOnlyEqSat costFun rewrites

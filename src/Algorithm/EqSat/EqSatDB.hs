@@ -158,15 +158,13 @@ instance Floating Pattern where
 -- | `createDB` creates a database of patterns from an e-graph
 -- it simply calls addToDB for every pair (e-node, e-class id) from 
 -- the e-graph. 
-createDB :: EGraph -> DB
-createDB eg = execState dbst Map.empty
-    where dbst = mapM_ (uncurry addToDB)
-               $ Map.toList
-               $ _eNodeToEClass eg
+createDB :: Monad m => EGraphST m DB
+createDB = do dbst <- gets (mapM_ (uncurry addToDB) . Map.toList . _eNodeToEClass)
+              pure $ execState dbst Map.empty
 
 -- | `addToDB` adds an e-node and e-class id to the database
 addToDB :: ENode -> EClassId -> State DB ()
-addToDB enode eid = do let ids = eid : children enode -- we will add the e-class id and the children ids 
+addToDB enode eid = do let ids = eid : childrenOf enode -- we will add the e-class id and the children ids 
                            op  = getOperator enode    -- changes Bin op l r to Bin op () () so `op` as a single entry in the DB
                        trie <- gets (Map.!? op)       -- gets the entry for op, if it exists 
                        case populate trie ids of      -- populates the trie 
@@ -193,31 +191,35 @@ populate (Just tId) (eid:eids) = let keys = Set.insert eid (_keys tId)
                                      val = fromMaybe (trie eid IntMap.empty) $ populate nextTrie eids
                                   in Just $ IntTrie keys (IntMap.insert eid val (_trie tId))
 
-canonizeMap ::(Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST (Map ClassOrVar ClassOrVar, ClassOrVar)
+canonizeMap :: Monad m => (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m (Map ClassOrVar ClassOrVar, ClassOrVar)
 canonizeMap (subst, cv) = (,cv) . Map.fromList <$> traverse f (Map.toList subst)
   where
-    f :: (ClassOrVar, ClassOrVar) -> EGraphST (ClassOrVar, ClassOrVar)
+    f :: Monad m => (ClassOrVar, ClassOrVar) -> EGraphST m (ClassOrVar, ClassOrVar)
     f (e1, Left e2) = do e2' <- canonical e2
                          pure (e1, Left e2')
     f (e1, e2)      = pure (e1, e2)
 
-applyMatch :: CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST ()
+applyMatch :: Monad m => CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m ()
 applyMatch costFun rule match' =
   do eg <- get
      let conds = getConditions rule
      match <- canonizeMap match'
-     when (isValidHeight match eg && all (\c -> isValidConditions c match eg) conds) $
+     validHeight <- isValidHeight match 
+     validConds  <- mapM (`isValidConditions` match) conds
+     when (validHeight && and validConds) $
        do new_eclass <- reprPrat costFun (fst match) (target rule)
           --traceShow ("merging", snd match, new_eclass) $
           merge costFun (getInt (snd match)) new_eclass
           pure ()
 
-applyMergeOnlyMatch :: CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST ()
+applyMergeOnlyMatch :: Monad m => CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m ()
 applyMergeOnlyMatch costFun rule match' =
   do eg <- get
      let conds = getConditions rule
      match <- canonizeMap match'
-     when (isValidHeight match eg && all (\c -> isValidConditions c match eg) conds) $
+     validHeight <- isValidHeight match 
+     validConds  <- mapM (`isValidConditions` match) conds
+     when (validHeight && and validConds) $
        do maybe_eid <- classOfENode costFun (fst match) (target rule)
           case maybe_eid of
             Nothing  -> pure ()
@@ -240,7 +242,7 @@ getConditions _ = []
 
 -- | gets the e-node of the target of the rule
 -- TODO: add consts and modify
-classOfENode :: CostFun -> Map ClassOrVar ClassOrVar -> Pattern -> EGraphST (Maybe EClassId)
+classOfENode :: Monad m => CostFun -> Map ClassOrVar ClassOrVar -> Pattern -> EGraphST m (Maybe EClassId)
 classOfENode costFun subst (VarPat c)     = do let maybeEid = getInt <$> subst Map.!? Right (fromEnum c)
                                                case maybeEid of
                                                  Nothing  -> pure Nothing
@@ -250,35 +252,37 @@ classOfENode costFun subst (Fixed target) = do newChildren <- mapM (classOfENode
                                                case sequence newChildren of
                                                  Nothing -> pure Nothing
                                                  Just cs -> do let new_enode = replaceChildren cs target
-                                                               areConsts <- mapM isConst cs
+                                                               cs' <- mapM canonical cs
+                                                               areConsts <- mapM isConst cs'
                                                                if and areConsts
                                                                  then do eid <- add costFun new_enode
                                                                          rebuild costFun -- eid new_enode
                                                                          pure (Just eid)
                                                                  else gets ((Map.!? new_enode) . _eNodeToEClass)
 
-isConst :: EClassId -> EGraphST Bool
+isConst :: Monad m => EClassId -> EGraphST m Bool
 isConst eid = do ec <- gets ((IntMap.! eid) . _eClass)
                  case (_consts . _info) ec of
                    ConstVal _ -> pure True
                    _          -> pure False
 
 -- | adds the target of the rule into the e-graph
-reprPrat :: CostFun -> Map ClassOrVar ClassOrVar -> Pattern -> EGraphST EClassId
+reprPrat :: Monad m => CostFun -> Map ClassOrVar ClassOrVar -> Pattern -> EGraphST m EClassId
 reprPrat costFun subst (VarPat c)     = canonical $ getInt $ subst Map.! Right (fromEnum c)
 reprPrat costFun subst (Fixed target) = do newChildren <- mapM (reprPrat costFun subst) (getElems target)
                                            add costFun (replaceChildren newChildren target)
 
-isValidHeight :: (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraph -> Bool
-isValidHeight match eg = h < 15
-  where
-    h = case snd match of
-          Left ec -> _height (_eClass eg IntMap.! canonical' ec eg)
-          Right _ -> 0
+isValidHeight :: Monad m => (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m Bool
+isValidHeight match = do
+    h <- case snd match of
+           Left ec -> do ec' <- canonical ec 
+                         gets (_height . (IntMap.! ec') . _eClass)
+           Right _ -> pure 0
+    pure $ h < 15
 
 -- | returns `True` if the condition of a rule is valid for that match
-isValidConditions :: Condition -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraph -> Bool
-isValidConditions cond match = cond (fst match)
+isValidConditions :: Monad m => Condition -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m Bool
+isValidConditions cond match = gets $ cond (fst match)
 
 -- | Returns the substitution rules
 -- for every match of the pattern `source` inside the e-graph.

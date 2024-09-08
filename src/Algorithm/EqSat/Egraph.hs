@@ -17,8 +17,9 @@
 module Algorithm.EqSat.Egraph where
 
 import Control.Lens (element, makeLenses, over, (&), (+~), (-~), (.~), (^.))
-import Control.Monad (forM, forM_, when)
+import Control.Monad (forM, forM_, when, foldM)
 import Control.Monad.State
+import Control.Monad.Identity
 import Data.AEq (AEq ((~==)))
 import Data.IntMap (IntMap, delete, empty, insert, toList)
 import qualified Data.IntMap as IntMap
@@ -31,13 +32,13 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import System.Random (Random (randomR), StdGen)
 
-type EClassId   = Int -- DO NOT CHANGE THIS without changing the next line! This will break the use of IntMap for speed
-type ClassIdMap = IntMap
-type ENode      = SRTree EClassId
-type EData      = ()
-type EGraphST a = State EGraph a
-type Cost       = Int
-type CostFun    = SRTree Cost -> Cost
+
+type EClassId     = Int -- DO NOT CHANGE THIS without changing the next line! This will break the use of IntMap for speed
+type ClassIdMap   = IntMap
+type ENode        = SRTree EClassId
+type EGraphST m a = StateT EGraph m a
+type Cost         = Int
+type CostFun      = SRTree Cost -> Cost
 
 data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId -- maps an e-class id to its canonical form
                      , _eNodeToEClass :: Map ENode EClassId  -- maps an e-node to its e-class id
@@ -57,9 +58,11 @@ data EClass = EClass { _eClassId :: Int                 -- e-class id (maybe we 
 data Consts   = NotConst | ParamIx Int | ConstVal Double deriving (Show, Eq)
 data Property = Positive | Negative | NonZero | Real deriving (Show, Eq) -- TODO: incorporate properties
 
-data EClassData = EData { _cost   :: Cost
-                        , _best   :: ENode
-                        , _consts :: Consts
+data EClassData = EData { _cost    :: Cost
+                        , _best    :: ENode
+                        , _consts  :: Consts
+                        , _fitness :: Maybe Double 
+                        , _size    :: Int
                         -- , _properties :: Property
                         -- TODO: include evaluation of expression from this e-class
                         } deriving (Show, Eq)
@@ -68,8 +71,27 @@ makeLenses ''EGraph
 makeLenses ''EClass
 makeLenses ''EClassData
 
+getEClassesThat :: Monad m => (EClass -> Bool) -> EGraphST m [EClassId]
+getEClassesThat p = do 
+    ecs <- gets (IntMap.keys . _eClass)
+    go ecs 
+        where 
+            go :: Monad m => [EClassId] -> EGraphST m [EClassId]
+            go [] = pure []
+            go (ecId:ecs) = do ec <- gets ((IntMap.! ecId) . _eClass)
+                               ecs' <- go ecs 
+                               if p ec 
+                                  then pure (ecId:ecs')
+                                  else pure ecs'
+
+updateFitness :: Monad m => Double -> EClassId -> EGraphST m ()
+updateFitness f ecId = do
+   ec   <- gets ((IntMap.! ecId) . _eClass)
+   let info = _info ec 
+   modify' $ over eClass (IntMap.insert ecId ec{_info=info{_fitness = Just f}})
+
 -- | adds a new or existing e-node (merging if necessary)
-add :: CostFun -> ENode -> EGraphST EClassId
+add :: Monad m => CostFun -> ENode -> EGraphST m EClassId
 add costFun enode =
   do enode'  <- canonize enode                                             -- canonize e-node
      doExist <- gets (Map.member enode' . _eNodeToEClass)                -- check if canonical e-node exists
@@ -80,13 +102,13 @@ add costFun enode =
                         . over canonicalMap (insert curId curId)           -- insert e-class id into canon map
                         . over eNodeToEClass (Map.insert enode' curId)     -- associate new e-node with id
                         . over worklist ((curId, enode'):)                 -- add e-node and id into worklist
-                forM_ (children enode') (addParents curId enode')          -- update the children's parent list
+                forM_ (childrenOf enode') (addParents curId enode')          -- update the children's parent list
                 info <- makeAnalysis costFun enode'
                 let newClass = EClass curId (Set.singleton enode') [] 0 info -- create e-class
                 modify' $ over eClass (insert curId newClass)              -- insert new e-class into e-graph
                 modifyEClass costFun curId                        -- simplify eclass if it evaluates to a number
   where
-    addParents :: EClassId -> ENode -> EClassId -> EGraphST ()
+    addParents :: Monad m => EClassId -> ENode -> EClassId -> EGraphST m ()
     addParents cId node c =
       do ec <- getEClass c
          let ec' = ec{ _parents = (cId, node):_parents ec }
@@ -94,7 +116,7 @@ add costFun enode =
 
 -- | rebuilds the e-graph after inserting or merging
 -- e-classes
-rebuild :: CostFun -> EGraphST ()
+rebuild :: Monad m => CostFun -> EGraphST m ()
 rebuild costFun =
   do wl <- gets _worklist
      al <- gets _analysis
@@ -106,7 +128,7 @@ rebuild costFun =
 -- | repairs e-node by canonizing its children
 -- if the canonized e-node already exists in
 -- e-graph, merge the e-classes
-repair :: CostFun -> EClassId -> ENode -> EGraphST ()
+repair :: Monad m => CostFun -> EClassId -> ENode -> EGraphST m ()
 repair costFun ecId enode =
   do modify' $ over eNodeToEClass (Map.delete enode)
      enode'  <- canonize enode
@@ -120,7 +142,7 @@ repair costFun ecId enode =
 
 -- | repair the analysis of the e-class
 -- considering the new added e-node
-repairAnalysis :: CostFun -> EClassId -> ENode -> EGraphST ()
+repairAnalysis :: Monad m => CostFun -> EClassId -> ENode -> EGraphST m ()
 repairAnalysis costFun ecId enode =
   do ecId'  <- canonical ecId
      enode' <- canonize enode
@@ -135,7 +157,7 @@ repairAnalysis costFun ecId enode =
           pure ()
 
 -- | merge to equivalnt e-classes
-merge :: CostFun -> EClassId -> EClassId -> EGraphST EClassId
+merge :: Monad m => CostFun -> EClassId -> EClassId -> EGraphST m EClassId
 merge costFun c1 c2 =
   do c1' <- canonical c1
      c2' <- canonical c2
@@ -144,7 +166,7 @@ merge costFun c1 c2 =
        else do (led, ledC, sub, subC) <- getLeaderSub c1' c2'  -- the leader will be the e-class with more parents
                mergeClasses led ledC sub subC          -- merge sub into leader
   where
-    mergeClasses :: EClassId -> EClass -> EClassId -> EClass -> EGraphST EClassId
+    mergeClasses :: Monad m => EClassId -> EClass -> EClassId -> EClass -> EGraphST m EClassId
     mergeClasses led ledC sub subC =
       do modify' $ over canonicalMap (insert sub led) -- points sub e-class to leader to maintain consistency
          let -- create new e-class with same id as led
@@ -173,7 +195,7 @@ merge costFun c1 c2 =
                   else (c2, ec2, c1, ec1)
 
 -- modify an e-class, e.g., add constant e-node and prune non-leaves
-modifyEClass :: CostFun -> EClassId -> EGraphST EClassId
+modifyEClass :: Monad m => CostFun -> EClassId -> EGraphST m EClassId
 modifyEClass costFun ecId =
   do ec <- getEClass ecId
      if (_consts . _info) ec /= NotConst
@@ -194,8 +216,8 @@ modifyEClass costFun ecId =
 
 -- join data from two e-classes
 joinData :: EClassData -> EClassData -> EClassData
-joinData (EData c1 b1 cn1) (EData c2 b2 cn2) =
-  EData (min c1 c2) b (combineConsts cn1 cn2)
+joinData (EData c1 b1 cn1 fit1 sz1) (EData c2 b2 cn2 fit2 sz2) =
+  EData (min c1 c2) b (combineConsts cn1 cn2) (min fit1 fit2) (min sz1 sz2)
   where
     b = if c1 <= c2 then b1 else b2
     combineConsts (ConstVal x) (ConstVal y)
@@ -213,74 +235,89 @@ joinData (EData c1 b1 cn1) (EData c2 b2 cn2) =
     combineConsts x y = error (show x <> " " <> show y)
 
 -- | Calculate e-node data (constant values and cost)
-makeAnalysis :: CostFun -> ENode -> EGraphST EClassData
+makeAnalysis :: Monad m => CostFun -> ENode -> EGraphST m EClassData
 makeAnalysis costFun enode =
   do consts <- calculateConsts enode
      enode' <- canonize enode
      cost   <- calculateCost costFun enode'
-     pure $ EData cost enode' consts
+     sz <- sum <$> mapM (\ecId -> gets (_size . _info . (IntMap.! ecId) . _eClass)) (childrenOf enode')
+     pure $ EData cost enode' consts Nothing (sz+1)
 
 -- | Creates an e-graph from an expression tree
-fromTree :: CostFun -> Fix SRTree -> (EClassId, EGraph)
-fromTree costFun tree = cataM sequence' (add costFun) tree `runState` emptyGraph
+fromTree :: Monad m => CostFun -> Fix SRTree -> EGraphST m EClassId
+fromTree costFun = cataM sequence (add costFun) 
 
 -- | Builds an e-graph from multiple independent trees
-fromTrees :: CostFun -> [Fix SRTree] -> ([EClassId], EGraph)
-fromTrees costFun = Prelude.foldr (\t (rs, eg) -> let (r, eg') = fromTreeWith costFun eg t in (r:rs, eg')) ([], emptyGraph)
-
--- | insert new tree into an existing e-graph
-fromTreeWith :: CostFun -> EGraph -> Fix SRTree -> (EClassId, EGraph)
-fromTreeWith costFun eg tree = cataM sequence' (add costFun) tree `runState` eg
+fromTrees :: Monad m => CostFun -> [Fix SRTree] -> EGraphST m [EClassId]
+fromTrees costFun = foldM (\rs t -> do eid <- fromTree costFun t; pure (eid:rs)) []
 
 -- | returns all the root e-classes (e-class without parents)
-findRootClasses :: EGraph -> [EClassId]
-findRootClasses = Prelude.map fst . Prelude.filter isParent . toList . _eClass
+findRootClasses :: Monad m => EGraphST m [EClassId]
+findRootClasses = gets (Prelude.map fst . Prelude.filter isParent . toList . _eClass)
   where
     isParent (k, v) = Prelude.null (_parents v) || fst (head (_parents v)) == k
 
+-- | gets the best expression given the default cost function
+getBest :: Monad m => EClassId -> EGraphST m (Fix SRTree)
+getBest eid = do eid' <- canonical eid
+                 best <- gets (_best . _info . (IntMap.! eid') . _eClass)
+                 childs <- mapM getBest $ childrenOf best
+                 pure . Fix $ replaceChildren childs best
+
 -- | returns one expression rooted at e-class `eId`
-getExpressionFrom :: EGraph -> EClassId -> Fix SRTree
-getExpressionFrom eg eId = case head (Set.toList nodes) of
-                                Bin op l r -> Fix $ Bin op (getExpressionFrom eg l) (getExpressionFrom eg r)
-                                Uni f t    -> Fix $ Uni f (getExpressionFrom eg t)
-                                Var ix     -> Fix $ Var ix
-                                Const x    -> Fix $ Const x
-                                Param ix   -> Fix $ Param ix
-  where
-    nodes = _eNodes . (IntMap.! eId) . _eClass $ eg
+getExpressionFrom :: Monad m => EClassId -> EGraphST m (Fix SRTree)
+getExpressionFrom eId' = do
+    eId <- canonical eId'
+    nodes <- gets (_eNodes . (IntMap.! eId) . _eClass)
+    Fix <$> case head (Set.toList nodes) of
+      Bin op l r -> Bin op <$> getExpressionFrom l <*> getExpressionFrom r
+      Uni f t    -> Uni f <$> getExpressionFrom t
+      Var ix     -> pure $ Var ix
+      Const x    -> pure $ Const x
+      Param ix   -> pure $ Param ix
 
 -- | returns all expressions rooted at e-class `eId`
-getAllExpressionsFrom :: EGraph -> EClassId -> [Fix SRTree]
-getAllExpressionsFrom eg eId = concatMap f (Set.toList nodes)
+getAllExpressionsFrom :: Monad m => EClassId -> EGraphST m [Fix SRTree]
+getAllExpressionsFrom eId' = do
+  eId <- canonical eId'
+  nodes <- gets (Set.toList . _eNodes . (IntMap.! eId) . _eClass)
+  concat <$> go nodes
   where
-    f n = case n of
-            Bin op l r -> Prelude.map Fix $ (Bin op) <$> (getAllExpressionsFrom eg l) <*> (getAllExpressionsFrom eg r)
-            Uni f t    -> (Fix . Uni f) <$> (getAllExpressionsFrom eg t)
-            Var ix     -> [Fix $ Var ix]
-            Const x    -> [Fix $ Const x]
-            Param ix   -> [Fix $ Param ix]
-    nodes = _eNodes . (IntMap.! eId) . _eClass $ eg
+    go []     = pure []
+    go (n:ns) = do 
+        t <- Prelude.map Fix <$> case n of
+                Bin op l r -> do l' <- getAllExpressionsFrom l
+                                 r' <- getAllExpressionsFrom r 
+                                 pure $ [Bin op li ri | li <- l', ri <- r']
+                Uni f t    -> Prelude.map (Uni f) <$> getAllExpressionsFrom t
+                Var ix     -> pure [Var ix]
+                Const x    -> pure [Const x]
+                Param ix   -> pure [Param ix]
+        ts <- go ns 
+        pure (t:ts)
 
 -- | returns a random expression rooted at e-class `eId`
-getRndExpressionFrom :: EGraph -> EClassId -> State StdGen (Fix SRTree)
-getRndExpressionFrom eg eId = do n <- randomFrom nodes
-                                 Fix <$> case n of
-                                            Bin op l r -> Bin op <$> (getRndExpressionFrom eg l) <*> (getRndExpressionFrom eg r)
-                                            Uni f t    -> Uni f <$> (getRndExpressionFrom eg t)
-                                            Var ix     -> pure $ Var ix
-                                            Const x    -> pure $ Const x
-                                            Param ix   -> pure $ Param ix
+getRndExpressionFrom :: EClassId -> EGraphST (State StdGen) (Fix SRTree)
+getRndExpressionFrom eId' = do
+    eId <- canonical eId'
+    nodes <- gets (Set.toList . _eNodes . (IntMap.! eId) . _eClass)
+    n <- lift $ randomFrom nodes
+    Fix <$> case n of
+              Bin op l r -> Bin op <$> getRndExpressionFrom l <*> getRndExpressionFrom r
+              Uni f t    -> Uni f <$> getRndExpressionFrom t
+              Var ix     -> pure $ Var ix
+              Const x    -> pure $ Const x
+              Param ix   -> pure $ Param ix
   where
-    nodes           = Set.toList . _eNodes . (IntMap.! eId) . _eClass $ eg
     randomRange rng = state (randomR rng)
     randomFrom xs   = do n <- randomRange (0, length xs - 1)
                          pure $ xs !! n
 
 -- | update the heights of each e-class
 -- won't work if there's no root
-calculateHeights :: EGraphST ()
+calculateHeights :: Monad m => EGraphST m ()
 calculateHeights =
-  do queue   <- gets findRootClasses
+  do queue   <- findRootClasses
      classes <- gets (Prelude.map fst . toList . _eClass)
      let nClasses = length classes
      forM_ classes (setHeight nClasses) -- set all heights to max possible height (number of e-classes)
@@ -298,19 +335,19 @@ calculateHeights =
          h <- _height <$> getEClass eId
          setHeight (min h x) eId
 
-    getChildren :: EClassId -> EGraphST [EClassId]
-    getChildren ec' = do ec <- canonical ec'
-                         gets (concatMap children . _eNodes . (IntMap.! ec) . _eClass)
+    getChildrenEC :: Monad m => EClassId -> EGraphST m [EClassId]
+    getChildrenEC ec' = do ec <- canonical ec'
+                           gets (concatMap childrenOf . _eNodes . (IntMap.! ec) . _eClass)
 
     go [] _    _ = pure ()
     go qs tabu h =
-      do children <- (Set.\\ tabu) . Set.fromList . concat <$> forM qs getChildren -- rerieve all unvisited children
-         let childrenL = Set.toList children
+      do childrenOf <- (Set.\\ tabu) . Set.fromList . concat <$> forM qs getChildrenEC -- rerieve all unvisited children
+         let childrenL = Set.toList childrenOf
          forM_ childrenL (setMinHeight h) -- set the height of the children as the minimum between current and h
-         go childrenL (Set.union tabu children) (h+1) -- move one breadth search style
+         go childrenL (Set.union tabu childrenOf) (h+1) -- move one breadth search style
 
 -- | gets the canonical id of an e-class
-canonical :: EClassId -> EGraphST EClassId
+canonical :: Monad m => EClassId -> EGraphST m EClassId
 canonical eclassId =
   do m <- gets _canonicalMap
      go m eclassId
@@ -320,51 +357,13 @@ canonical eclassId =
         | otherwise        = go m (m IntMap.! ecId)  -- otherwise, check the next id in the sequence
 {-# INLINE canonical #-}
 
-canonical' :: EClassId -> EGraph -> EClassId
-canonical' ec eg = go ec
-  where
-    m = _canonicalMap eg
-    go ec
-      | m IntMap.! ec == ec = ec
-      | otherwise           = go (m IntMap.! ec)
-{-# INLINE canonical' #-}
-
 -- | canonize the e-node children
-canonize :: ENode -> EGraphST ENode
-canonize = sequence' . fmap canonical  -- applies canonical to the children
+canonize :: Monad m => ENode -> EGraphST m ENode
+canonize = mapM canonical  -- applies canonical to the children
 {-# INLINE canonize #-}
 
-sequence' :: Applicative f => SRTree (f a) -> f (SRTree a)
-sequence' (Bin f ml mr) = Bin f <$> ml <*> mr
-sequence' (Uni f mt)    = Uni f <$> mt
-sequence' (Var ix)      = pure (Var ix)
-sequence' (Param ix)    = pure (Param ix)
-sequence' (Const x)     = pure (Const x)
-{-# INLINE sequence' #-}
-
-children :: SRTree a -> [a]
-children (Bin _ l r) = [l, r]
-children (Uni _ t)   = [t]
-children _           = []
-{-# INLINE children #-}
-
-replaceChildren :: [a] -> SRTree b -> SRTree a
-replaceChildren [l, r] (Bin op _ _) = Bin op l r
-replaceChildren [t]    (Uni f _)    = Uni f t
-replaceChildren _      (Var ix)     = Var ix
-replaceChildren _      (Param ix)   = Param ix
-replaceChildren _      (Const x)    = Const x
-{-# INLINE replaceChildren #-}
-
-getOperator :: SRTree a -> SRTree ()
-getOperator (Bin op _ _) = Bin op () ()
-getOperator (Uni f _) = Uni f ()
-getOperator (Var ix) = Var ix
-getOperator (Param ix) = Param ix
-getOperator (Const x) = Const x
-
 -- | gets an e-class with id `c`
-getEClass :: EClassId -> EGraphST EClass
+getEClass :: Monad m => EClassId -> EGraphST m EClass
 getEClass c = gets ((IntMap.! c) . _eClass)
 {-# INLINE getEClass #-}
 
@@ -373,16 +372,16 @@ emptyGraph :: EGraph
 emptyGraph = EGraph empty Map.empty empty [] [] 0
 
 -- | calculates the cost of a node
-calculateCost :: CostFun -> SRTree EClassId -> EGraphST Cost
+calculateCost :: Monad m => CostFun -> SRTree EClassId -> EGraphST m Cost
 calculateCost f t =
-  do let cs = children t
+  do let cs = childrenOf t
      costs <- traverse (fmap (_cost . _info) . getEClass) cs
      pure . f $ replaceChildren costs t
 
 -- | check whether an e-node evaluates to a const
-calculateConsts :: SRTree EClassId -> EGraphST Consts
+calculateConsts :: Monad m => SRTree EClassId -> EGraphST m Consts
 calculateConsts t =
-  do let cs = children t
+  do let cs = childrenOf t
      eg <- get
      consts <- traverse (fmap (_consts . _info) . getEClass) cs
      case combineConsts $ replaceChildren consts t of
@@ -401,3 +400,4 @@ combineConsts (Bin op l r) = evalOp' l r
     evalOp' (ParamIx ix) (ParamIx iy) = ParamIx (min ix iy)
     evalOp' (ConstVal x) (ConstVal y) = ConstVal $ evalOp op x y
     evalOp' _            _            = NotConst
+
