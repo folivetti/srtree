@@ -1,0 +1,3 @@
+- optimize best size calculation
+- decide whether to merge operations on parameters
+- perturbation operators

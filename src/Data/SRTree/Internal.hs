@@ -2,6 +2,7 @@
 {-# language ScopedTypeVariables #-}
 {-# language RankNTypes #-}
 {-# language OverloadedStrings #-}
+{-# language LambdaCase #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.Internal 
@@ -24,6 +25,9 @@ module Data.SRTree.Internal
          , constv
          , arity
          , getChildren
+         , childrenOf
+         , replaceChildren
+         , getOperator
          , countNodes
          , countVarNodes
          , countConsts
@@ -207,6 +211,29 @@ instance Floating (Fix SRTree) where
   logBase l r = log l / log r
   {-# INLINE logBase #-}
 
+instance Foldable SRTree where 
+    foldMap f =
+        \case
+          Bin op l r -> f l <> f r
+          Uni g t    -> f t 
+          _          -> mempty 
+
+instance Traversable SRTree where 
+    traverse f = 
+        \case 
+          Bin op l r -> Bin op <$> f l <*> f r 
+          Uni g t    -> Uni g <$> f t 
+          Var ix     -> pure (Var ix) 
+          Param ix   -> pure (Param ix) 
+          Const x    -> pure (Const x) 
+    sequence =
+        \case
+          Bin op l r -> Bin op <$> l <*> r 
+          Uni g t    -> Uni g <$> t 
+          Var ix     -> pure (Var ix) 
+          Param ix   -> pure (Param ix) 
+          Const x    -> pure (Const x) 
+
 -- | Arity of the current node
 arity :: Fix SRTree -> Int
 arity = cata alg
@@ -230,6 +257,34 @@ getChildren (Fix (Const {})) = []
 getChildren (Fix (Uni _ t)) = [t]
 getChildren (Fix (Bin _ l r)) = [l, r]
 {-# INLINE getChildren #-}
+
+-- | Get the children of an unfixed node 
+-- 
+childrenOf :: SRTree a -> [a] 
+childrenOf = 
+    \case 
+      Uni _ t   -> [t] 
+      Bin _ l r -> [l, r] 
+      _         -> []
+
+-- | replaces the children with elements from a list 
+replaceChildren :: [a] -> SRTree b -> SRTree a
+replaceChildren [l, r] (Bin op _ _) = Bin op l r
+replaceChildren [t]    (Uni f _)    = Uni f t
+replaceChildren _      (Var ix)     = Var ix
+replaceChildren _      (Param ix)   = Param ix
+replaceChildren _      (Const x)    = Const x
+replaceChildren xs     n            = error "ERROR: trying to replace children with not enough elements."
+{-# INLINE replaceChildren #-}
+
+-- | returns a node containing the operator and () as children
+getOperator :: SRTree a -> SRTree ()
+getOperator (Bin op _ _) = Bin op () ()
+getOperator (Uni f _)    = Uni f ()
+getOperator (Var ix)     = Var ix
+getOperator (Param ix)   = Param ix
+getOperator (Const x)    = Const x
+{-# INLINE getOperator #-}
 
 -- | Count the number of nodes in a tree.
 --

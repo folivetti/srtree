@@ -38,11 +38,11 @@ processTree :: Args        -- command line arguments
             -> Fix SRTree  -- expression in tree format
             -> Int         -- index of the parsed expression 
             -> (BasicInfo, SSE, SSE, Info, (BasicStats, [CI], [CI], [CI], [CI]))
-processTree args seed dset tree ix = (basic, sseOrig, sseOpt, info, cis)
+processTree args seed dset t ix = (basic, sseOrig, sseOpt, info, cis)
   where
-    (t, theta0)  = floatConstsToParam tree
+    (tree, theta0)  = floatConstsToParam tree
     mSErr'  = case dist args of
-                Gaussian -> estimateSErr Gaussian (msErr args)  (_xTr dset) (_yTr dset) (A.fromList A.Seq theta0) t (niter args)
+                Gaussian -> estimateSErr Gaussian (msErr args)  (_xTr dset) (_yTr dset) (A.fromList A.Seq theta0) tree (niter args)
                 _        -> Nothing
     args'   = args{ msErr = mSErr' }
     basic   = getBasicStats args' seed dset tree ix

@@ -44,10 +44,9 @@ fromJust _        = error "fromJust called with Nothing"
 -- | runs equality saturation from an expression tree,
 -- a given set of rules, and a cost function.
 -- Returns the tree with the smallest cost.
-eqSat :: Fix SRTree -> [Rule] -> CostFun -> Int -> EGraphST (Fix SRTree)
+eqSat :: Monad m => Fix SRTree -> [Rule] -> CostFun -> Int -> EGraphST m (Fix SRTree)
 eqSat expr rules costFun maxIt =
-    do let (root, eg) = fromTree costFun expr
-       put eg
+    do root <- fromTree costFun expr
        (end, it) <- runEqSat costFun rules maxIt
        best      <- getBest root
        if not end -- if had an early stop 
@@ -56,15 +55,8 @@ eqSat expr rules costFun maxIt =
 
 type CostMap = Map EClassId (Int, Fix SRTree)
 
--- | gets the best expression given the default cost function
-getBest :: EClassId -> EGraphST (Fix SRTree)
-getBest eid = do eid' <- canonical eid
-                 best <- gets (_best . _info . (IntMap.! eid') . _eClass)
-                 childs <- mapM getBest $ children best
-                 pure . Fix $ replaceChildren childs best
-
 -- | recalculates the costs with a new cost function
-recalculateBest :: CostFun -> EClassId -> EGraphST (Fix SRTree)
+recalculateBest :: Monad m => CostFun -> EClassId -> EGraphST m (Fix SRTree)
 recalculateBest costFun eid =
     do classes <- gets _eClass
        let costs = fillUpCosts classes Map.empty
@@ -73,7 +65,7 @@ recalculateBest costFun eid =
     where
         nodeCost :: CostMap -> ENode -> Maybe (Int, Fix SRTree)
         nodeCost costMap enode =
-          do optChildren <- traverse (costMap Map.!?) (children enode) -- | gets the cost of the children, if one is missing, returns Nothing
+          do optChildren <- traverse (costMap Map.!?) (childrenOf enode) -- | gets the cost of the children, if one is missing, returns Nothing
              let cc = map fst optChildren
                  nc = map snd optChildren
                  n  = replaceChildren cc enode
@@ -103,7 +95,7 @@ recalculateBest costFun eid =
                                             else (True, Map.insert eid new m)
 
 -- | run equality saturation for a number of iterations
-runEqSat :: CostFun -> [Rule] -> Int -> EGraphST (Bool, Int)
+runEqSat :: Monad m => CostFun -> [Rule] -> Int -> EGraphST m (Bool, Int)
 runEqSat costFun rules maxIter = go maxIter IntMap.empty
     where
         rules' = concatMap replaceEqRules rules
@@ -116,7 +108,7 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty
 
         go it sch = do eNodes   <- gets _eNodeToEClass
                        eClasses <- gets _eClass
-                       db       <- gets createDB -- creates the DB
+                       db       <- createDB -- creates the DB
 
                        -- step 1: match the rules
                        let matchSch        = matchWithScheduler db it
@@ -139,11 +131,31 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty
                                  then pure (False, it)
                                  else go (it-1) sch'
 
+-- | apply a single step of merge-only equality saturation
+applySingleMergeOnlyEqSat :: Monad m => CostFun -> [Rule] -> EGraphST m ()
+applySingleMergeOnlyEqSat costFun rules =
+  do db <- createDB
+     let matchSch        = matchWithScheduler db 10
+         matchAll        = zipWithM matchSch [0..]
+         (matches, sch') = runState (matchAll rules') IntMap.empty
+     mapM_ (uncurry (applyMergeOnlyMatch costFun)) $ concat matches
+     rebuild costFun
+     -- recalculate heights
+     calculateHeights
+      where
+        rules' = concatMap replaceEqRules rules
+
+        -- replaces the equality rules with two one-way rules
+        replaceEqRules :: Rule -> [Rule]
+        replaceEqRules (p1 :=> p2)  = [p1 :=> p2]
+        replaceEqRules (p1 :==: p2) = [p1 :=> p2, p2 :=> p1]
+        replaceEqRules (r :| cond)  = map (:| cond) $ replaceEqRules r
+
 -- | matches the rules given a scheduler
 matchWithScheduler :: DB -> Int -> Int -> Rule -> Scheduler [(Rule, (Map ClassOrVar ClassOrVar, ClassOrVar))]
 matchWithScheduler db it ruleNumber rule =
   do mbBan <- gets (IntMap.!? ruleNumber)
-     if mbBan /= Nothing && (fromJust mbBan) <= it -- check if the rule is banned
+     if mbBan /= Nothing && fromJust mbBan <= it -- check if the rule is banned
         then pure []
         else do let matches = match db (source rule)
                 modify (IntMap.insert ruleNumber (it+5))

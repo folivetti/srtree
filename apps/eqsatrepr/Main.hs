@@ -149,62 +149,6 @@ testEqSat t = do
 testEqSats :: IO ()
 testEqSats = mapM_ testEqSat trees
 
-testMerge :: IO ()
-testMerge = do
-    let rl = "y" * ("x" + "x") :=> (2 * "y") * "x"
-        t1 = sin (5 * (var 0 + var 0)) - (var 3 * ((var 4 * var 3) + (var 4 * var 3)))
-        t2 = 10 * var 0 -- sin (5 * (var 0 + var 0)) - (var 3 * ((var 4 * var 3) + (var 4 * var 3)))
-        (root, eg) = fromTrees myCost [t1,t2]
-        db = createDB eg
-        (q, r) = compileToQuery (source rl)
-        m = genericJoin db q
-        subst = match db (source rl)
-        eg' = (applyMergeOnlyMatch myCost rl (head subst) >> rebuild myCost) `execState` eg
-    mapM_ print $ _eClass  eg
-    putStrLn "" >> putStrLn ""
-    mapM_ print $ _eClass  eg'
-    putStrLn "" >> putStrLn ""
-    mapM_ (putStrLn . showExpr) $ getAllExpressionsFrom eg' (head root)
-
-test :: IO ()
-test =  do
-    let x = "x" + "x"
-        y = "y" * x
-        z = y :=> (2 * "y") * "x" -- :| isZero "y"
-        w1 = "x" * "y"
-        w2 = w1 + w1
-        w = "y" * w2
-        rl = w :=> square "y" * "x" where square = Fixed . Uni Square
-        t = sin (5 * (var 0 + var 0)) - (var 3 * ((var 4 * var 3) + (var 4 * var 3)))
-
-        (root, eg) = fromTrees myCost [t]
-        (best, eg') = eqSat t [z, rl] myCost 30 `runState` eg
-
-        db = createDB eg'
-        (q, r) = compileToQuery x
-        (q2, r2) = compileToQuery y
-        (q3, r3) = compileToQuery (source z)
-        m1 = genericJoin db q
-        m2 = genericJoin db q3
-        subst = match db (source z)
-        -- eg' = (applyMatch z (head subst) >> rebuild) `execState` eg
-        --eg' = eqSat t [z] (\_ _ -> 1) `execState` eg
-
-    putStrLn ""
-    print q3
-    putStrLn ""
-    mapM_ (putStrLn . showExpr) $ getAllExpressionsFrom eg' (head root)
-    putStrLn ""
-    mapM_ print $ _eClass eg'
-
-    putStrLn ""
-    --print m2
-    putStr "Subs: "
-    print subst
-    putStrLn ""
-    mapM_ print $ Map.toList db
-    putStrLn ""
-    putStrLn $ showExpr best
 
 
 initialPop :: HyperParams -> Rng [Fix SRTree]
@@ -286,8 +230,11 @@ data HyperParams =
        }
 
 
-countSubTrees eg = sum $ map (length . getAllExpressionsFrom eg) (IM.keys $ _eClass eg)
-countRootTrees rs eg = sum $ map (length . getAllExpressionsFrom eg) rs -- (findRootClasses eg)
+countSubTrees = do ecs <- gets (IM.keys . _eClass) 
+                   subs <- mapM (\ec -> getAllExpressionsFrom ec >>= pure . length) ecs 
+                   pure $ sum subs 
+countRootTrees rs = do subs <- mapM (\ec -> getAllExpressionsFrom ec >>= pure . length) rs
+                       pure $ sum subs
 
 terms = [var 0, var 1, var 2, param 0, param 1, param 2, param 3]
 nonterms = [Right (+), Right (-), Right (*), Right (/), Right (\l r -> abs l ** r), Left (1/)]
@@ -297,16 +244,17 @@ calcRedundancy nPop = do
     let hp = HP 2 4 10 nPop 2 1.0 0.25 terms nonterms
         p  = RT.P [0, 1, 2, 3, 4, 5] (0, 3) (1, 3) [Log]
     g <- getStdGen
-    --pop <- evalStateT (initialPop hp) g
     pop <- (`evalStateT` g)  <$> replicateM nPop $ runReaderT (RT.randomTree 10) p
-    let nSubs = sum $ map (countSubTrees . snd . fromTrees myCost . (:[])) pop
-        (rs, popEg) = fromTrees myCost pop
-        nSubsSingle = countSubTrees popEg
-        rsN         = nub rs
+    let nSubsSingle = sum $ map (\p -> (fromTrees myCost [p] >> countSubTrees) `evalState` emptyGraph) pop 
+        myEqPop = do rs <- fromTrees myCost pop
+                     let rsN = nub rs 
+                     cnt <- countSubTrees
+                     pure (cnt, rsN)
+        (nSubs, rsN) = myEqPop `evalState` emptyGraph 
     putStr "Ratio of subtrees: "
     putStrLn $ show nSubsSingle <> "/" <> show nSubs <> " = " <> show (fromIntegral nSubsSingle / fromIntegral nSubs)
-    let nSubsR = sum $ map (\p -> let (rs', eg') = fromTree myCost p in countRootTrees [rs'] eg') pop
-        nSubsSingleR = countRootTrees rsN popEg
+    let nSubsR = sum $ map (\p -> (fromTree myCost p >>= \r -> countRootTrees [r]) `evalState` emptyGraph) pop
+        nSubsSingleR = (fromTrees myCost pop >>= countRootTrees) `evalState` emptyGraph
     putStr "Ratio of rooted trees: "
     putStrLn $ show nSubsSingleR <> "/" <> show nSubsR <> " = " <> show (fromIntegral nSubsSingleR / fromIntegral nSubsR)
 
@@ -317,25 +265,34 @@ main = do
         t3 = 3.2 * var 0 / (var 0 + 12.0)
         t4 = var 0 + sin (var 0)
         t5 = 1.5 + exp 5.2
-        (v, eg) = fromTrees myCost [t3,t1,t2,t4,t5]
-        roots = findRootClasses eg
-        ecId = _eNodeToEClass eg Map.! (Var 0)
-        eg' = (calculateHeights) `execState` eg
+        egraphRun :: EGraphST IO ()
+        egraphRun = do v <- fromTrees myCost [t3,t1,t2,t4]
+                       roots <- findRootClasses
+                       ecId  <- gets ((Map.! (Var 0)) . _eNodeToEClass)
+                       calculateHeights 
+                       h <- gets (map _height . IM.elems . _eClass)
+                       v <- gets (map (_consts . _info) . IM.elems . _eClass)
+                       c <- gets (map (_cost . _info) . IM.elems . _eClass)
+                       parents <- gets (_parents . (IM.! ecId) . _eClass)
+                       exprs <- mapM getExpressionFrom roots
+                       exprs' <- gets (IM.keys . _eClass) >>= mapM getExpressionFrom 
+
+                       lift $ do putStr "Parents of x0: "
+                                 print parents 
+                                 putStrLn "\nexpressions from root: "
+                                 mapM_ (putStrLn . showExpr) exprs
+                                 putStrLn "\nexpressions from each e-class: "
+                                 mapM_ (putStrLn . showExpr) exprs'
+                                 putStrLn "heights: "
+                                 mapM_ print h -- (print . _height) (IM.elems $ _eClass eg')
+                                 putStrLn "values: "
+                                 mapM_ print v -- (print . _consts . _info) (IM.elems $ _eClass eg')
+                                 putStrLn "costs: "
+                                 mapM_ print c -- (print . _cost . _info) (IM.elems $ _eClass eg')
         nPop = 10000
         hp = HP 3 7 100 nPop 2 1.0 0.25 terms nonterms
         p  = RT.P [0] (-3, 3) (-3, 3) []
+    egraphRun `evalStateT` emptyGraph
     g <- getStdGen
     pop <- evalStateT (initialPop hp) g
-    putStr "Parents of x0: "
-    print $ _parents $ _eClass eg IM.! ecId    
-    putStrLn "\nexpressions from root: "
-    mapM_ (putStrLn . showExpr . getExpressionFrom eg) roots
-    putStrLn "\nexpressions from each e-class: "
-    mapM_ (putStrLn . showExpr . getExpressionFrom eg) (IM.keys $ _eClass eg)
-    putStrLn "heights: "
-    mapM_ (print . _height) (IM.elems $ _eClass eg')
-    putStrLn "values: "
-    mapM_ (print . _consts . _info) (IM.elems $ _eClass eg')
-    putStrLn "costs: "
-    mapM_ (print . _cost . _info) (IM.elems $ _eClass eg')
     mapM_ (\nP -> putStr "pop " >> print nP >> calcRedundancy nP >> putStrLn "") [100, 200, 500, 1000, 5000, 10000, 20000, 100000]

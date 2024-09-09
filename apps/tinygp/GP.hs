@@ -143,14 +143,6 @@ fitness x y ind =
     --in ind{_fit = fit, _params = theta}
 {-# INLINE fitness #-}
 
-replaceChildren :: [Fix SRTree] -> Fix SRTree -> Fix SRTree
-replaceChildren _ (Fix (Var ix)) = Fix (Var ix)
-replaceChildren _ (Fix (Const c)) = Fix (Const c)
-replaceChildren _ (Fix (Param ix)) = Fix (Param ix) 
-replaceChildren (x:_) (Fix (Uni f _)) = Fix (Uni f x)
-replaceChildren (l:r:_) (Fix (Bin op _ _)) = Fix (Bin op l r)
-{-# INLINE replaceChildren #-}
-
 isAbs (Fix (Uni Abs _)) = True 
 isAbs _ = False 
 {-# INLINE isAbs #-}
@@ -170,7 +162,7 @@ mutate hp ind = do
         go s p t
           | isAbs t = do let [x] = getChildren t
                          (t', b) <- go s p x
-                         pure (replaceChildren [t'] t, b)
+                         pure (Fix $ replaceChildren [t'] $ unfix t, b)
           | otherwise = do
               v <- state random 
               if v < p 
@@ -181,15 +173,15 @@ mutate hp ind = do
                        0 -> pure (t, False)
                        1 -> do let [x] = getChildren t 
                                (t', b) <- go s p x 
-                               pure (replaceChildren [t'] t, b)
+                               pure (Fix $ replaceChildren [t'] $ unfix t, b)
                        2 -> do let [l,r] = getChildren t 
                                (l', b) <- if isInv t 
                                              then pure (l, False)
                                              else go s p l
                                if b 
-                                 then pure (replaceChildren [l', r] t, b)
+                                 then pure (Fix $ replaceChildren [l', r] $ unfix t, b)
                                  else do (r', b') <- go s p r 
-                                         pure (replaceChildren [l, r'] t, b')
+                                         pure (Fix $ replaceChildren [l, r'] $ unfix t, b')
 
 crossover :: HyperParams -> Individual -> Individual -> Rng Individual
 crossover hp ind1 ind2 = pure ind1

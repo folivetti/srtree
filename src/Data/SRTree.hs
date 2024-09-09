@@ -19,6 +19,9 @@ module Data.SRTree
          , constv
          , arity
          , getChildren
+         , childrenOf
+         , replaceChildren
+         , getOperator
          , countNodes
          , countVarNodes
          , countConsts
@@ -45,6 +48,9 @@ import Data.SRTree.Internal
          , constv
          , arity
          , getChildren
+         , childrenOf
+         , replaceChildren
+         , getOperator
          , countNodes
          , countVarNodes
          , countConsts

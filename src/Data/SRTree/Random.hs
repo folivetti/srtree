@@ -88,10 +88,10 @@ replaceChild _         _ = Nothing
 {-# INLINE replaceChild #-}
 
 -- Replace the children of a binary tree.
-replaceChildren :: Fix SRTree -> Fix SRTree -> Fix SRTree -> Maybe (Fix SRTree)
-replaceChildren (Fix (Bin f _ _)) l r = Just $ Fix (Bin f l r)
-replaceChildren _             _ _ = Nothing
-{-# INLINE replaceChildren #-}
+replaceFixChildren :: Fix SRTree -> Fix SRTree -> Fix SRTree -> Maybe (Fix SRTree)
+replaceFixChildren (Fix (Bin f _ _)) l r = Just $ Fix (Bin f l r)
+replaceFixChildren _             _ _ = Nothing
+{-# INLINE replaceFixChildren #-}
 
 -- | RndTree is a Monad Transformer to generate random trees of type `SRTree ix val` 
 -- given the parameters `p ix val` using the random number generator `StdGen`.
@@ -163,7 +163,7 @@ randomTree budget = do
   fromJust <$> case arity node of
     0 -> pure $ Just node
     1 -> replaceChild node <$> randomTree (budget - 1)
-    2 -> replaceChildren node <$> randomTree (budget `div` 2) <*> randomTree (budget `div` 2)
+    2 -> replaceFixChildren node <$> randomTree (budget `div` 2) <*> randomTree (budget `div` 2)
     
 -- | Returns a random tree with a approximately a number `n` of nodes, the parameter `p` must have every property.
 --
@@ -181,4 +181,4 @@ randomTreeBalanced n = do
   node  <- randomNonTerminal
   fromJust <$> case arity node of
     1 -> replaceChild node <$> randomTreeBalanced (n - 1)
-    2 -> replaceChildren node <$> randomTreeBalanced (n `div` 2) <*> randomTreeBalanced (n `div` 2)    
+    2 -> replaceFixChildren node <$> randomTreeBalanced (n `div` 2) <*> randomTreeBalanced (n `div` 2)    

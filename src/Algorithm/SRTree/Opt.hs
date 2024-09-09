@@ -28,7 +28,7 @@ minimizeNLL dist msErr niter xss ys tree t0
   | n == 0     = (t0, f)
   | otherwise  = (fromStorableVector Seq t_opt, f)
   where
-    tree'      = relabelParams $ fst $ floatConstsToParam tree
+    tree'      = relabelParams tree -- $ fst $ floatConstsToParam tree
     t0'        = toStorableVector t0
     (Sz n)     = size t0
     (Sz m)     = size ys

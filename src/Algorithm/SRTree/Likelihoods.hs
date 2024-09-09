@@ -86,7 +86,7 @@ nll Gaussian msErr xss ys t theta = 0.5*(ssr/s2 + m*log (2*pi*s2))
     m    = fromIntegral m' 
     p    = fromIntegral p'
     ssr  = sse xss ys t theta
-    est  = sqrt $ ssr / (m - p)
+    est  = sqrt (m - p) -- $ ssr / (m - p)
     sErr = getSErr Gaussian est msErr
     s2   = sErr ^ 2
 
@@ -137,7 +137,7 @@ gradNLL Gaussian msErr xss ys tree theta =
     (yhat, grad) = reverseModeUnique xss theta ys' id tree
     -- err          = yhat - delay ys
     ssr          = sse xss ys tree theta
-    est          = sqrt $ ssr / fromIntegral (m - p)
+    est          = sqrt $ fromIntegral (m - p) -- $ ssr / fromIntegral (m - p)
     sErr         = getSErr Gaussian est msErr
 
 gradNLL Bernoulli _ xss (delay -> ys) tree theta
@@ -168,7 +168,7 @@ gradNLLNonUnique Gaussian msErr xss ys tree theta =
     (yhat, grad) = forwardMode xss theta err tree
     err          = predict Gaussian tree theta xss - ys'
     ssr          = sse xss ys tree theta
-    est          = sqrt $ ssr / fromIntegral (m - p)
+    est          = sqrt $ fromIntegral (m - p) -- $ ssr / fromIntegral (m - p)
     sErr         = getSErr Gaussian est msErr
 
 gradNLLNonUnique Bernoulli _ xss (delay -> ys) tree theta
@@ -204,7 +204,7 @@ fisherNLL dist msErr xss ys tree theta = makeArray cmp (Sz p) build
     eval   = evalTree xss theta
     ssr    = sse xss ys tree theta
     sErr   = getSErr dist est msErr
-    est    = sqrt $ ssr / fromIntegral (m - p)
+    est    = sqrt $ fromIntegral (m-p) -- $ ssr / fromIntegral (m - p)
     yhat   = eval t'
     res    = delay ys - phi
 
@@ -234,7 +234,7 @@ hessianNLL dist msErr xss ys tree theta = makeArray cmp (Sz (p :. p)) build
     eval   = evalTree xss theta
     ssr    = sse xss ys tree theta
     sErr   = getSErr dist est msErr
-    est    = sqrt $ ssr / fromIntegral (m - p)
+    est    = sqrt $ fromIntegral (m - p) -- $ ssr / fromIntegral (m - p)
     yhat   = eval t'
     res    = delay ys - phi
 
