@@ -31,6 +31,8 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Control.Monad ( zipWithM )
 
+import Debug.Trace
+
 -- | The `Scheduler` stores a map with the banned iterations of a certain rule . 
 -- TODO: make it more customizable.
 type Scheduler a = State (IntMap Int) a
@@ -135,7 +137,7 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty
 applySingleMergeOnlyEqSat :: Monad m => CostFun -> [Rule] -> EGraphST m ()
 applySingleMergeOnlyEqSat costFun rules =
   do db <- createDB
-     let matchSch        = matchWithScheduler db 10
+     let matchSch        = matchWithScheduler db 0
          matchAll        = zipWithM matchSch [0..]
          (matches, sch') = runState (matchAll rules') IntMap.empty
      mapM_ (uncurry (applyMergeOnlyMatch costFun)) $ concat matches

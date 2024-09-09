@@ -17,7 +17,7 @@
 module Algorithm.EqSat.Egraph where
 
 import Control.Lens (element, makeLenses, over, (&), (+~), (-~), (.~), (^.))
-import Control.Monad (forM, forM_, when, foldM)
+import Control.Monad (forM, forM_, when, foldM, void)
 import Control.Monad.State
 import Control.Monad.Identity
 import Data.AEq (AEq ((~==)))
@@ -32,6 +32,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import System.Random (Random (randomR), StdGen)
 
+import Debug.Trace
 
 type EClassId     = Int -- DO NOT CHANGE THIS without changing the next line! This will break the use of IntMap for speed
 type ClassIdMap   = IntMap
@@ -130,15 +131,14 @@ rebuild costFun =
 -- e-graph, merge the e-classes
 repair :: Monad m => CostFun -> EClassId -> ENode -> EGraphST m ()
 repair costFun ecId enode =
-  do modify' $ over eNodeToEClass (Map.delete enode)
+  do -- modify' $ over eNodeToEClass (Map.delete enode)
      enode'  <- canonize enode
      ecId'   <- canonical ecId
-     doExist <- gets (Map.member enode' . _eNodeToEClass)
-     if doExist
-       then do ecIdCanon <- gets ((Map.! enode') . _eNodeToEClass)
-               _ <- merge costFun ecIdCanon ecId'
-               pure ()
-       else modify' $ over eNodeToEClass (Map.insert enode' ecId')
+     doExist <- gets ((Map.!? enode') . _eNodeToEClass)
+     case doExist of
+        Just ecIdCanon -> void $ merge costFun ecIdCanon ecId'
+        Nothing        -> modify' $ over eNodeToEClass (Map.insert enode' ecId')
+     modify' $ over eNodeToEClass (Map.delete enode)
 
 -- | repair the analysis of the e-class
 -- considering the new added e-node
@@ -217,8 +217,12 @@ modifyEClass costFun ecId =
 -- join data from two e-classes
 joinData :: EClassData -> EClassData -> EClassData
 joinData (EData c1 b1 cn1 fit1 sz1) (EData c2 b2 cn2 fit2 sz2) =
-  EData (min c1 c2) b (combineConsts cn1 cn2) (min fit1 fit2) (min sz1 sz2)
+  EData (min c1 c2) b (combineConsts cn1 cn2) (minMaybe fit1 fit2) (min sz1 sz2)
   where
+    minMaybe Nothing x = x
+    minMaybe x Nothing = x
+    minMaybe x y       = min x y
+
     b = if c1 <= c2 then b1 else b2
     combineConsts (ConstVal x) (ConstVal y)
       | abs (x-y) < 1e-7   = ConstVal $ (x+y)/2

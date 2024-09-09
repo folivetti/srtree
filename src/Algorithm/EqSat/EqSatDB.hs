@@ -201,8 +201,7 @@ canonizeMap (subst, cv) = (,cv) . Map.fromList <$> traverse f (Map.toList subst)
 
 applyMatch :: Monad m => CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m ()
 applyMatch costFun rule match' =
-  do eg <- get
-     let conds = getConditions rule
+  do let conds = getConditions rule
      match <- canonizeMap match'
      validHeight <- isValidHeight match 
      validConds  <- mapM (`isValidConditions` match) conds
@@ -214,8 +213,7 @@ applyMatch costFun rule match' =
 
 applyMergeOnlyMatch :: Monad m => CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m ()
 applyMergeOnlyMatch costFun rule match' =
-  do eg <- get
-     let conds = getConditions rule
+  do let conds = getConditions rule
      match <- canonizeMap match'
      validHeight <- isValidHeight match 
      validConds  <- mapM (`isValidConditions` match) conds

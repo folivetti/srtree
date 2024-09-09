@@ -116,6 +116,7 @@ rewritesFun =
     , abs ("x" * "y") :=> abs "x" * abs "y" :| isConstPt "x"
     , sqrt ("z" * ("x" - "y")) :=> sqrt (negate "z") * sqrt ("y" - "x")
     , sqrt ("z" * ("x" + "y")) :=> sqrt "z" * sqrt ("x" + "y")
+    , recip (recip "x") :=> "x" :| isNotZero "x"
     ]
 
 -- Rules that reduces redundant parameters

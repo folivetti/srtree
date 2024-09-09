@@ -22,6 +22,8 @@ import Options.Applicative as Opt hiding (Const)
 import Random
 import System.Random
 
+import Debug.Trace
+
 -- Insert random expression 
 -- Evaluate random subtree 
 -- Insert new random parent eNode 
@@ -90,7 +92,9 @@ opDoesNotExistWith node ecId = Prelude.any (not . (`sameOpAs` node) . snd) . _pa
 egraphGP :: SRMatrix -> PVector -> [Fix SRTree] -> Int -> RndEGraph (Fix SRTree, Double)
 egraphGP x y terms nIter = do 
     insertRndExpr
-    forM_ [1 .. nIter] $ \i -> gpStep >> when (i `mod` 1000 == 0) (getBestExpr >>= (io . print . snd)) -- applyMergeOnlyDftl myCost >>
+    forM_ [1 .. nIter] $ \i -> gpStep
+                                  >> when (i `mod` 1000 == 0) (getBestExpr >>= (io . print . snd))
+                                  >> when (i `mod` 5000 == 0) (applyMergeOnlyDftl myCost)
     getBestExpr
   where 
     rndTerm    = Random.randomFrom terms
@@ -160,19 +164,19 @@ egraphGP x y terms nIter = do
                                                                            else pure Nothing
                          when (isJust meId) do
                            let eId = fromJust meId
-                           curFit <- gets (_fitness . _info . (IM.! eId) . _eClass)
+                           eId' <- canonical eId
+                           curFit <- gets (_fitness . _info . (IM.! eId') . _eClass)
                            when (isNothing curFit) do
-                               t <- getBest eId
+                               t <- getBest eId'
                                f <- fitnessFun x y t
-                               updateFitness f eId 
+                               updateFitness f eId'
                                -- io $ print ('p', showExpr t, f)
 
     gpStep :: RndEGraph () 
-    gpStep = do choice <- rnd $ randomFrom [1,2,3]
+    gpStep = do choice <- rnd $ randomFrom [1,2,2,3,3,3]
                 if | choice == 1 -> insertRndExpr
                    | choice == 2 -> insertRndParent
                    | otherwise   -> evalRndSubTree
-                -- applyMergeOnlyDftl myCost
                 rebuild myCost
 
 data Args = Args
