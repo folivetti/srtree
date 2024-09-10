@@ -90,13 +90,25 @@ opDoesNotExistWith node ecId = Prelude.any (not . (`sameOpAs` node) . snd) . _pa
 {-# INLINE opDoesNotExistWith #-}
 
 egraphGP :: SRMatrix -> PVector -> [Fix SRTree] -> Int -> RndEGraph (Fix SRTree, Double)
-egraphGP x y terms nIter = do 
+egraphGP x y terms nEvals = do
     insertRndExpr
-    forM_ [1 .. nIter] $ \i -> gpStep
-                                  >> when (i `mod` 1000 == 0) (getBestExpr >>= (io . print . snd))
-                                  >> when (i `mod` 5000 == 0) (applyMergeOnlyDftl myCost)
+    go 1
     getBestExpr
-  where 
+  where
+
+    go i = do n <- getEClassesThat isValidFitness
+              unless (length n >= nEvals)
+                do gpStep
+                   when (i `mod` 1000 == 0) (getBestExpr >>= (io . print . snd))
+                   when (i `mod` 100000 == 0) $ do
+                     n <- gets (IM.size . _eClass)
+                     --io $ putStrLn ("before: " <> show n)
+                     applyMergeOnlyDftl myCost
+                     n1 <- gets (IM.size . _eClass)
+                     when (n1 < n) $ io $ print (n,n1)
+                     --io $ putStrLn ("after: " <> show n1)
+                   go (i+1)
+
     rndTerm    = Random.randomFrom terms
     rndNonTerm = Random.randomFrom [Bin Add () (), Bin Sub () (), Bin Mul () (), Bin Div () (), Bin PowerAbs () (),  Uni Recip ()]
 
@@ -106,7 +118,7 @@ egraphGP x y terms nIter = do
                      io . putStrLn $ "Evaluated expressions: " <> show (length ecIds) <> " / " <> show nc
                      bestFit <- foldM (\acc -> getFitness >=> (pure . max acc . fromJust)) ((-1.0)/0.0) ecIds
                      ecIds'  <- getEClassesThat (fitnessIs (== Just bestFit))
-                     (,bestFit) <$> getExpressionFrom (head ecIds')
+                     (,bestFit) <$> getBest (head ecIds')
 
     insertRndExpr :: RndEGraph () 
     insertRndExpr = do grow <- rnd toss
@@ -121,7 +133,7 @@ egraphGP x y terms nIter = do
                         unless (null ecIds) do
                             rndId <- rnd $ randomFrom ecIds
                             rndId' <- canonical rndId 
-                            t     <- getExpressionFrom rndId'
+                            t     <- getBest rndId'
                             f <- fitnessFun x y t
                             -- io $ print ('e', showExpr t, f)
                             updateFitness f rndId'

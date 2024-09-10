@@ -137,7 +137,7 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty
 applySingleMergeOnlyEqSat :: Monad m => CostFun -> [Rule] -> EGraphST m ()
 applySingleMergeOnlyEqSat costFun rules =
   do db <- createDB
-     let matchSch        = matchWithScheduler db 0
+     let matchSch        = matchWithScheduler db 10
          matchAll        = zipWithM matchSch [0..]
          (matches, sch') = runState (matchAll rules') IntMap.empty
      mapM_ (uncurry (applyMergeOnlyMatch costFun)) $ concat matches

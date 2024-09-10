@@ -29,6 +29,8 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.String (IsString (..))
 
+import Debug.Trace
+
 -- The database maps a symbol to an IntTrie
 -- The IntTrie stores the possible paths from a certain e-class 
 -- that matches a pattern 
@@ -167,7 +169,7 @@ addToDB :: ENode -> EClassId -> State DB ()
 addToDB enode eid = do let ids = eid : childrenOf enode -- we will add the e-class id and the children ids 
                            op  = getOperator enode    -- changes Bin op l r to Bin op () () so `op` as a single entry in the DB
                        trie <- gets (Map.!? op)       -- gets the entry for op, if it exists 
-                       case populate trie ids of      -- populates the trie 
+                       case populate trie ids of      -- populates the trie
                          Nothing -> pure ()
                          Just t  -> modify' (Map.insert op t) -- if something was created, insert back into the DB 
 
