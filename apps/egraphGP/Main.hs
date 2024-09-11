@@ -100,7 +100,7 @@ egraphGP x y terms nEvals = do
               unless (length n >= nEvals)
                 do gpStep
                    when (i `mod` 1000 == 0) (getBestExpr >>= (io . print . snd))
-                   when (i `mod` 100000 == 0) $ do
+                   when (i `mod` 1000000 == 0) $ do
                      n <- gets (IM.size . _eClass)
                      --io $ putStrLn ("before: " <> show n)
                      applyMergeOnlyDftl myCost
@@ -185,7 +185,7 @@ egraphGP x y terms nEvals = do
                                -- io $ print ('p', showExpr t, f)
 
     gpStep :: RndEGraph () 
-    gpStep = do choice <- rnd $ randomFrom [1,2,2,3,3,3]
+    gpStep = do choice <- rnd $ randomFrom [1,1,2,2,3,3,3]
                 if | choice == 1 -> insertRndExpr
                    | choice == 2 -> insertRndParent
                    | otherwise   -> evalRndSubTree
