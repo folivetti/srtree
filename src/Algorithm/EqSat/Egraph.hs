@@ -1,5 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE StrictData #-}
+
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Algorithm.EqSat.Egraph
@@ -225,6 +227,8 @@ modifyEClass costFun ecId =
     toConst _          = NotConst
 
 -- join data from two e-classes
+-- TODO: instead of folding, just do not apply rules
+-- list of values instead of single value
 joinData :: EClassData -> EClassData -> EClassData
 joinData (EData c1 b1 cn1 fit1 sz1) (EData c2 b2 cn2 fit2 sz2) =
   EData (min c1 c2) b (combineConsts cn1 cn2) (minMaybe fit1 fit2) (min sz1 sz2)
@@ -236,6 +240,8 @@ joinData (EData c1 b1 cn1 fit1 sz1) (EData c2 b2 cn2 fit2 sz2) =
     b = if c1 <= c2 then b1 else b2
     combineConsts (ConstVal x) (ConstVal y)
       | abs (x-y) < 1e-7   = ConstVal $ (x+y)/2
+      | isNaN x || isInfinite x = ConstVal y 
+      | isNaN y || isInfinite y = ConstVal x
       | isNaN x && isNaN y = ConstVal x
       | x ~== y = ConstVal $ (x+y)/2
       | abs (x / y) < 1 + 1e-6 || abs (y / x) < 1 + 1e-6 = ConstVal $ min x y
@@ -298,7 +304,9 @@ getExpressionFrom eId' = do
     isTerm (Const _) = True
     isTerm (Param _) = True
     isTerm _ = False
+
 -- | returns all expressions rooted at e-class `eId`
+-- TODO: check for infinite list
 getAllExpressionsFrom :: Monad m => EClassId -> EGraphST m [Fix SRTree]
 getAllExpressionsFrom eId' = do
   eId <- canonical eId'

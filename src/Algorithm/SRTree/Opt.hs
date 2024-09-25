@@ -36,7 +36,7 @@ minimizeNLL dist msErr niter xss ys tree t0
     (f, _)     = gradNLL dist msErr xss ys tree t0 -- if there's no parameter or no iterations
 
     algorithm  = LBFGS funAndGrad Nothing
-    stop       = ObjectiveRelativeTolerance 1e-5 :| [MaximumEvaluations (fromIntegral niter)]
+    stop       = ObjectiveRelativeTolerance 1e-10 :| [MaximumEvaluations (fromIntegral niter)]
     problem    = LocalProblem (fromIntegral n) stop algorithm
     t_opt      = case minimizeLocal problem t0' of
                   Right sol -> solutionParams sol

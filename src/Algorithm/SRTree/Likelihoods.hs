@@ -86,6 +86,7 @@ nll Gaussian msErr xss ys t theta = 0.5*(ssr/s2 + m*log (2*pi*s2))
     m    = fromIntegral m' 
     p    = fromIntegral p'
     ssr  = sse xss ys t theta
+    mse' = mse xss ys t theta
     est  = sqrt (m - p) -- $ ssr / (m - p)
     sErr = getSErr Gaussian est msErr
     s2   = sErr ^ 2
