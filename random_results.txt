@@ -1,0 +1,130 @@
+t0 Just (-6.301759103812452e-2)
+(t0 / x0) Just (-Infinity)
+(t0 / x0) Just (-Infinity)
+(t0 / x0) Just (-Infinity)
+Recip(Recip(Recip(Recip(t0)))) Just (-6.301759103812449e-2)
+(t0 / x0) Just (-Infinity)
+Recip(((Recip((t0 * t0)) + t0) + t0)) Just (-6.301759103812431e-2)
+((((x0 - x0) + t0) * t0) + x0) Just (-0.639573821032193)
+((((Abs(t0) ^ x0) - t0) / t0) * x0) Just (-6.785393657831555e-3)
+(Recip(((t0 / (x0 - t0)) + x0)) - t0) Just (-5.676641848996014e-3)
+"FIN"
+============================================
+
+t0 Just (-6.301759103812452e-2)
+(t0 / x0) Just (-Infinity)
+(x0 + t0) Just (-0.6395738210321935)
+(t0 / x0) Just (-Infinity)
+(t0 / x0) Just (-Infinity)
+Recip(Recip(Recip((x0 + t0)))) Just (-1.6725629776198663)
+(Abs((t0 / x0)) ^ (x0 + t0)) Just (-1.7951075870630204)
+Recip(Recip((Abs(Recip(x0)) ^ (t0 - x0)))) Just (-229.493632956918)
+(Abs(((Abs((Abs(x0) ^ x0)) ^ t0) - t0)) ^ x0) Just (-8.498109957499275e-3)
+(((Abs(Recip(t0)) ^ (Abs(t0) ^ x0)) - t0) * x0) Just (-9.44374014396872e-3)
+"FIN"
+============================================
+
+t0 Just (-6.301759103812452e-2)
+(Abs((Recip((t0 * t0)) * x0)) ^ t0) Just (-Infinity)
+(t0 * t0) Just (-6.301759103812488e-2)
+Recip((t0 * t0)) Just (-6.301759103812453e-2)
+(Recip((((x0 + x0) + t0) + t0)) + t0) Just (-6.301759103812449e-2)
+(Recip((t0 * t0)) * x0) Just (-0.6386775021098045)
+((Abs(((t0 - x0) + x0)) ^ t0) / t0) Just (-6.301759103812431e-2)
+((Abs(((t0 - x0) + x0)) ^ t0) / t0) Just (-6.301759103812431e-2)
+((((Abs(t0) ^ x0) + t0) * x0) / t0) Just (-6.785393657824731e-3)
+(((Abs(Recip(t0)) ^ (t0 - x0)) + t0) * x0) Just (-6.785393657824737e-3)
+"FIN"
+============================================
+
+t0 Just (-6.301759103812452e-2)
+Recip((x0 * (t0 + t0))) Just (-Infinity)
+(x0 * t0) Just (-0.6386775021098048)
+Recip((x0 * (t0 + t0))) Just (-Infinity)
+(x0 * t0) Just (-0.6386775021098048)
+Recip((x0 * (t0 + t0))) Just (-Infinity)
+Recip((x0 * (t0 + t0))) Just (-Infinity)
+Recip(Recip((Abs((x0 * t0)) ^ Recip(x0)))) Just (-0.11593865953413574)
+((Abs(((Abs(t0) ^ x0) + t0)) ^ t0) * x0) Just (-8.300768006359502e-3)
+Recip((((Abs((x0 + t0)) ^ t0) - t0) - x0)) Just (-9.762960394508805e-3)
+"FIN"
+============================================
+
+t0 Just (-6.301759103812452e-2)
+((Abs(((Abs(t0) ^ t0) / t0)) ^ x0) / x0) Just (-Infinity)
+(t0 - x0) Just (-0.6990852659514573)
+((Abs(((Abs(t0) ^ t0) / t0)) ^ x0) / x0) Just (-Infinity)
+Recip(Recip(Recip(Recip(t0)))) Just (-6.301759103812449e-2)
+((((Abs(t0) ^ t0) / t0) + t0) / t0) Just (-6.301759103812424e-2)
+((Abs((t0 - x0)) ^ x0) + x0) Just (-85.03966346251724)
+Recip(Recip(((t0 + t0) + Recip(t0)))) Just (-6.301759103812418e-2)
+((((Abs(t0) ^ x0) * t0) + t0) * x0) Just (-6.785393657824833e-3)
+Recip((((Abs((t0 + x0)) ^ t0) - x0) - t0)) Just (-9.762960394508814e-3)
+"FIN"
+============================================
+
+t0 Just (-6.301759103812452e-2)
+((t0 + x0) / x0) Just (-Infinity)
+(t0 + x0) Just (-0.6395738210321936)
+((t0 + x0) / x0) Just (-Infinity)
+Recip(Recip(Recip(Recip(t0)))) Just (-6.301759103812449e-2)
+Recip(Recip(Recip((t0 + x0)))) Just (-1.6725629776198663)
+((Abs(((x0 - t0) - x0)) ^ t0) / t0) Just (-6.301759103812433e-2)
+Recip(Recip(Recip((Abs((x0 + x0)) ^ t0)))) Just (-0.26440687335320145)
+((((Abs(t0) ^ x0) / t0) - t0) * x0) Just (-6.7853936578289595e-3)
+(((Recip((Abs(t0) ^ x0)) - t0) * x0) / t0) Just (-6.78539365782474e-3)
+"FIN"
+============================================
+
+t0 Just (-6.301759103812452e-2)
+(t0 / x0) Just (-Infinity)
+(t0 / x0) Just (-Infinity)
+(t0 / x0) Just (-Infinity)
+x0 Just (-0.6688241748187843)
+(t0 / x0) Just (-Infinity)
+(t0 / x0) Just (-Infinity)
+Recip(Recip((Recip(t0) / (t0 - t0)))) Just (-6.301759103812445e-2)
+((((Abs(t0) ^ x0) / t0) + t0) * x0) Just (-6.785393657824797e-3)
+((Recip(((Abs(t0) ^ x0) / t0)) - t0) * x0) Just (-6.785393657824734e-3)
+"FIN"
+============================================
+
+t0 Just (-6.301759103812452e-2)
+((((x0 + t0) / x0) + t0) + t0) Just (-Infinity)
+(t0 - x0) Just (-0.6990852659514573)
+Recip((t0 - x0)) Just (-313.40518624537344)
+Recip(Recip(Recip(Recip(t0)))) Just (-6.301759103812449e-2)
+Recip(((((t0 * t0) + t0) - t0) - t0)) Just (-6.301759103812433e-2)
+(Recip(Recip((t0 - x0))) + t0) Just (-0.6990852659514577)
+Recip(Recip((Recip(t0) - (t0 + x0)))) Just (-0.6990852659514567)
+((((Abs(t0) ^ x0) + t0) * x0) / t0) Just (-6.785393657824751e-3)
+Recip((((Abs((x0 + t0)) ^ t0) + t0) - x0)) Just (-9.7629603960927e-3)
+"FIN"
+============================================
+
+t0 Just (-6.301759103812452e-2)
+((((t0 + t0) / x0) + t0) - x0) Just (-Infinity)
+(t0 / t0) Just (-6.301759103812422e-2)
+((((t0 + t0) / x0) + t0) - x0) Just (-Infinity)
+(((Recip(Recip(x0)) - x0) / t0) - t0) Just (-6.301759103812449e-2)
+(Recip(Recip(Recip(t0))) * ((Abs(t0) ^ t0) * t0)) Just (-6.301759103812428e-2)
+((Abs(((t0 * t0) - t0)) ^ t0) - t0) Just (-6.301759103812433e-2)
+(Abs(Recip((Abs((t0 + (t0 + t0))) ^ t0))) ^ t0) Just (-6.301759103812424e-2)
+((Abs(((Abs(t0) ^ x0) + t0)) ^ t0) * x0) Just (-8.300768006345534e-3)
+((Abs((Recip((Abs(t0) ^ x0)) + t0)) ^ t0) * x0) Just (-8.300768006536076e-3)
+"FIN"
+============================================
+
+t0 Just (-6.301759103812452e-2)
+((Abs(((x0 * x0) - t0)) ^ x0) / x0) Just (-Infinity)
+(x0 - x0) Just (-3.2958613259668437)
+((Abs(((x0 * x0) - t0)) ^ x0) / x0) Just (-Infinity)
+(x0 - x0) Just (-3.2958613259668437)
+((((t0 / t0) - t0) / t0) + t0) Just (-6.301759103812425e-2)
+Recip(Recip(Recip((Recip(x0) - t0)))) Just (-0.7291893833127949)
+Recip(Recip(Recip((t0 * (x0 + t0))))) Just (-6.297643585516843e-2)
+((((Abs(t0) ^ x0) - t0) / t0) * x0) Just (-6.78539365782477e-3)
+(Recip(((t0 / (t0 - x0)) + x0)) + t0) Just (-5.676641849001036e-3)
+"FIN"
+============================================
+

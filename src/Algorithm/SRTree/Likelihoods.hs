@@ -18,6 +18,7 @@ module Algorithm.SRTree.Likelihoods
   , sse
   , mse
   , rmse
+  , r2
   , nll
   , predict
   , gradNLL
@@ -48,6 +49,15 @@ sse xss ys tree theta = err
     cmp    = getComp xss
     yhat   = evalTree xss theta tree
     err    = M.sum $ (delay ys - yhat) ^ (2 :: Int)
+
+-- | Total Sum-of-squares
+sseTot :: SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
+sseTot xss ys tree theta = err
+  where
+    (Sz m) = M.size ys
+    cmp    = getComp xss
+    ym     = M.sum ys / fromIntegral m
+    err    = M.sum $ (M.map (subtract ym) ys) ^ (2 :: Int)
         
 -- | Mean squared errors
 mse :: SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
@@ -56,6 +66,10 @@ mse xss ys tree theta = let (Sz m) = M.size ys in sse xss ys tree theta / fromIn
 -- | Root of the mean squared errors
 rmse :: SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
 rmse xss ys tree = sqrt . mse xss ys tree
+
+-- | Coefficient of determination
+r2 :: SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
+r2 xss ys tree theta = 1 - sse xss ys tree theta / sseTot  xss ys tree theta
 
 -- | logistic function
 logistic :: Floating a => a -> a

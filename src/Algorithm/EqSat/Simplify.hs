@@ -107,20 +107,20 @@ rewriteBasic =
     --, ("x" + "y") - "z" :=> "x" + ("y" - "z") -- TODO: check that I don't need that
     , ("x" * "y") * "z" :=> "x" * ("y" * "z")
     , ("x" * "y") + ("x" * "z") :=> "x" * ("y" + "z")
-    --, "x" - ("y" + "z") :=> ("x" - "y") - "z" -- TODO: check that I don't this
-    --, "x" - ("y" - "z") :=> ("x" - "y") + "z" -- TODO
-    --, ("x" * "y") / "z" :=> ("x" / "z") * "y" :| isNotZero "z" -- TODO: inv(x) <=> x^-1 , x/y <=> x*y^-1
-    --, "x" * ("y" / "z") :=> ("x" / "z") * "y" :| isNotZero "z" -- ^
-    --, "x" / ("y" * "z") :=> ("x" / "z") / "y" :| isNotZero "z" -- ^ TODO: 0 ^-1 check
+    , "x" - ("y" + "z") :=> ("x" - "y") - "z" -- TODO: check that I don't this
+    , "x" - ("y" - "z") :=> ("x" - "y") + "z" -- TODO
+    , ("x" * "y") / "z" :=> ("x" / "z") * "y" :| isNotZero "z" -- TODO: inv(x) <=> x^-1 , x/y <=> x*y^-1
+    , "x" * ("y" / "z") :=> ("x" / "z") * "y" :| isNotZero "z" -- ^
+    , "x" / ("y" * "z") :=> ("x" / "z") / "y" :| isNotZero "z" -- ^ TODO: 0 ^-1 check
     , ("w" * "x") + ("z" * "x") :=> ("w" + "z") * "x" -- :| isConstPt "w" :| isConstPt "z"
-    --, ("w" * "x") - ("z" * "x") :=> ("w" - "z") * "x" -- TODO: handle sub :| isConstPt "w" :| isConstPt "z"
-    --, ("w" * "x") / ("z" * "y") :=> ("w" / "z") * ("x" / "y") -- TODO handle with power :| isConstPt "w" :| isConstPt "z" :| isNotZero "z"
+    , ("w" * "x") - ("z" * "x") :=> ("w" - "z") * "x" -- TODO: handle sub :| isConstPt "w" :| isConstPt "z"
+    , ("w" * "x") / ("z" * "y") :=> ("w" / "z") * ("x" / "y") -- TODO handle with power :| isConstPt "w" :| isConstPt "z" :| isNotZero "z"
     -- TODO: a + b*y :=> b * (a/b + y) :| isNotZero b
-    -- , (("x" * "y") + ("z" * "w")) :=> "x" * ("y" + ("z" / "x") * "w") :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
-    -- , (("x" * "y") - ("z" * "w")) :=> "x" * ("y" - ("z" / "x") * "w") :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
-    -- , (("x" * "y") * ("z" * "w")) :=> ("x" * "z") * ("y" * "w") :| isConstPt "x" :| isConstPt "z"
-    , "x" + "y" :=> "y" * ("x" * "y" ** (-1) + 1) :| isNotZero "y"
-    , "x" + "y" * "z" :=> "y" * ("x" * "y" ** (-1) + "z") :| isNotZero "y"
+    , (("x" * "y") + ("z" * "w")) :=> "x" * ("y" + ("z" / "x") * "w") :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
+    , (("x" * "y") - ("z" * "w")) :=> "x" * ("y" - ("z" / "x") * "w") :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
+    , (("x" * "y") * ("z" * "w")) :=> ("x" * "z") * ("y" * "w") :| isConstPt "x" :| isConstPt "z"
+    -- , "x" + "y" :=> "y" * ("x" * "y" ** (-1) + 1) :| isNotZero "y" -- GABRIEL 
+    -- , "x" + "y" * "z" :=> "y" * ("x" * "y" ** (-1) + "z") :| isNotZero "y" -- GABRIEL 
     ]
 
 -- rules for nonlinear functions 
@@ -144,11 +144,11 @@ rewritesFun =
     , abs ("x" - "y") :=> abs ("y" - "x")
     --, sqrt ("z" * ("x" - "y")) :=> sqrt (negate "z") * sqrt ("y" - "x")
     --, sqrt ("z" * ("x" + "y")) :=> sqrt "z" * sqrt ("x" + "y")
-    -- , recip (recip "x") :=> "x" :| isNotZero "x"
+    , recip (recip "x") :=> "x" :| isNotZero "x"
     , ("x" * "y") ** "z" :==: ("x" ** "z") * ("y" ** "z") -- :| bothSameSign "x" "y"
     , ("x" * "y") ** "z" :==: ("x" ** "z") * ("y" ** "z") -- :| isInteger "z"
-    , recip "x" :==: "x" ** (-1)
-    , "x" / "y" :==: "x" * "y" ** (-1)
+    --, recip "x" :==: "x" ** (-1) -- GABRIEL 
+    --, "x" / "y" :==: "x" * "y" ** (-1) -- GABRIEL 
     , abs "x" ** "y" :=> "x" ** "y" :| isEven "y"
     ]
 

@@ -13,6 +13,13 @@ toss :: Rng Bool
 toss = state random
 {-# INLINE toss #-}
 
+tossBiased :: Double -> Rng Bool
+tossBiased p = do r <- state random 
+                  pure (r < p)
+
+randomVal :: Rng Double
+randomVal = state random
+
 randomRange :: (Ord val, Random val) => (val, val) -> Rng val
 randomRange rng = state (randomR rng)
 {-# INLINE randomRange #-}
@@ -23,7 +30,7 @@ randomFrom funs = do n <- randomRange (0, length funs - 1)
 {-# INLINE randomFrom #-}
 
 randomVec :: Int -> Rng PVector
-randomVec n = MA.fromList Seq <$> replicateM n (randomRange (0, 1))
+randomVec n = MA.fromList Seq <$> replicateM n (randomRange (-3.0, 3.0))
 
 randomTree :: Int -> Int -> Int -> Rng (Fix SRTree) -> Rng (SRTree ()) -> Bool -> Rng (Fix SRTree)
 randomTree minDepth maxDepth maxSize genTerm genNonTerm grow 
