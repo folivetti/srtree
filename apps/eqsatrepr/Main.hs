@@ -132,6 +132,7 @@ trees = [  (4.059e-3 + (0.988153 * (((1.923901 * x1) * ((-1.228652 * x0) * (-0.2
         , abs(((1.3 * x1) + (-1.56 * x2))) * (-1.0)
         ]
 
+
 myCost :: SRTree Int -> Int
 myCost (Var _) = 1
 myCost (Const _) = 1

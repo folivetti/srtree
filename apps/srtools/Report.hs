@@ -124,17 +124,17 @@ getDataset args = do
                             pure (Just xTe, Just yTe)
   pure (DS xTr yTr mXVal mYVal mXTe mYTe, varnames, tgname)
 
-getBasicStats :: Args -> StdGen -> Datasets -> Fix SRTree -> Int -> BasicInfo
-getBasicStats args seed dset tree ix
-  | anyNaN    = getBasicStats args (snd $ split seed) dset tree ix
+getBasicStats :: Args -> StdGen -> Datasets -> Fix SRTree -> [Double] -> Int -> BasicInfo
+getBasicStats args seed dset tree theta0 ix
+  | anyNaN    = getBasicStats args (snd $ split seed) dset tree theta0 ix
   | otherwise = Basic ix (infile args) tOpt nNodes nParams params
   where
-    (tree', theta0) = floatConstsToParam tree
+    -- (tree', theta0) = floatConstsToParam tree
     thetas          = if restart args
                         then A.fromList A.Seq $ take nParams (normals seed)
                         else A.fromList A.Seq theta0
     t               = fst $ minimizeNLL (dist args) (msErr args) (niter args) (_xTr dset) (_yTr dset) tree thetas
-    tOpt            = paramsToConst (A.toList t) tree'
+    tOpt            = paramsToConst (A.toList t) tree
     nNodes          = countNodes tOpt :: Int
     nParams         = length theta0
     params          = A.toList t

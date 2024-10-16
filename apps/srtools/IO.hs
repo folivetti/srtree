@@ -40,16 +40,16 @@ processTree :: Args        -- command line arguments
             -> (BasicInfo, SSE, SSE, Info, (BasicStats, [CI], [CI], [CI], [CI]))
 processTree args seed dset t ix = (basic, sseOrig, sseOpt, info, cis)
   where
-    (tree, theta0)  = floatConstsToParam tree
+    (tree, theta0)  = floatConstsToParam t
     mSErr'  = case dist args of
                 Gaussian -> estimateSErr Gaussian (msErr args)  (_xTr dset) (_yTr dset) (A.fromList A.Seq theta0) tree (niter args)
                 _        -> Nothing
     args'   = args{ msErr = mSErr' }
-    basic   = getBasicStats args' seed dset tree ix
+    basic   = getBasicStats args' seed dset tree theta0 ix
     treeVal = case (_xVal dset, _yVal dset) of
                 (Nothing, _) -> _expr basic
                 (_, Nothing) -> _expr basic
-                (Just xV, Just yV) -> _expr $ getBasicStats args' seed dset{_xTr = xV, _yTr = yV} tree ix
+                (Just xV, Just yV) -> _expr $ getBasicStats args' seed dset{_xTr = xV, _yTr = yV} tree theta0 ix
     sseOrig = getSSE dset tree
     sseOpt  = getSSE dset (_expr basic)
     info    = getInfo args' dset (_expr basic) treeVal
