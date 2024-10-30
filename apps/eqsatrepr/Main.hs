@@ -6,14 +6,17 @@ import Algorithm.EqSat.Egraph
 import Data.SRTree.Print 
 import qualified Data.Map as Map
 import qualified Data.IntMap as IM
-import Control.Monad.State.Lazy
+import Control.Monad.State.Strict
 import System.Random
 import Data.SRTree.Recursion ( cata )
 import Control.Monad
 import Control.Monad.Reader
 import qualified Data.SRTree.Random as RT
 import Data.List ( nub )
-import Algorithm.EqSat.EqSatDB
+import Algorithm.EqSat.DB
+import Algorithm.EqSat.Info
+import Algorithm.EqSat.Build
+import Algorithm.EqSat.Queries
 import Algorithm.EqSat
 
 isConstPt :: Pattern -> Map.Map ClassOrVar ClassOrVar -> EGraph -> Bool

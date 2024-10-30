@@ -28,8 +28,11 @@ source-repository head
 library
   exposed-modules:
       Algorithm.EqSat
+      Algorithm.EqSat.Build
+      Algorithm.EqSat.DB
       Algorithm.EqSat.Egraph
-      Algorithm.EqSat.EqSatDB
+      Algorithm.EqSat.Info
+      Algorithm.EqSat.Queries
       Algorithm.EqSat.Simplify
       Algorithm.Massiv.Utils
       Algorithm.SRTree.AD
@@ -58,11 +61,12 @@ library
     , attoparsec-expr
     , base >=4.16 && <5
     , bytestring ==0.11.*
-    , containers ==0.6.*
+    , containers >=0.6.7 && <0.8
     , deriving-compat
     , dlist ==1.0.*
     , exceptions
     , filepath
+    , fingertree
     , graphviz
     , ieee
     , lens
@@ -91,11 +95,12 @@ executable egraphGP
     , attoparsec-expr
     , base >=4.16 && <5
     , bytestring ==0.11.*
-    , containers ==0.6.*
+    , containers >=0.6.7 && <0.8
     , deriving-compat
     , dlist ==1.0.*
     , exceptions
     , filepath
+    , fingertree
     , graphviz
     , ieee
     , lens
@@ -125,11 +130,12 @@ executable eqsatrepr
     , attoparsec-expr
     , base >=4.16 && <5
     , bytestring ==0.11.*
-    , containers ==0.6.*
+    , containers >=0.6.7 && <0.8
     , deriving-compat
     , dlist ==1.0.*
     , exceptions
     , filepath
+    , fingertree
     , graphviz
     , ieee
     , lens
@@ -158,11 +164,12 @@ executable ieeexplore
     , attoparsec-expr
     , base >=4.16 && <5
     , bytestring ==0.11.*
-    , containers ==0.6.*
+    , containers >=0.6.7 && <0.8
     , deriving-compat
     , dlist ==1.0.*
     , exceptions
     , filepath
+    , fingertree
     , graphviz
     , ieee
     , lens
@@ -192,11 +199,12 @@ executable srsimplify
     , attoparsec-expr
     , base >=4.16 && <5
     , bytestring ==0.11.*
-    , containers ==0.6.*
+    , containers >=0.6.7 && <0.8
     , deriving-compat
     , dlist ==1.0.*
     , exceptions
     , filepath
+    , fingertree
     , graphviz
     , ieee
     , lens
@@ -229,11 +237,12 @@ executable srtools
     , attoparsec-expr
     , base >=4.16 && <5
     , bytestring ==0.11.*
-    , containers ==0.6.*
+    , containers >=0.6.7 && <0.8
     , deriving-compat
     , dlist ==1.0.*
     , exceptions
     , filepath
+    , fingertree
     , graphviz
     , ieee
     , lens
@@ -266,11 +275,12 @@ executable tinygp
     , attoparsec-expr
     , base >=4.16 && <5
     , bytestring ==0.11.*
-    , containers ==0.6.*
+    , containers >=0.6.7 && <0.8
     , deriving-compat
     , dlist ==1.0.*
     , exceptions
     , filepath
+    , fingertree
     , graphviz
     , ieee
     , lens
@@ -303,11 +313,12 @@ test-suite srtree-test
     , attoparsec-expr
     , base >=4.16 && <5
     , bytestring ==0.11.*
-    , containers ==0.6.*
+    , containers >=0.6.7 && <0.8
     , deriving-compat
     , dlist ==1.0.*
     , exceptions
     , filepath
+    , fingertree
     , graphviz
     , ieee
     , lens

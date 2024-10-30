@@ -30,7 +30,7 @@ module Data.SRTree.Random
          where
 
 import Control.Monad.Reader (ReaderT, asks, runReaderT)
-import Control.Monad.State ( MonadState(state), MonadTrans(lift), StateT )
+import Control.Monad.State.Strict ( MonadState(state), MonadTrans(lift), StateT )
 import Data.Maybe (fromJust)
 import Data.SRTree.Internal
 import System.Random (Random (random, randomR), StdGen, mkStdGen)

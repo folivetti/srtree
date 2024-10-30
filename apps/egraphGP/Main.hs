@@ -2,17 +2,22 @@
 {-# LANGUAGE  TupleSections #-}
 {-# LANGUAGE  MultiWayIf #-}
 {-# LANGUAGE  OverloadedStrings #-}
+{-# LANGUAGE  BangPatterns #-}
 
 module Main where 
 
 import Algorithm.EqSat.Egraph
 import Algorithm.EqSat.Simplify
+import Algorithm.EqSat.Build
+import Algorithm.EqSat.Queries
+import Algorithm.EqSat.Info
+import Algorithm.EqSat.DB
 import Algorithm.SRTree.Likelihoods
 import Algorithm.SRTree.Opt
 import Control.Lens (element, makeLenses, over, (&), (+~), (-~), (.~), (^.))
 import Control.Monad (foldM, forM_, forM, when, unless, filterM, (>=>), replicateM, replicateM_)
-import Control.Monad.State
-import qualified Data.IntMap as IM
+import Control.Monad.State.Strict
+import qualified Data.IntMap.Strict as IM
 import Data.Massiv.Array as MA hiding (forM_, forM)
 import Data.Maybe (fromJust, isNothing, isJust)
 import Data.SRTree
@@ -24,7 +29,13 @@ import Options.Applicative as Opt hiding (Const)
 import Random
 import System.Random
 import qualified Data.Set as Set
-import Data.List ( sort )
+import Data.List ( sort, maximumBy )
+import Data.IntSet (IntSet)
+import qualified Data.IntSet as IntSet
+import Data.FingerTree ( FingerTree, Measured, ViewL(..), ViewR(..), (<|), (|>) )
+import qualified Data.FingerTree as FingerTree
+import Data.Function ( on )
+import qualified Data.Foldable as Foldable
 
 import Debug.Trace
 import Algorithm.EqSat (runEqSat)
@@ -50,20 +61,23 @@ myCost (Uni _ t)    = 3 + t
 data Alg = OnlyRandom | BestFirst deriving (Show, Read, Eq)
 
 -- experiment 1 80/30
-fitnessFun :: SRMatrix -> PVector -> Fix SRTree -> RndEGraph Double
+fitnessFun :: SRMatrix -> PVector -> Fix SRTree -> RndEGraph (Double, PVector)
 fitnessFun x y _tree = do
     let tree         = relabelParams _tree
         nParams      = countParams tree
     thetaOrig <- rnd $ randomVec nParams --   = MA.replicate Seq nParams 1.0
     let (theta, fit) = minimizeNLL Gaussian Nothing 50 x y tree thetaOrig
-    pure . negate . mse x y tree $ if nParams == 0 then thetaOrig else theta
-    --pure . r2 x y tree $ if nParams == 0 then thetaOrig else theta
+        val          = negate . mse x y tree $ if nParams == 0 then thetaOrig else theta
+        -- val       = r2 x y tree $ if nParams == 0 then thetaOrig else theta
+    pure $ if isNaN val
+            then (-1/0, theta) -- infinity
+            else (val, theta)
 {-# INLINE fitnessFun #-}
 
-fitnessFunRep :: SRMatrix -> PVector -> Fix SRTree -> RndEGraph Double
+fitnessFunRep :: SRMatrix -> PVector -> Fix SRTree -> RndEGraph (Double, PVector)
 fitnessFunRep x y _tree = do
     fits <- replicateM 5 (fitnessFun x y _tree)
-    pure (maximum fits)
+    pure (maximumBy (compare `on` fst) fits)
 {-# INLINE fitnessFunRep #-}
 
 -- helper query functions
@@ -88,8 +102,8 @@ isValidFitness = fitnessIs (isJust &&& (not . isNaN . fromJust) &&& (not . isInf
 
 evaluated = fitnessIs isJust
 {-# INLINE evaluated #-}
-unevaluated = fitnessIs isNothing
-{-# INLINE unevaluated #-}
+unevaluated' = fitnessIs isNothing
+{-# INLINE unevaluated' #-}
 
 isSizeOf p = p . _size . _info
 {-# INLINE isSizeOf #-}
@@ -127,15 +141,17 @@ egraphSearch alg x y terms nEvals maxSize = do
   while (numberOfEvalClasses nEvals) 10 $
     \radius ->
       do
-       nEvs  <- length <$> (getEClassesThat evaluated)
+       --nEvs  <- gets (FingerTree.size . _fitRangeDB . _eDB)
        nCls  <- gets (IM.size . _eClass)
+       nUnev <- gets (IntSet.size . _unevaluated . _eDB)
+       let nEvs = nCls - nUnev
        --io . print $ (nCls, nEvs)
        bestF <- getBestFitness
 
        (ecN, b) <- case alg of
                     OnlyRandom -> do let ratio = fromIntegral nEvs / fromIntegral nCls
                                      b <- rnd (tossBiased ratio)
-                                     ec <- if b && ratio > 0.7 then insertRndExpr maxSize >>= canonical else evaluateRndUnevaluated >>= canonical
+                                     ec <- insertRndExpr maxSize -- if b && ratio > 0.7 then insertRndExpr maxSize >>= canonical else evaluateRndUnevaluated >>= canonical
                                      pure (ec, False)
                     BestFirst  -> do
                       ecsPareto <- getParetoEcsUpTo radius
@@ -157,30 +173,36 @@ egraphSearch alg x y terms nEvals maxSize = do
                                             Just c  -> pure (c, False)
 
        upd <- updateIfNothing ecN
-       when upd
-         do tot <- length <$> getEClassesThat evaluated
-            --runEqSat myCost rewriteBasic2 5
+       when (not upd) $ (io . print) 1
+       when (False && upd)
+         do runEqSat myCost rewriteBasic2 5
+            cleanDB
             pure ()
        if b then pure (min 300 $ radius+2) else pure (max 5 $ radius-1)
   paretoFront
+  --ft <- gets (_fitRangeDB . _eDB)
+  --io . print $ Foldable.toList ft
 
   where
-    numberOfEvalClasses nEvs = (length <$> (getEClassesThat evaluated)) >>= \n -> pure (n<nEvs)
+    numberOfEvalClasses :: Monad m => Int -> EGraphST m Bool
+    numberOfEvalClasses nEvs =
+      (subtract <$> gets (IntSet.size . _unevaluated . _eDB) <*> gets (IM.size . _eClass))
+        >>= \n -> pure (n<nEvs)
 
     updateIfNothing ec = do
       mf <- getFitness ec
       when (isNothing mf) do
         t <- getBest ec
-        f <- fitnessFunRep x y t
-        updateFitness f ec
+        (f, p) <- fitnessFunRep x y t
+        insertFitness ec f p
       pure $ if isNothing mf then True else False
 
     getBestFitness = do
-      bec <- head <$> (getBestEclassThat isValidFitness >>= Prelude.mapM canonical)
+      bec <- (gets (eidOf . getGreatest . _fitRangeDB . _eDB) >>= canonical)
       gets (_fitness . _info . (IM.! bec) . _eClass)
 
     evalRndSubTree :: RndEGraph (Maybe EClassId)
-    evalRndSubTree = do ecIds <- getEClassesThat unevaluated
+    evalRndSubTree = do ecIds <- gets (IntSet.toList . _unevaluated . _eDB)
                         if not (null ecIds)
                           then do rndId <- rnd $ randomFrom ecIds
                                   Just <$> canonical rndId
@@ -207,10 +229,10 @@ egraphSearch alg x y terms nEvals maxSize = do
     getParetoEcsUpTo n = concat <$> (forM [1..maxSize] $ \i -> getBestEcs (isSizeOf (==i)) n)
 
     getBestEcs p n = do
-      ecs <- getEClassesThat (isValidFitness &&& p)
-      fits <- Prelude.mapM getFitness ecs
-      let sorted = sort $ Prelude.zip (Prelude.map (fmap negate) fits) ecs
-      pure (Prelude.map snd $ Prelude.take n sorted)
+      ecs  <- geTopECLassThat n p
+      --fits <- Prelude.mapM getFitness ecs
+      --let sorted = sort $ Prelude.zip (Prelude.map (fmap negate) fits) ecs
+      Prelude.mapM canonical (Prelude.take n ecs)
 
     randomChildFrom ec maxL = do
       p <- rnd toss -- whether to go deeper or return this level
@@ -247,18 +269,17 @@ egraphSearch alg x y terms nEvals maxSize = do
     insertBestExpr = do --let t =  "t0" / (recip ("t1" - "x0") + powabs "t2" "x0")
                         let t = ((("t0" + (powabs "t0" "x0")) / "t0") * "x0")
                         ecId <- fromTree myCost t >>= canonical
-                        f <- fitnessFunRep x y t
-                        updateFitness f ecId
+                        (f, p) <- fitnessFunRep x y t
+                        insertFitness ecId f p
                         io . putStrLn $ "Best fit global: " <> show f
                         pure ecId
         where powabs l r  = Fix (Bin PowerAbs l r)
 
     getBestEclassThat p  =
-        do ecIds <- getEClassesThat p -- isValidFitness
-           nc    <- gets (IM.size . _eClass)
-           bestFit <- foldM (\acc -> getFitness >=> (pure . max acc . fromJust)) ((-1.0)/0.0) ecIds
-           ecIds'  <- getEClassesThat (fitnessIs (== Just bestFit))
-           Prelude.mapM canonical $ Prelude.take 1 ecIds'
+        do ecIds <- geTopECLassThat 1 p -- isValidFitness
+           --bestFit <- foldM (\acc -> getFitness >=> (pure . max acc . fromJust)) ((-1.0)/0.0) ecIds
+           --ecIds'  <- getEClassesThat (fitnessIs (== Just bestFit))
+           Prelude.mapM canonical $ Prelude.take 1 ecIds
 
     getBestExprThat p  =
         do ec <- getBestEclassThat p
@@ -280,7 +301,7 @@ egraphSearch alg x y terms nEvals maxSize = do
         go n f
           | n > maxSize = pure ()
           | otherwise   = do
-              ecList <- getBestExprThat (evaluated &&& isSizeOf (==n))
+              ecList <- getBestExprThat (isSizeOf (==n))
               if (not (null ecList))
                  then do let (best, mf) = head ecList
                              fit = fromJust mf
@@ -290,24 +311,25 @@ egraphSearch alg x y terms nEvals maxSize = do
                  else go (n+1) f
 
     evaluateUnevaluated = do
-          ec <- getEClassesThat unevaluated
+          ec <- gets (IntSet.toList . _unevaluated . _eDB)
           forM_ ec $ \c -> do
               t <- getBest c
-              f <- fitnessFun x y t
-              updateFitness f c
+              (f, p) <- fitnessFun x y t
+              insertFitness c f p
 
     evaluateRndUnevaluated = do
-          ec <- getEClassesThat unevaluated
+          ec <- gets (IntSet.toList . _unevaluated . _eDB)
           c <- rnd . randomFrom $ ec 
           t <- getBest c
-          f <- fitnessFun x y t
-          updateFitness f c
+          (f, p) <- fitnessFun x y t
+          insertFitness c f p
           pure c
 
 while p arg prog = do b <- p
                       when b do arg' <- prog arg
                                 while p arg' prog
 
+                                {-
 egraphGP :: SRMatrix -> PVector -> [Fix SRTree] -> Int -> RndEGraph (Fix SRTree, Double)
 egraphGP x y terms nEvals = do
     replicateM_ 200 insertRndExpr
@@ -447,7 +469,7 @@ egraphGP x y terms nEvals = do
                    | choice == 2 -> insertRndParent
                    | otherwise   -> evalRndSubTree
                 rebuild myCost
-
+                -}
 data Args = Args
   { dataset :: String,
     gens    :: Int,

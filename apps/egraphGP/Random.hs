@@ -1,7 +1,7 @@
 module Random where 
 
 import System.Random 
-import Control.Monad.State 
+import Control.Monad.State.Strict
 import Control.Monad
 import Data.SRTree 
 import Data.SRTree.Eval

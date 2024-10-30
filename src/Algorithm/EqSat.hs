@@ -16,7 +16,9 @@
 module Algorithm.EqSat where
 
 import Algorithm.EqSat.Egraph
-import Algorithm.EqSat.EqSatDB
+import Algorithm.EqSat.DB
+import Algorithm.EqSat.Info
+import Algorithm.EqSat.Build
 import Control.Lens (element, makeLenses, over, (&), (+~), (-~), (.~), (^.))
 import Control.Monad.State
 import Data.Function (on)
@@ -51,7 +53,10 @@ eqSat expr rules costFun maxIt =
     do root <- fromTree costFun expr
        (end, it) <- runEqSat costFun rules maxIt
        best      <- getBest root
-       if not end -- if had an early stop 
+       --info      <- gets ((IntMap.! root) . _eClass)
+       --info2     <- gets ((IntMap.! 9) . _eClass)
+       --traceShow (info, info2) $
+       if not end -- if had an early stop
          then do eqSat best rules costFun it -- reapplies eqsat on the best so far 
          else pure best
 
@@ -110,19 +115,20 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty
 
         go it sch = do eNodes   <- gets _eNodeToEClass
                        eClasses <- gets _eClass
-                       db       <- createDB -- creates the DB
+                       --db       <- gets (_patDB . _eDB) -- createDB -- creates the DB
 
                        -- step 1: match the rules
-                       let matchSch        = matchWithScheduler db it
+                       let matchSch        = matchWithScheduler it
                            matchAll        = zipWithM matchSch [0..]
-                           (matches, sch') = runState (matchAll rules') sch
+                           (rules, sch') = runState (matchAll rules') sch
 
                        -- step 2: apply matches and rebuild
+                       matches <- mapM (\rule -> map (rule,) <$> match (source rule)) $ concat rules
                        mapM_ (uncurry (applyMatch costFun)) $ concat matches
                        rebuild costFun
 
                        -- recalculate heights
-                       calculateHeights
+                       --calculateHeights
                        eNodes'   <- gets _eNodeToEClass
                        eClasses' <- gets _eClass
 
@@ -136,14 +142,15 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty
 -- | apply a single step of merge-only equality saturation
 applySingleMergeOnlyEqSat :: Monad m => CostFun -> [Rule] -> EGraphST m ()
 applySingleMergeOnlyEqSat costFun rules =
-  do db <- createDB
-     let matchSch        = matchWithScheduler db 10
+  do db <- gets (_patDB . _eDB) -- createDB
+     let matchSch        = matchWithScheduler 10
          matchAll        = zipWithM matchSch [0..]
-         (matches, sch') = runState (matchAll rules') IntMap.empty
+         (rules, sch') = runState (matchAll rules') IntMap.empty
+     matches <- mapM (\rule -> map (rule,) <$> match (source rule)) $ concat rules
      mapM_ (uncurry (applyMergeOnlyMatch costFun)) $ concat matches
      rebuild costFun
      -- recalculate heights
-     calculateHeights
+     --calculateHeights
       where
         rules' = concatMap replaceEqRules rules
 
@@ -154,11 +161,11 @@ applySingleMergeOnlyEqSat costFun rules =
         replaceEqRules (r :| cond)  = map (:| cond) $ replaceEqRules r
 
 -- | matches the rules given a scheduler
-matchWithScheduler :: DB -> Int -> Int -> Rule -> Scheduler [(Rule, (Map ClassOrVar ClassOrVar, ClassOrVar))]
-matchWithScheduler db it ruleNumber rule =
+matchWithScheduler :: Int -> Int -> Rule -> Scheduler [Rule] -- [(Rule, (Map ClassOrVar ClassOrVar, ClassOrVar))]
+matchWithScheduler it ruleNumber rule =
   do mbBan <- gets (IntMap.!? ruleNumber)
      if mbBan /= Nothing && fromJust mbBan <= it -- check if the rule is banned
         then pure []
-        else do let matches = match db (source rule)
+        else do -- let matches = match db (source rule)
                 modify (IntMap.insert ruleNumber (it+5))
-                pure $ map (rule,) matches
+                pure [rule] -- $ map (rule,) matches

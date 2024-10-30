@@ -16,13 +16,13 @@ module Algorithm.EqSat.Simplify ( Rule(..), simplifyEqSatDefault, applyMergeOnly
 
 import Algorithm.EqSat (eqSat, applySingleMergeOnlyEqSat)
 import Algorithm.EqSat.Egraph
-import Algorithm.EqSat.EqSatDB
+import Algorithm.EqSat.DB
   ( ClassOrVar,
     Pattern (Fixed, VarPat),
     Rule (..),
     getInt,
   )
-import Control.Monad.State.Lazy (evalState)
+import Control.Monad.State.Strict (evalState)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.Map (Map)
@@ -191,11 +191,11 @@ constReduction =
 --          op priorities (+, -, *, inv_div, pow, abs, exp, log, log10, sqrt)
 --            univariates
 myCost :: SRTree Int -> Int
-myCost (Var _) = 1
-myCost (Const _) = 1
-myCost (Param _) = 1
+myCost (Var _)      = 1
+myCost (Const _)    = 1
+myCost (Param _)    = 1
 myCost (Bin op l r) = 2 + l + r
-myCost (Uni _ t) = 3 + t
+myCost (Uni _ t)    = 3 + t
 
 -- all rewrite rules
 rewrites :: [Rule]
