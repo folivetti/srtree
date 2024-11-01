@@ -2,7 +2,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Algorithm.EqSat.Egraph
@@ -27,8 +27,8 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Set (Set)
-import qualified Data.Set as Set
+import Data.HashSet (HashSet)
+import qualified Data.HashSet as Set
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
 import Data.FingerTree ( FingerTree, Measured, ViewL(..), ViewR(..), (<|), (|>), measure )
@@ -36,12 +36,14 @@ import qualified Data.FingerTree as FingerTree
 import Data.Foldable ( toList )
 import Data.SRTree
 import Data.SRTree.Eval
+import Data.Hashable
 
 import Debug.Trace
 
 type EClassId     = Int -- NOTE: DO NOT CHANGE THIS, this will break the use of IntMap and IntSet
 type ClassIdMap   = IntMap
 type ENode        = SRTree EClassId
+type ENodeEnc     = (Int, Int, Int, Double)
 type EGraphST m a = StateT EGraph m a
 type Cost         = Int
 type CostFun      = SRTree Cost -> Cost
@@ -54,6 +56,9 @@ valOf (Singl _ v)   = v
 high (Range _ _ h) = h
 low (Range _ l _) = l
 
+instance Hashable ENode where
+  hashWithSalt n enode = hashWithSalt n (encodeEnode enode)
+
 instance Ord a => Semigroup (Range a) where
   EmptyRange <> rng = rng
   rng <> EmptyRange = rng
@@ -65,6 +70,30 @@ instance Ord a => Measured (Range a) (Singl a) where
   measure (Singl eid x) = Range eid x x
 
 type RangeTree a = FingerTree (Range a) (Singl a)
+
+-- | this assumes up to 999 variables and params
+encodeEnode :: ENode -> ENodeEnc
+--encodeEnode = id
+{--}
+encodeEnode (Var ix)         = (0, ix, -1, 0)
+encodeEnode (Param ix)       = (1, ix, -1, 0)
+encodeEnode (Const x)        = (2, -1, -1, x)
+encodeEnode (Uni f ed)       = (300 + fromEnum f, ed, -1, 0)
+encodeEnode (Bin op ed1 ed2) = (400 + fromEnum op, ed1, ed2, 0)
+{--}
+{-# INLINE encodeEnode #-}
+
+decodeEnode :: ENodeEnc -> ENode
+--decodeEnode = id
+{--}
+decodeEnode (0, ix, _, _) = Var ix
+decodeEnode (1, ix, _, _) = Param ix
+decodeEnode (2, _, _, x)  = Const x
+decodeEnode (opCode, arg1, arg2, arg3)
+  | opCode < 400 = Uni (toEnum $ opCode-300) arg1
+  | otherwise    = Bin (toEnum $ opCode-400) arg1 arg2
+  {--}
+{-# INLINE decodeEnode #-}
 
 insertRange :: (Ord a, Show a) => EClassId -> a -> RangeTree a -> RangeTree a
 insertRange eid x rt = go rt
@@ -139,8 +168,8 @@ data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId   -- maps an e-clas
                      , _eDB           :: EGraphDB
                      } deriving Show
 
-data EGraphDB = EDB { _worklist      :: Set (EClassId, ENode)      -- e-nodes and e-class schedule for analysis
-                    , _analysis      :: Set (EClassId, ENode)      -- e-nodes and e-class that changed data
+data EGraphDB = EDB { _worklist      :: HashSet (EClassId, ENode)      -- e-nodes and e-class schedule for analysis
+                    , _analysis      :: HashSet (EClassId, ENode)      -- e-nodes and e-class that changed data
                     , _patDB         :: DB                         -- database of patterns
                     , _fitRangeDB    :: RangeTree Double           -- database of valid fitness
                     , _sizeDB        :: IntMap IntSet              -- database of model sizes
@@ -149,8 +178,8 @@ data EGraphDB = EDB { _worklist      :: Set (EClassId, ENode)      -- e-nodes an
                     } deriving Show
 
 data EClass = EClass { _eClassId :: Int                   -- e-class id (maybe we don't need that here)
-                     , _eNodes   :: Set ENode             -- set of e-nodes inside this e-class
-                     , _parents  :: Set (EClassId, ENode) -- parents (e-class, e-node)'s
+                     , _eNodes   :: HashSet ENodeEnc          -- set of e-nodes inside this e-class
+                     , _parents  :: HashSet (EClassId, ENode) -- parents (e-class, e-node)'s
                      , _height   :: Int                   -- height
                      , _info     :: EClassData            -- data
                      } deriving (Show, Eq)
@@ -178,7 +207,7 @@ type DB = Map (SRTree ()) IntTrie
 -- The IntTrie is composed of the set of available keys (for convenience)
 -- and an IntMap that maps one e-class id to the first child IntTrie,
 -- the first child IntTrie will point to the next child and so on
-data IntTrie = IntTrie { _keys :: Set EClassId, _trie :: IntMap IntTrie } -- deriving Show
+data IntTrie = IntTrie { _keys :: HashSet EClassId, _trie :: IntMap IntTrie } -- deriving Show
 
 -- Shows the IntTrie as {keys} -> {show IntTries}
 instance Show IntTrie where
@@ -204,7 +233,7 @@ emptyDB = EDB Set.empty Set.empty Map.empty FingerTree.empty IntMap.empty IntSet
 -- | Creates a new e-class from an e-class id, a new e-node,
 -- and the info of this e-class 
 createEClass :: EClassId -> ENode -> EClassData -> Int -> EClass
-createEClass cId enode' info h = EClass cId (Set.singleton enode') Set.empty h info
+createEClass cId enode' info h = EClass cId (Set.singleton $ encodeEnode enode') Set.empty h info
 {-# INLINE createEClass #-}
 
 -- | gets the canonical id of an e-class

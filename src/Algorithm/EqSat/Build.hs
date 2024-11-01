@@ -28,7 +28,7 @@ import Algorithm.EqSat.DB
 import qualified Data.IntMap.Strict as IntMap
 import Data.Map.Strict ( Map )
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
+import qualified Data.HashSet as Set
 import Control.Monad.State.Strict
 import Data.SRTree.Recursion (cataM)
 import Algorithm.EqSat.Info
@@ -195,23 +195,12 @@ modifyEClass costFun ecId =
          c <- calculateCost costFun en
          let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
          maybeEid <- gets ((Map.!? en) . _eNodeToEClass)
-         modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.singleton en , _info = infoEc})
+         modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.singleton (encodeEnode en) , _info = infoEc})
          case maybeEid of
            Nothing   -> pure ecId
            Just eid' -> merge costFun eid' ecId
        _ -> pure ecId
-      {-
-     if (_consts . _info) ec
-      then
-       do let en = head term
-          c <- calculateCost costFun en
-          let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
-          maybeEid <- gets ((Map.!? en) . _eNodeToEClass)
-          modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.singleton en , _info = infoEc})
-          case maybeEid of
-            Nothing   -> pure ecId
-            Just eid' -> merge costFun eid' ecId
-            else pure ecId -}
+
   where
     isTerm (Var _)   = True
     isTerm (Const _) = True
@@ -356,7 +345,7 @@ getBest eid = do eid' <- canonical eid
 getExpressionFrom :: Monad m => EClassId -> EGraphST m (Fix SRTree)
 getExpressionFrom eId' = do
     eId <- canonical eId'
-    nodes <- gets (_eNodes . (IntMap.! eId) . _eClass)
+    nodes <- gets (Set.map decodeEnode . _eNodes . (IntMap.! eId) . _eClass)
     let hasTerm = any isTerm nodes
         cands   = if hasTerm then filter isTerm (Set.toList nodes) else Set.toList nodes
 
@@ -377,7 +366,7 @@ getExpressionFrom eId' = do
 getAllExpressionsFrom :: Monad m => EClassId -> EGraphST m [Fix SRTree]
 getAllExpressionsFrom eId' = do
   eId <- canonical eId'
-  nodes <- gets (Set.toList . _eNodes . (IntMap.! eId) . _eClass)
+  nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! eId) . _eClass)
   let cands  = filter isTerm nodes
   concat <$> go nodes
   --if null cands
@@ -412,7 +401,7 @@ getRndExpressionFrom eId' = do
     eId <- canonical eId'
     nodes <- gets (Set.toList . _eNodes . (IntMap.! eId) . _eClass)
     n <- lift $ randomFrom nodes
-    Fix <$> case n of
+    Fix <$> case decodeEnode n of
               Bin op l r -> Bin op <$> getRndExpressionFrom l <*> getRndExpressionFrom r
               Uni f t    -> Uni f <$> getRndExpressionFrom t
               Var ix     -> pure $ Var ix

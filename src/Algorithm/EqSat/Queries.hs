@@ -18,7 +18,7 @@ module Algorithm.EqSat.Queries where
 import Algorithm.EqSat.Egraph
 import qualified Data.IntMap as IntMap
 import qualified Data.Map as Map
-import qualified Data.Set as Set
+import qualified Data.HashSet as Set
 import Control.Monad.State ( gets, modify' )
 import Control.Monad ( filterM )
 import Control.Lens ( over )

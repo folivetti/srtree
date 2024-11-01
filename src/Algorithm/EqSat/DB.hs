@@ -27,8 +27,9 @@ import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Ord (comparing)
 import Data.SRTree
-import Data.Set (Set)
-import qualified Data.Set as Set
+--import Data.Set (Set)
+import Data.HashSet (HashSet)
+import qualified Data.HashSet as Set
 import Data.String (IsString (..))
 
 import Debug.Trace
@@ -276,7 +277,7 @@ intersectAtoms var (a:atoms) root = do
 -- trie is the current trie of the pattern
 -- (i:ids) sequence of root : children of the atom to investigate
 -- NOTE: it must be Maybe Set to differentiate between empty set and no answer
-intersectTries :: ClassOrVar -> Map ClassOrVar EClassId -> IntTrie -> [ClassOrVar] -> Maybe (Set EClassId)
+intersectTries :: ClassOrVar -> Map ClassOrVar EClassId -> IntTrie -> [ClassOrVar] -> Maybe (HashSet EClassId)
 intersectTries var xs trie [] = Just Set.empty
 intersectTries var xs trie (i:ids) =
     case i of

@@ -68,6 +68,7 @@ library
     , filepath
     , fingertree
     , graphviz
+    , hashable
     , ieee
     , lens
     , massiv >=1.0.4.0 && <1.1
@@ -78,6 +79,7 @@ library
     , statistics
     , text
     , transformers
+    , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib
   default-language: Haskell2010
@@ -102,6 +104,7 @@ executable egraphGP
     , filepath
     , fingertree
     , graphviz
+    , hashable
     , ieee
     , lens
     , massiv >=1.0.4.0 && <1.1
@@ -114,6 +117,7 @@ executable egraphGP
     , statistics
     , text
     , transformers
+    , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib
   default-language: Haskell2010
@@ -137,6 +141,7 @@ executable eqsatrepr
     , filepath
     , fingertree
     , graphviz
+    , hashable
     , ieee
     , lens
     , massiv >=1.0.4.0 && <1.1
@@ -148,6 +153,7 @@ executable eqsatrepr
     , statistics
     , text
     , transformers
+    , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib
   default-language: Haskell2010
@@ -171,6 +177,7 @@ executable ieeexplore
     , filepath
     , fingertree
     , graphviz
+    , hashable
     , ieee
     , lens
     , massiv >=1.0.4.0 && <1.1
@@ -183,6 +190,7 @@ executable ieeexplore
     , statistics
     , text
     , transformers
+    , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib
   default-language: Haskell2010
@@ -206,6 +214,7 @@ executable srsimplify
     , filepath
     , fingertree
     , graphviz
+    , hashable
     , ieee
     , lens
     , massiv >=1.0.4.0 && <1.1
@@ -218,6 +227,7 @@ executable srsimplify
     , statistics
     , text
     , transformers
+    , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib
   default-language: Haskell2010
@@ -244,6 +254,7 @@ executable srtools
     , filepath
     , fingertree
     , graphviz
+    , hashable
     , ieee
     , lens
     , massiv >=1.0.4.0 && <1.1
@@ -257,6 +268,7 @@ executable srtools
     , statistics
     , text
     , transformers
+    , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib
   default-language: Haskell2010
@@ -282,6 +294,7 @@ executable tinygp
     , filepath
     , fingertree
     , graphviz
+    , hashable
     , ieee
     , lens
     , massiv >=1.0.4.0 && <1.1
@@ -294,6 +307,7 @@ executable tinygp
     , statistics
     , text
     , transformers
+    , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib
   default-language: Haskell2010
@@ -320,6 +334,7 @@ test-suite srtree-test
     , filepath
     , fingertree
     , graphviz
+    , hashable
     , ieee
     , lens
     , massiv >=1.0.4.0 && <1.1
@@ -331,6 +346,7 @@ test-suite srtree-test
     , statistics
     , text
     , transformers
+    , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib
   default-language: Haskell2010

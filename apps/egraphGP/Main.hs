@@ -28,7 +28,7 @@ import Data.SRTree.Print
 import Options.Applicative as Opt hiding (Const)
 import Random
 import System.Random
-import qualified Data.Set as Set
+import qualified Data.HashSet as Set
 import Data.List ( sort, maximumBy )
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
@@ -36,6 +36,7 @@ import Data.FingerTree ( FingerTree, Measured, ViewL(..), ViewR(..), (<|), (|>) 
 import qualified Data.FingerTree as FingerTree
 import Data.Function ( on )
 import qualified Data.Foldable as Foldable
+import qualified Data.IntMap as IntMap
 
 import Debug.Trace
 import Algorithm.EqSat (runEqSat)
@@ -173,12 +174,13 @@ egraphSearch alg x y terms nEvals maxSize = do
                                             Just c  -> pure (c, False)
 
        upd <- updateIfNothing ecN
-       when (not upd) $ (io . print) 1
-       when (False && upd)
-         do runEqSat myCost rewriteBasic2 5
+       when (upd)
+         do runEqSat myCost rewriteBasic2 1
             cleanDB
             pure ()
        if b then pure (min 300 $ radius+2) else pure (max 5 $ radius-1)
+  eclasses <- gets (IntMap.toList . _eClass)
+  -- forM_ eclasses $ \(_, v) -> (io.print) (Set.size (_eNodes v), Set.size (_parents v))
   paretoFront
   --ft <- gets (_fitRangeDB . _eDB)
   --io . print $ Foldable.toList ft
@@ -191,11 +193,13 @@ egraphSearch alg x y terms nEvals maxSize = do
 
     updateIfNothing ec = do
       mf <- getFitness ec
-      when (isNothing mf) do
-        t <- getBest ec
-        (f, p) <- fitnessFunRep x y t
-        insertFitness ec f p
-      pure $ if isNothing mf then True else False
+      case mf of
+        Nothing -> do
+          t <- getBest ec
+          (f, p) <- fitnessFunRep x y t
+          insertFitness ec f p
+          pure True
+        Just _ -> pure False
 
     getBestFitness = do
       bec <- (gets (eidOf . getGreatest . _fitRangeDB . _eDB) >>= canonical)

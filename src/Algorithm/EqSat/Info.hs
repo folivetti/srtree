@@ -24,13 +24,14 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.SRTree
 import Data.SRTree.Eval (evalFun, evalOp, PVector)
-import Data.Set (Set)
-import qualified Data.Set as Set
+import Data.HashSet (HashSet)
+import qualified Data.HashSet as Set
 import qualified Data.IntSet as IntSet
 import Algorithm.EqSat.Egraph
 import Data.AEq (AEq ((~==)))
 import Algorithm.EqSat.Queries
 import Data.Maybe
+import qualified Data.Set as TrueSet
 
 import Debug.Trace
 
@@ -93,7 +94,7 @@ calculateHeights =
      let nClasses = length classes
      forM_ classes (setHeight nClasses) -- set all heights to max possible height (number of e-classes)
      forM_ queue (setHeight 0)          -- set root e-classes height to zero
-     go queue (Set.fromList queue) 1    -- next height is 1
+     go queue (TrueSet.fromList queue) 1    -- next height is 1
   where
     setHeight x eId' =
       do eId <- canonical eId'
@@ -108,14 +109,18 @@ calculateHeights =
 
     getChildrenEC :: Monad m => EClassId -> EGraphST m [EClassId]
     getChildrenEC ec' = do ec <- canonical ec'
-                           gets (concatMap childrenOf . _eNodes . (IntMap.! ec) . _eClass)
+                           gets (concatMap childrenOf' . _eNodes . (IntMap.! ec) . _eClass)
+
+    childrenOf' (_, -1, -1, _) = []
+    childrenOf' (_, e1, -1, _) = [e1]
+    childrenOf' (_, e1, e2, _) = [e1, e2]
 
     go [] _    _ = pure ()
     go qs tabu h =
-      do childrenOf <- (Set.\\ tabu) . Set.fromList . concat <$> forM qs getChildrenEC -- rerieve all unvisited children
-         let childrenL = Set.toList childrenOf
+      do childrenOf <- (TrueSet.\\ tabu) . TrueSet.fromList . concat <$> forM qs getChildrenEC -- rerieve all unvisited children
+         let childrenL = TrueSet.toList childrenOf
          forM_ childrenL (setMinHeight h) -- set the height of the children as the minimum between current and h
-         go childrenL (Set.union tabu childrenOf) (h+1) -- move one breadth search style
+         go childrenL (TrueSet.union tabu childrenOf) (h+1) -- move one breadth search style
 
 -- | calculates the cost of a node
 calculateCost :: Monad m => CostFun -> SRTree EClassId -> EGraphST m Cost

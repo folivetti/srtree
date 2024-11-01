@@ -29,8 +29,8 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (mapMaybe)
 import Data.SRTree
-import Data.Set (Set)
-import qualified Data.Set as Set
+import Data.HashSet (HashSet)
+import qualified Data.HashSet as Set
 import Control.Monad ( zipWithM )
 
 import Debug.Trace
@@ -93,6 +93,7 @@ recalculateBest costFun eid =
             let currentCost = m Map.!? eid
                 minCost     = minimumBy' (compare `on` fst)  -- get the minimum available cost of the nodes of this class
                             $ mapMaybe (nodeCost m)
+                            $ map decodeEnode
                             $ Set.toList (_eNodes ecl)
             in case (currentCost, minCost) of -- replace the costs accordingly
                   (_, Nothing)         -> (b, m)
@@ -115,6 +116,7 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty
 
         go it sch = do eNodes   <- gets _eNodeToEClass
                        eClasses <- gets _eClass
+                       --createDB
                        --db       <- gets (_patDB . _eDB) -- createDB -- creates the DB
 
                        -- step 1: match the rules
