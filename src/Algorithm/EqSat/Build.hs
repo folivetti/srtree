@@ -32,10 +32,9 @@ import qualified Data.HashSet as Set
 import Control.Monad.State.Strict
 import Data.SRTree.Recursion (cataM)
 import Algorithm.EqSat.Info
-import Data.IntervalMap.FingerTree ( IntervalMap )
-import qualified Data.IntervalMap.FingerTree as IMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe
+import Data.Sequence (Seq(..), (><))
 
 import Debug.Trace (trace, traceShow)
 
@@ -174,15 +173,21 @@ merge costFun c1 c2 =
           if isNothing fitLed
              then modify' $ over (eDB . unevaluated) (IntSet.delete led . IntSet.delete ledO)
              else modify' $ over (eDB . fitRangeDB) (removeRange led (fromJust fitLed) . removeRange ledO (fromJust fitLed))
+                          . over (eDB . sizeFitDB) (IntMap.adjust (removeRange ledO (fromJust fitLed) . removeRange led (fromJust fitLed)) szLed)
           modify' $ over (eDB . fitRangeDB) (insertRange led (fromJust fitNew))
+                  . over (eDB . sizeFitDB) (IntMap.adjust (insertRange led (fromJust fitNew)) szNew . IntMap.insertWith (><) szNew Empty)
         if isNothing fitSub
            then modify' $ over (eDB . unevaluated) (IntSet.delete sub . IntSet.delete subO)
            else modify' $ over (eDB . fitRangeDB) (removeRange sub (fromJust fitSub) . removeRange subO (fromJust fitSub))
+                        . over (eDB . sizeFitDB) (IntMap.adjust (removeRange subO (fromJust fitSub) . removeRange sub (fromJust fitSub)) szSub)
        else modify' $ over (eDB . unevaluated) (IntSet.insert led . IntSet.delete ledO . IntSet.delete sub . IntSet.delete subO)
       where
         fitNew = (_fitness . _info) newC
         fitLed = (_fitness . _info) ledC
         fitSub = (_fitness . _info) subC
+        szNew  = (_size . _info) newC
+        szLed  = (_size . _info) ledC
+        szSub  = (_size . _info) subC
 
 -- | modify an e-class, e.g., add constant e-node and prune non-leaves
 modifyEClass :: Monad m => CostFun -> EClassId -> EGraphST m EClassId

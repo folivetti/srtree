@@ -45,7 +45,6 @@ dependencies:
 - ieee
 - lens 
 - exceptions 
-- fingertree
 - hashable
 
 library:

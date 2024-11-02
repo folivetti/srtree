@@ -32,6 +32,7 @@ import Data.AEq (AEq ((~==)))
 import Algorithm.EqSat.Queries
 import Data.Maybe
 import qualified Data.Set as TrueSet
+import Data.Sequence (Seq(..), (><))
 
 import Debug.Trace
 
@@ -158,8 +159,10 @@ insertFitness eId fit params = do
   let oldFit  = _fitness . _info $ ec
       newInfo = (_info ec){_fitness = Just fit, _theta = Just params}
       newEc   = ec{_info = newInfo}
+      sz = _size newInfo
   modify' $ over eClass (IntMap.insert eId newEc)
   if (isNothing oldFit)
     then modify' $ over (eDB . unevaluated) (IntSet.delete eId)
                  . over (eDB . fitRangeDB) (insertRange eId fit)
+                 . over (eDB . sizeFitDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith (><) sz Empty)
     else modify' $ over (eDB . fitRangeDB) (insertRange eId fit . removeRange eId (fromJust oldFit))

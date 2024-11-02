@@ -1,4 +1,5 @@
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE BangPatterns #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Algorithm.EqSat.Queries
@@ -23,8 +24,7 @@ import Control.Monad.State ( gets, modify' )
 import Control.Monad ( filterM )
 import Control.Lens ( over )
 import Data.Maybe
-import qualified Data.FingerTree as FingerTree
-import Data.FingerTree ( FingerTree, Measured, ViewL(..), ViewR(..), (<|), (|>), viewr, viewl )
+import Data.Sequence ( Seq(..) )
 
 import Debug.Trace
 
@@ -57,20 +57,36 @@ findRootClasses = gets (Prelude.map fst . Prelude.filter isParent . IntMap.toLis
 
 -- | returns the e-class id with the best fitness that
 -- is true to a predicate
-geTopECLassThat :: Monad m => Int -> (EClass -> Bool) -> EGraphST m [EClassId]
-geTopECLassThat n p = do
+getTopECLassThat :: Monad m => Int -> (EClass -> Bool) -> EGraphST m [EClassId]
+getTopECLassThat n p = do
   gets (_fitRangeDB . _eDB)
-    >>= go n
+    >>= go n []
   where
-    go :: Monad m => Int -> RangeTree Double -> EGraphST m [EClassId]
-    go 0 rt = pure []
-    go m rt = case viewr rt of
-                EmptyR            -> pure []
-                t :> y            -> do let x = eidOf y
-                                        ecId <- canonical x
-                                        ec <- gets ((IntMap.! ecId) . _eClass)
-                                        if (isInfinite . fromJust . _fitness . _info $ ec)
-                                          then pure []
-                                          else if p ec
-                                                then (x:) <$> go (m-1) t
-                                                else go m t
+    go :: Monad m => Int -> [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
+    go 0 bests rt = pure bests
+    go m bests rt = case rt of
+                       Empty   -> pure bests
+                       t :|> y -> do let x = snd y
+                                     ecId <- canonical x
+                                     ec <- gets ((IntMap.! ecId) . _eClass)
+                                     if (isInfinite . fromJust . _fitness . _info $ ec)
+                                       then pure bests
+                                       else if p ec
+                                              then go (m-1) (x:bests) t
+                                              else go m bests t
+getTopECLassWithSize :: Monad m => Int -> Int -> EGraphST m [EClassId]
+getTopECLassWithSize sz n = do
+  gets ((IntMap.!? sz) . _sizeFitDB . _eDB)
+    >>= go n []
+  where
+    go :: Monad m => Int -> [EClassId] -> Maybe (RangeTree Double) -> EGraphST m [EClassId]
+    go _ bests Nothing   = pure []
+    go 0 bests (Just rt) = pure bests
+    go m bests (Just rt) = case rt of
+                             Empty   -> pure bests
+                             t :|> y -> do let x = snd y
+                                           ecId <- canonical x
+                                           ec <- gets ((IntMap.! ecId) . _eClass)
+                                           if (isInfinite . fromJust . _fitness . _info $ ec)
+                                             then pure bests
+                                             else go (m-1) (x:bests) (Just t)

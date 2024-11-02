@@ -32,8 +32,7 @@ import qualified Data.HashSet as Set
 import Data.List ( sort, maximumBy )
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
-import Data.FingerTree ( FingerTree, Measured, ViewL(..), ViewR(..), (<|), (|>) )
-import qualified Data.FingerTree as FingerTree
+import qualified Data.Sequence as FingerTree
 import Data.Function ( on )
 import qualified Data.Foldable as Foldable
 import qualified Data.IntMap as IntMap
@@ -163,6 +162,7 @@ egraphSearch alg x y terms nEvals maxSize = do
 
                       if isNothing curFitPareto
                         then pure (ecPareto, False)
+                      --if False then pure (0, False)
                         else do ecBest     <- combineFrom ecsBest
                                 curFitBest <- getFitness ecBest
                                 if isNothing curFitBest
@@ -178,7 +178,7 @@ egraphSearch alg x y terms nEvals maxSize = do
          do runEqSat myCost rewriteBasic2 1
             cleanDB
             pure ()
-       if b then pure (min 300 $ radius+2) else pure (max 5 $ radius-1)
+       if b then pure (min 20 $ radius+2) else pure (max 2 $ radius-1)
   eclasses <- gets (IntMap.toList . _eClass)
   -- forM_ eclasses $ \(_, v) -> (io.print) (Set.size (_eNodes v), Set.size (_parents v))
   paretoFront
@@ -202,7 +202,7 @@ egraphSearch alg x y terms nEvals maxSize = do
         Just _ -> pure False
 
     getBestFitness = do
-      bec <- (gets (eidOf . getGreatest . _fitRangeDB . _eDB) >>= canonical)
+      bec <- (gets (snd . getGreatest . _fitRangeDB . _eDB) >>= canonical)
       gets (_fitness . _info . (IM.! bec) . _eClass)
 
     evalRndSubTree :: RndEGraph (Maybe EClassId)
@@ -230,10 +230,14 @@ egraphSearch alg x y terms nEvals maxSize = do
                               then add myCost (Bin op e1 e2) >>= canonical
                               else add myCost (Bin op e2 e1) >>= canonical
 
-    getParetoEcsUpTo n = concat <$> (forM [1..maxSize] $ \i -> getBestEcs (isSizeOf (==i)) n)
+    getParetoEcsUpTo n = concat <$> (forM [1..maxSize] $ \i -> getBestEcsOfSize  i n)
+
+    getBestEcsOfSize i n = do
+      ecs <- getTopECLassWithSize i n
+      Prelude.mapM canonical (Prelude.take n ecs)
 
     getBestEcs p n = do
-      ecs  <- geTopECLassThat n p
+      ecs  <- getTopECLassThat n p
       --fits <- Prelude.mapM getFitness ecs
       --let sorted = sort $ Prelude.zip (Prelude.map (fmap negate) fits) ecs
       Prelude.mapM canonical (Prelude.take n ecs)
@@ -280,10 +284,18 @@ egraphSearch alg x y terms nEvals maxSize = do
         where powabs l r  = Fix (Bin PowerAbs l r)
 
     getBestEclassThat p  =
-        do ecIds <- geTopECLassThat 1 p -- isValidFitness
+        do ecIds <- getTopECLassThat 1 p -- isValidFitness
            --bestFit <- foldM (\acc -> getFitness >=> (pure . max acc . fromJust)) ((-1.0)/0.0) ecIds
            --ecIds'  <- getEClassesThat (fitnessIs (== Just bestFit))
            Prelude.mapM canonical $ Prelude.take 1 ecIds
+
+    getBestExprWithSize n =
+        do ec <- getTopECLassWithSize n 1
+           if (not (null ec))
+            then do
+              bestFit <- getFitness $ head ec
+              (:[]) . (,bestFit) <$> getBest (head ec)
+            else pure []
 
     getBestExprThat p  =
         do ec <- getBestEclassThat p
@@ -305,7 +317,7 @@ egraphSearch alg x y terms nEvals maxSize = do
         go n f
           | n > maxSize = pure ()
           | otherwise   = do
-              ecList <- getBestExprThat (isSizeOf (==n))
+              ecList <- getBestExprWithSize n
               if (not (null ecList))
                  then do let (best, mf) = head ecList
                              fit = fromJust mf

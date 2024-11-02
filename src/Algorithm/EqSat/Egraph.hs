@@ -31,8 +31,8 @@ import Data.HashSet (HashSet)
 import qualified Data.HashSet as Set
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
-import Data.FingerTree ( FingerTree, Measured, ViewL(..), ViewR(..), (<|), (|>), measure )
-import qualified Data.FingerTree as FingerTree
+import Data.Sequence ( Seq(..), (><) )
+import qualified Data.Sequence as FingerTree
 import Data.Foldable ( toList )
 import Data.SRTree
 import Data.SRTree.Eval
@@ -48,28 +48,10 @@ type EGraphST m a = StateT EGraph m a
 type Cost         = Int
 type CostFun      = SRTree Cost -> Cost
 
-data Range a = EmptyRange | Range EClassId a a
-data Singl a = Singl EClassId a deriving Show
-
-eidOf (Singl eid _) = eid
-valOf (Singl _ v)   = v
-high (Range _ _ h) = h
-low (Range _ l _) = l
-
 instance Hashable ENode where
   hashWithSalt n enode = hashWithSalt n (encodeEnode enode)
 
-instance Ord a => Semigroup (Range a) where
-  EmptyRange <> rng = rng
-  rng <> EmptyRange = rng
-  (Range i a b) <> (Range j c d) = Range j (min a c) (max b d)
-instance Ord a => Monoid (Range a) where
-  mempty = EmptyRange
-
-instance Ord a => Measured (Range a) (Singl a) where
-  measure (Singl eid x) = Range eid x x
-
-type RangeTree a = FingerTree (Range a) (Singl a)
+type RangeTree a = Seq (a, EClassId)
 
 -- | this assumes up to 999 variables and params
 encodeEnode :: ENode -> ENodeEnc
@@ -96,70 +78,82 @@ decodeEnode (opCode, arg1, arg2, arg3)
 {-# INLINE decodeEnode #-}
 
 insertRange :: (Ord a, Show a) => EClassId -> a -> RangeTree a -> RangeTree a
+insertRange eid x Empty                      = FingerTree.singleton (x, eid)
+insertRange eid x (y :<| _xs) | (x, eid) < y = (x, eid) :<| y :<| _xs
+insertRange eid x (_xs :|> y) | (x, eid) > y = _xs :|> y :|> (x, eid)
 insertRange eid x rt = go rt
   where
-    go root
-      | theSame (measure root)    = root
-      | toTheLeft (measure root)  = (Singl eid x) <| root
-      | toTheRight (measure root) = root |> (Singl eid x)
-      | otherwise = let (l, r) = FingerTree.split greater root
-                    in l <> (go r)
-
-    greater EmptyRange       = False
-    greater (Range eid' a b) = x < b
-
-    toTheLeft EmptyRange = True
-    toTheLeft (Range eid' lo hi) = (x < lo) || (x == lo && eid < eid')
-
-    toTheRight EmptyRange = True
-    toTheRight (Range eid' lo hi) = (x > hi) || (x == hi && eid > eid')
-
-    theSame EmptyRange = False
-    theSame (Range eid' _ _) = eid' == eid
+    entry   = (x, eid)
+    go root = case FingerTree.splitAt (n `div` 2) root of
+                (Empty, Empty)    -> FingerTree.singleton entry
+                (Empty, z :<| zs) | entry < z -> entry :<| z :<| zs
+                                  | otherwise -> z :<| (go zs)
+                (ys :|> y, Empty) | entry > y -> ys :|> y :|> entry
+                                  | otherwise -> (go ys) :|> y
+                (ys :|> y, z :<| zs)
+                     | entry > y && entry < z -> (ys :|> y :|> entry) >< (z :<| zs)
+                     | entry > z              -> (ys :|> y) >< go (z :<| zs)
+                     | entry < y              -> go (ys :|> y) >< (z :<| zs)
+                     | otherwise              -> root
+      where
+        n = FingerTree.length root
 
 removeRange :: (Ord a, Show a) => EClassId -> a -> RangeTree a -> RangeTree a
+removeRange eid x Empty                  = Empty
+removeRange eid x (y :<| _xs) | (x, eid) < y = (y :<| _xs)
+removeRange eid x (_xs :|> y) | (x, eid) > y = (_xs :|> y)
 removeRange eid x rt = go rt
   where
-    go root
-      | theSame (measure root)    = FingerTree.empty
-      | toTheLeft (measure root)  = (Singl eid x) <| root
-      | toTheRight (measure root) = root |> (Singl eid x)
-      | otherwise = let (l, r) = FingerTree.split greater root
-                    in l <> (go r)
+    entry   = (x, eid)
+    go root = case FingerTree.splitAt (n `div` 2) root of
+                (Empty, Empty)    -> root
+                (Empty, z :<| zs)
+                            | entry < z  -> z :<| zs
+                            | entry == z -> zs
+                            | otherwise  -> z :<| (go zs)
+                (ys :|> y, Empty)
+                            | entry > y  -> ys :|> y
+                            | entry == y -> ys
+                            | otherwise  -> (go ys) :|> y
+                (ys :|> y, z :<| zs)
+                     | entry > y && entry < z -> root
+                     | entry > z              -> (ys :|> y) >< go (z :<| zs)
+                     | entry < y              -> go (ys :|> y) >< (z :<| zs)
+                     | otherwise              -> root
 
-    greater EmptyRange       = False
-    greater (Range eid' a b) = x < b
+      where
+        n = FingerTree.length root
 
-    toTheLeft EmptyRange = True
-    toTheLeft (Range eid' lo hi) = (x < lo) || (x == lo && eid < eid')
-
-    toTheRight EmptyRange = True
-    toTheRight (Range eid' lo hi) = (x > hi) || (x == hi && eid > eid')
-
-    theSame EmptyRange = False
-    theSame (Range eid' _ _) = eid' == eid
 
 -- TODO: check this \/
 getWithinRange :: Ord a => a -> a -> RangeTree a -> [EClassId]
-getWithinRange lb ub rt = map eidOf $ toList eids
+getWithinRange lb ub rt = map snd . toList $ go rt
   where
-    (l, r)    = FingerTree.split greater rt
-    (eids, _) = FingerTree.split smaller r
+    go Empty = Empty
+    go root = case FingerTree.splitAt (n `div` 2) root of
+                (Empty, Empty)    -> Empty
+                (ys :|> y, Empty)
+                     | fst y < lb    -> Empty
+                     | otherwise -> go (ys :|> y)
+                (Empty, z :<| zs)
+                            | fst z > ub    -> Empty
+                            | otherwise -> go (z :<| zs)
+                (ys :|> y, z :<| zs)
+                     | fst y < lb -> go (z :<| zs)
+                     | fst z > ub -> go (ys :|> y)
+                     | otherwise -> go (ys :|> y) >< go (z :<| zs)
+      where
+        n = FingerTree.length root
 
-    greater EmptyRange = False
-    greater (Range _ a b) = lb > b
 
-    smaller EmptyRange = False
-    smaller (Range _ a b) = ub <= a
-
-getSmallest :: Ord a => RangeTree a -> Singl a
-getSmallest rt = case FingerTree.viewl rt of
-                     EmptyL -> error "empty finger"
-                     x :< t -> x
-getGreatest :: Ord a => RangeTree a -> Singl a
-getGreatest rt = case FingerTree.viewr rt of
-                     EmptyR -> error "empty finger"
-                     t :> x -> x
+getSmallest :: Ord a => RangeTree a -> (a, EClassId)
+getSmallest rt = case rt of
+                     Empty -> error "empty finger"
+                     x :<| t -> x
+getGreatest :: Ord a => RangeTree a -> (a, EClassId)
+getGreatest rt = case rt of
+                     Empty -> error "empty finger"
+                     t :|> x -> x
 
 
 data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId   -- maps an e-class id to its canonical form
@@ -173,6 +167,7 @@ data EGraphDB = EDB { _worklist      :: HashSet (EClassId, ENode)      -- e-node
                     , _patDB         :: DB                         -- database of patterns
                     , _fitRangeDB    :: RangeTree Double           -- database of valid fitness
                     , _sizeDB        :: IntMap IntSet              -- database of model sizes
+                    , _sizeFitDB     :: IntMap (RangeTree Double)  -- hacky! Size x Fitness DB
                     , _unevaluated   :: IntSet                     -- set of not-evaluated e-classes
                     , _nextId        :: Int                        -- next available id
                     } deriving Show
@@ -228,7 +223,7 @@ emptyGraph = EGraph IntMap.empty Map.empty IntMap.empty emptyDB
 
 -- | returns an empty e-graph DB
 emptyDB :: EGraphDB
-emptyDB = EDB Set.empty Set.empty Map.empty FingerTree.empty IntMap.empty IntSet.empty 0
+emptyDB = EDB Set.empty Set.empty Map.empty FingerTree.empty IntMap.empty IntMap.empty IntSet.empty 0
 
 -- | Creates a new e-class from an e-class id, a new e-node,
 -- and the info of this e-class 
