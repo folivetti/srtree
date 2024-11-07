@@ -24,6 +24,7 @@ module Data.SRTree.Eval
         , invleft
         , replicateAs
         , SRVector, PVector, SRMatrix
+        , compMode
         )
         where
 
@@ -31,14 +32,16 @@ import Data.Massiv.Array
 import qualified Data.Massiv.Array as M
 import Data.SRTree.Internal
 import Data.SRTree.Recursion (Fix (..), cata)
-import qualified Data.Vector as V
 
 -- | Vector of target values 
 type SRVector = M.Array D Ix1 Double
 -- | Vector of parameter values. Needs to be strict to be readily accesible.
 type PVector  = M.Array S Ix1 Double
 -- | Matrix of features values 
-type SRMatrix = M.Array S Ix2 Double 
+type SRMatrix = M.Array S Ix2 Double
+
+compMode :: M.Comp
+compMode = M.Par'
 
 -- Improve quality of life with Num and Floating instances for our matrices 
 instance Index ix => Num (M.Array D ix Double) where

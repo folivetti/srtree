@@ -23,7 +23,7 @@ import Data.ByteString.Lazy qualified as BS
 import Data.List (delete, find, intercalate)
 import Data.Massiv.Array
   ( Array,
-    Comp (Seq),
+    Comp (Seq, Par),
     Ix2 ((:.)),
     S (..),
     Sz (Sz1),
@@ -31,14 +31,14 @@ import Data.Massiv.Array
   )
 import Data.Massiv.Array qualified as M
 import Data.Maybe (fromJust)
-import Data.SRTree.Eval (PVector, SRMatrix)
+import Data.SRTree.Eval (PVector, SRMatrix, compMode)
 import Data.Vector qualified as V
 import System.FilePath (takeExtension)
 import Text.Read (readMaybe)
 
 -- | Loads a list of list of bytestrings to a matrix of double
 loadMtx :: [[B.ByteString]] -> Array S Ix2 Double
-loadMtx = M.fromLists' Seq . map (map (read . B.unpack))
+loadMtx = M.fromLists' compMode . map (map (read . B.unpack))
 {-# INLINE loadMtx #-}
 
 -- | Returns true if the extension is .gz

@@ -30,7 +30,7 @@ randomFrom funs = do n <- randomRange (0, length funs - 1)
 {-# INLINE randomFrom #-}
 
 randomVec :: Int -> Rng PVector
-randomVec n = MA.fromList Seq <$> replicateM n (randomRange (-3.0, 3.0))
+randomVec n = MA.fromList compMode <$> replicateM n (randomRange (-3.0, 3.0))
 
 randomTree :: Int -> Int -> Int -> Rng (Fix SRTree) -> Rng (SRTree ()) -> Bool -> Rng (Fix SRTree)
 randomTree minDepth maxDepth maxSize genTerm genNonTerm grow 

@@ -30,22 +30,20 @@ dependencies:
 - vector >= 0.12 && < 0.14
 - dlist >= 1.0 && < 1.1
 - massiv >= 1.0.4.0 && < 1.1
-- filepath 
-- split 
-- zlib 
+- filepath >= 1.4.0.0 && < 1.6
+- split >= 0.2.5 && < 0.3
+- zlib >= 0.6.3 && < 0.8
 - bytestring >= 0.11 && < 0.12
-- nlopt-haskell 
-- statistics 
-- attoparsec
-- attoparsec-expr
-- transformers
-- deriving-compat
-- text
-- graphviz
-- ieee
-- lens 
-- exceptions 
-- hashable
+- nlopt-haskell >= 0.1.3.0 && < 0.2 
+- statistics >= 0.16.2.1 && < 0.17  
+- attoparsec >= 0.14.4 && < 0.15
+- attoparsec-expr >= 0.1.1.2 && < 0.2 
+- transformers >= 0.6.1.0 && < 0.7
+- ieee754 >= 0.8.0 && < 0.9
+- lens >= 5.2.3 && < 5.4
+- exceptions >= 0.10.7 && < 0.11 
+- hashable >= 1.4.4.0 && < 1.6
+- list-shuffle >= 1.0.0.1 && < 1.1
 
 library:
   source-dirs: src
@@ -76,9 +74,8 @@ executables:
     - -optc-O3
     dependencies:
     - srtree
-    - bytestring >= 0.11 && < 0.12
     - optparse-applicative >= 0.17 && < 0.19
-    - normaldistribution
+    - normaldistribution >= 1.1.0.3 && < 1.2 
   eqsatrepr:
     main:                Main.hs
     source-dirs:         apps/eqsatrepr
@@ -110,10 +107,9 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     - -O2
-    - -optc-O3
+    #- -optc-O3
     dependencies:
     - srtree
-    - bytestring >= 0.11 && < 0.12
     - optparse-applicative >= 0.17 && < 0.19
   ieeexplore:
     main:                Main.hs
@@ -126,7 +122,6 @@ executables:
     - -optc-O3
     dependencies:
     - srtree
-    - bytestring >= 0.11 && < 0.12
     - optparse-applicative >= 0.17 && < 0.19
 
 tests:

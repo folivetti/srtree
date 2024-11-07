@@ -13,6 +13,7 @@ import Algorithm.SRTree.Opt ( estimateSErr )
 import Algorithm.SRTree.Likelihoods ( Distribution (..) )
 import Algorithm.SRTree.ConfidenceIntervals ( printCI, BasicStats(_stdErr, _corr), CI )
 import qualified Data.SRTree.Print as P
+import Data.SRTree.Eval ( compMode )
 
 import Args ( Args(outfile, alpha,msErr,dist,niter) )
 import Report
@@ -42,7 +43,7 @@ processTree args seed dset t ix = (basic, sseOrig, sseOpt, info, cis)
   where
     (tree, theta0)  = floatConstsToParam t
     mSErr'  = case dist args of
-                Gaussian -> estimateSErr Gaussian (msErr args)  (_xTr dset) (_yTr dset) (A.fromList A.Seq theta0) tree (niter args)
+                Gaussian -> estimateSErr Gaussian (msErr args)  (_xTr dset) (_yTr dset) (A.fromList compMode theta0) tree (niter args)
                 _        -> Nothing
     args'   = args{ msErr = mSErr' }
     basic   = getBasicStats args' seed dset tree theta0 ix

@@ -18,7 +18,7 @@ import Algorithm.SRTree.NonlinearOpt
 import Data.Bifunctor (bimap, second)
 import Data.Massiv.Array
 import Data.SRTree (Fix (..), SRTree (..), floatConstsToParam, relabelParams)
-import Data.SRTree.Eval (evalTree)
+import Data.SRTree.Eval (evalTree, compMode)
 import qualified Data.Vector.Storable as VS
 
 -- | minimizes the negative log-likelihood of the expression
@@ -26,13 +26,13 @@ minimizeNLL :: Distribution -> Maybe Double -> Int -> SRMatrix -> PVector -> Fix
 minimizeNLL dist msErr niter xss ys tree t0
   | niter == 0 = (t0, f)
   | n == 0     = (t0, f)
-  | otherwise  = (fromStorableVector Seq t_opt, f)
+  | otherwise  = (fromStorableVector compMode t_opt, f)
   where
     tree'      = relabelParams tree -- $ fst $ floatConstsToParam tree
     t0'        = toStorableVector t0
     (Sz n)     = size t0
     (Sz m)     = size ys
-    funAndGrad = second (toStorableVector . computeAs S) . gradNLL dist msErr xss ys tree' . fromStorableVector Seq
+    funAndGrad = second (toStorableVector . computeAs S) . gradNLL dist msErr xss ys tree' . fromStorableVector compMode
     (f, _)     = gradNLL dist msErr xss ys tree t0 -- if there's no parameter or no iterations
 
     algorithm  = LBFGS funAndGrad Nothing
@@ -47,12 +47,12 @@ minimizeNLLNonUnique :: Distribution -> Maybe Double -> Int -> SRMatrix -> PVect
 minimizeNLLNonUnique dist msErr niter xss ys tree t0
   | niter == 0 = (t0, f)
   | n == 0     = (t0, f)
-  | otherwise  = (fromStorableVector Seq t_opt, f)
+  | otherwise  = (fromStorableVector compMode t_opt, f)
   where
     t0'        = toStorableVector t0
     (Sz n)     = size t0
     (Sz m)     = size ys
-    funAndGrad = second (toStorableVector . computeAs S) . gradNLLNonUnique dist msErr xss ys tree . fromStorableVector Seq
+    funAndGrad = second (toStorableVector . computeAs S) . gradNLLNonUnique dist msErr xss ys tree . fromStorableVector compMode
     (f, _)     = gradNLLNonUnique dist msErr xss ys tree t0 -- if there's no parameter or no iterations
 
     algorithm  = LBFGS funAndGrad Nothing
@@ -68,13 +68,13 @@ minimizeNLLWithFixedParam dist msErr niter xss ys tree ix t0
   | niter == 0 = t0
   | n == 0     = t0
   | n > m      = t0
-  | otherwise  = fromStorableVector Seq t_opt
+  | otherwise  = fromStorableVector compMode t_opt
   where
     t0'        = toStorableVector t0
     (Sz n)     = size t0
     (Sz m)     = size ys
     setTo0     = (VS.// [(ix, 0.0)])
-    funAndGrad = second (setTo0 . toStorableVector . computeAs S). gradNLLNonUnique dist msErr xss ys tree . fromStorableVector Seq
+    funAndGrad = second (setTo0 . toStorableVector . computeAs S). gradNLLNonUnique dist msErr xss ys tree . fromStorableVector compMode
     (f, _)     = gradNLLNonUnique dist msErr xss ys tree t0 -- if there's no parameter or no iterations
 
     algorithm  = LBFGS funAndGrad Nothing

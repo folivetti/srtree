@@ -1,5 +1,13 @@
 # Changelog for srtree
 
+## 2.0.0.0 
+
+- Complete refactoring of the library
+- Integration of other tools such as: srtree-opt, srtree-tools, srsimplify
+- Implementation of Equality Saturation and support to e-graph 
+- Using Massiv for performance 
+- Using NLOpt as the optimization library 
+
 ## 1.1.0.0
 
 - Reorganization of modules

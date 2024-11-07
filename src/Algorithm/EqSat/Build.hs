@@ -41,7 +41,12 @@ import Debug.Trace (trace, traceShow)
 -- | adds a new or existing e-node (merging if necessary)
 add :: Monad m => CostFun -> ENode -> EGraphST m EClassId
 add costFun enode =
-  do enode'   <- canonize enode                                             -- canonize e-node
+  do enode''   <- canonize enode                                             -- canonize e-node
+     constEnode <- calculateConsts enode''
+     let enode' = case constEnode of
+                     ConstVal x -> Const x
+                     ParamIx  x -> Param x
+                     _          -> enode''
      maybeEid <- gets ((Map.!? enode') . _eNodeToEClass)                -- check if canonical e-node exists
      case maybeEid of
        Just eid -> pure eid
@@ -56,7 +61,7 @@ add costFun enode =
          h    <- getChildrenMinHeight enode'
          let newClass = createEClass curId enode' info h              -- create e-class
          modify' $ over eClass (IntMap.insert curId newClass)              -- insert new e-class into e-graph
-         modifyEClass costFun curId                                 -- simplify eclass if it evaluates to a number
+         --modifyEClass costFun curId                                 -- simplify eclass if it evaluates to a number
 
          -- update database
          addToDB enode' curId                                       -- add new node to db
@@ -204,6 +209,19 @@ modifyEClass costFun ecId =
          case maybeEid of
            Nothing   -> pure ecId
            Just eid' -> merge costFun eid' ecId
+           {-
+       ParamIx x -> do
+         let en = Param x
+         c <- calculateCost costFun en
+         ens <- gets (_eNodes . (IntMap.! ecId) . _eClass)
+         let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
+         maybeEid <- gets ((Map.!? en) . _eNodeToEClass)
+         modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.insert (encodeEnode en) (_eNodes ec), _info = infoEc})
+         -- TODO: what happen to the orphans?
+         case maybeEid of
+           Nothing   -> pure ecId
+           Just eid' -> trace "merge" $ merge costFun eid' ecId
+           -}
        _ -> pure ecId
 
   where

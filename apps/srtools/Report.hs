@@ -131,8 +131,8 @@ getBasicStats args seed dset tree theta0 ix
   where
     -- (tree', theta0) = floatConstsToParam tree
     thetas          = if restart args
-                        then A.fromList A.Seq $ take nParams (normals seed)
-                        else A.fromList A.Seq theta0
+                        then A.fromList compMode $ take nParams (normals seed)
+                        else A.fromList compMode theta0
     t               = fst $ minimizeNLL (dist args) (msErr args) (niter args) (_xTr dset) (_yTr dset) tree thetas
     tOpt            = paramsToConst (A.toList t) tree
     nNodes          = countNodes tOpt :: Int
@@ -144,15 +144,15 @@ getSSE :: Datasets -> Fix SRTree -> SSE
 getSSE dset tree = SSE tr val te
   where
     (t, th) = floatConstsToParam tree
-    tr  = sse (_xTr dset) (_yTr dset) t (A.fromList A.Seq th)
+    tr  = sse (_xTr dset) (_yTr dset) t (A.fromList compMode th)
     val = case (_xVal dset, _yVal dset) of
             (Nothing, _)           -> 0.0
             (_, Nothing)           -> 0.0
-            (Just xVal, Just yVal) -> sse xVal yVal t (A.fromList A.Seq th)
+            (Just xVal, Just yVal) -> sse xVal yVal t (A.fromList compMode th)
     te  = case (_xTe dset, _yTe dset) of
             (Nothing, _)           -> 0.0
             (_, Nothing)           -> 0.0
-            (Just xTe, Just yTe)   -> sse xTe yTe t (A.fromList A.Seq th)
+            (Just xTe, Just yTe)   -> sse xTe yTe t (A.fromList compMode th)
 
 getInfo :: Args -> Datasets -> Fix SRTree -> Fix SRTree -> Info
 getInfo args dset tree treeVal =
@@ -182,14 +182,14 @@ getInfo args dset tree treeVal =
                          (_, Nothing)     -> (xTr, yTr)
                          (Just a, Just b) -> (a, b)
     (tOpt, thetaOpt) = floatConstsToParam tree
-    thetaOpt'        = A.fromList A.Seq thetaOpt
+    thetaOpt'        = A.fromList compMode thetaOpt
 
     (tOptVal, thetaOptVal) = floatConstsToParam treeVal
-    thetaOptVal'           = A.fromList A.Seq thetaOptVal
+    thetaOptVal'           = A.fromList compMode thetaOptVal
 
     dist'            = dist args
     msErr'           = msErr args
-    nllTr            = nll dist' msErr' (_xTr dset) (_yTr dset) tOpt (A.fromList A.Seq thetaOpt)
+    nllTr            = nll dist' msErr' (_xTr dset) (_yTr dset) tOpt (A.fromList compMode thetaOpt)
     bicVal           = case (_xVal dset, _yVal dset) of
                          (Nothing, _) -> 0.0
                          (_, Nothing) -> 0.0
@@ -205,7 +205,7 @@ getInfo args dset tree treeVal =
     nllVal           = case (_xVal dset, _yVal dset) of
                          (Nothing, _) -> 0.0
                          (_, Nothing) -> 0.0
-                         _            -> nll dist' msErr' xVal yVal tOptVal (A.fromList A.Seq thetaOptVal)
+                         _            -> nll dist' msErr' xVal yVal tOptVal (A.fromList compMode thetaOptVal)
     mdlVal           = case (_xVal dset, _yVal dset) of
                          (Nothing, _) -> 0.0
                          (_, Nothing) -> 0.0
@@ -221,7 +221,7 @@ getInfo args dset tree treeVal =
     nllTe            = case (_xTe dset, _yTe dset) of
                          (Nothing, _)           -> 0.0
                          (_, Nothing)           -> 0.0
-                         (Just xTe, Just yTe) -> nll dist' msErr' xTe yTe tOpt (A.fromList A.Seq thetaOpt)
+                         (Just xTe, Just yTe) -> nll dist' msErr' xTe yTe tOpt (A.fromList compMode thetaOpt)
 
 getCI :: Args -> Datasets -> BasicInfo -> Double -> (BasicStats, [CI], [CI], [CI], [CI])
 getCI args dset basic alpha' = (stats', cis, pis_tr, pis_val, pis_te)
@@ -234,12 +234,12 @@ getCI args dset basic alpha' = (stats', cis, pis_tr, pis_val, pis_te)
     (xTr, yTr) = (_xTr dset, _yTr dset)
     dist'      = dist args
     msErr'     = msErr args
-    stats'     = getStatsFromModel dist' msErr' xTr yTr tree (A.fromList A.Seq theta)
-    profiles   = getAllProfiles (ptype args) dist' msErr' xTr yTr tree (A.fromList A.Seq theta) (_stdErr stats') estCIs alpha'
+    stats'     = getStatsFromModel dist' msErr' xTr yTr tree (A.fromList compMode theta)
+    profiles   = getAllProfiles (ptype args) dist' msErr' xTr yTr tree (A.fromList compMode theta) (_stdErr stats') estCIs alpha'
     method     = if useProfile args
                    then Profile stats' profiles
                    else Laplace stats'
-    predFun   = A.computeAs A.S . predict dist' tree (A.fromList A.Seq theta)
+    predFun   = A.computeAs A.S . predict dist' tree (A.fromList compMode theta)
 
     prof estPi th t =
                 let (thOpt, _) = minimizeNLLNonUnique dist' (Just 1) 100 xTr yTr t th
@@ -253,19 +253,19 @@ getCI args dset basic alpha' = (stats', cis, pis_tr, pis_val, pis_te)
                 in case fun of
                       Left th' -> trace "found better optima" $ prof estPi th' t
                       Right p  -> (_tau2theta p, _opt p)
-    jac xss   = forwardModeUniqueJac xss (A.fromList A.Seq theta) tree -- FIX
+    jac xss   = forwardModeUniqueJac xss (A.fromList compMode theta) tree -- FIX
 
-    estCIs    = paramCI (Laplace stats') n (A.fromList A.Seq theta) 0.001
-    cis       = paramCI method n (A.fromList A.Seq theta) alpha'
+    estCIs    = paramCI (Laplace stats') n (A.fromList compMode theta) 0.001
+    cis       = paramCI method n (A.fromList compMode theta) alpha'
 
-    estPIS_tr  = predictionCI (Laplace stats') dist' predFun jac prof xTr tree (A.fromList A.Seq theta) alpha' []
-    estPIS_val = predictionCI (Laplace stats') dist' predFun jac prof xTr tree (A.fromList A.Seq theta) alpha' []
-    estPIS_te  = predictionCI (Laplace stats') dist' predFun jac prof xTr tree (A.fromList A.Seq theta) alpha' []
+    estPIS_tr  = predictionCI (Laplace stats') dist' predFun jac prof xTr tree (A.fromList compMode theta) alpha' []
+    estPIS_val = predictionCI (Laplace stats') dist' predFun jac prof xTr tree (A.fromList compMode theta) alpha' []
+    estPIS_te  = predictionCI (Laplace stats') dist' predFun jac prof xTr tree (A.fromList compMode theta) alpha' []
 
-    pis_tr    = predictionCI method dist' predFun jac prof xTr tree (A.fromList A.Seq theta) alpha' estPIS_tr
+    pis_tr    = predictionCI method dist' predFun jac prof xTr tree (A.fromList compMode theta) alpha' estPIS_tr
     pis_val   = case (_xVal dset, _yVal dset) of
                   (Nothing, _)   -> []
-                  (Just xVal, _) -> predictionCI method dist' predFun jac prof xVal tree (A.fromList A.Seq theta) alpha' estPIS_val
+                  (Just xVal, _) -> predictionCI method dist' predFun jac prof xVal tree (A.fromList compMode theta) alpha' estPIS_val
     pis_te    = case (_xTe dset, _yTe dset) of
                   (Nothing, _)  -> []
-                  (Just xTe, _) -> predictionCI method dist' predFun jac prof xTe tree (A.fromList A.Seq theta) alpha' estPIS_te
+                  (Just xTe, _) -> predictionCI method dist' predFun jac prof xTe tree (A.fromList compMode theta) alpha' estPIS_te

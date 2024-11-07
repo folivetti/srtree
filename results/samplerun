@@ -1,0 +1,32 @@
+time stack run egraphGP -- -d 192_vineyard.tsv.gz -g 100000 -a BestFirst  -s 30 +RTS -N2
+srtree-2.0.0.0: unregistering (local file changes: apps/egraphGP/Main.hs)
+srtree> build (lib + exe) with ghc-9.6.6
+Preprocessing library for srtree-2.0.0.0..
+Building library for srtree-2.0.0.0..
+Preprocessing executable 'egraphGP' for srtree-2.0.0.0..
+Building executable 'egraphGP' for srtree-2.0.0.0..
+[3 of 3] Compiling Main [Source file changed]
+[4 of 4] Linking .stack-work/dist/x86_64-linux/ghc-9.6.6/build/egraphGP/egraphGP [Objects changed]
+srtree> copy/register
+Installing library in /home/olivetti/Projects/srtools/srtree/.stack-work/install/x86_64-linux/b72df57c170ab1012f5a4edf1c40718a98b92a6592ab6faa96b466ee4be8d4a8/9.6.6/lib/x86_64-linux-ghc-9.6.6/srtree-2.0.0.0-KcS0llrJnV94CjCimzaIBV
+Installing executable egraphGP in /home/olivetti/Projects/srtools/srtree/.stack-work/install/x86_64-linux/b72df57c170ab1012f5a4edf1c40718a98b92a6592ab6faa96b466ee4be8d4a8/9.6.6/bin
+Registering library for srtree-2.0.0.0..
+t0,18.939626479289934
+(x1 - t0),10.038738905325443
+(x1 - Recip(t0)),10.03873890532544
+(x0 - (t0 - x1)),7.659023668639051
+((x1 + x0) - Recip(t0)),7.65902366863905
+(t0 - (t0 / (x0 + t0))),5.092983196845605
+((t0 / (Recip(t0) + x0)) - t0),5.092983196845604
+(((t0 / (x0 + t0)) - t0) - t0),5.092983196845603
+((t0 - (t0 / (x0 + t0))) - Recip(x1)),5.044733533340489
+((t0 - (t0 / (x0 + t0))) + (t0 / x1)),4.524642601359542
+(t0 * (Abs(((t0 + t0) - (x0 * t0))) ^ (t0 / x1))),4.297676653545933
+(Abs((t0 / (Abs(((t0 + t0) - (x0 * t0))) ^ (t0 / x1)))) ^ t0),4.297676653545574
+(Recip(x1) - (t0 * (Abs(((t0 + t0) - (x0 * t0))) ^ (t0 / x1)))),4.291830359522425
+((Abs((t0 / (Abs(((t0 + t0) - (x0 * t0))) ^ (t0 / x1)))) ^ t0) + Recip(t0)),4.288084928238512
+(Abs(Recip(t0)) ^ (Recip(x1) - (t0 / (Abs(((t0 + t0) - (x0 * t0))) ^ (t0 / x1))))),4.286599310802817
+((Abs(((Abs(((t0 + t0) - (x0 * t0))) ^ (t0 / x1)) * (x0 + (t0 - x0)))) ^ t0) - t0),4.288318352798358
+((t0 / (x0 + t0)) + (t0 - (((t0 - (t0 / (x0 + t0))) - (t0 * x1)) / Recip(x1)))),4.2153737956042585
+((t0 / (x0 + t0)) - (((t0 * x1) / ((t0 - (t0 / (x0 + t0))) - (t0 * x1))) - Recip(t0))),4.159956239895752
+((((t0 + (x1 * (((t0 - (t0 / (x0 + t0))) - (t0 * x1)) + t0))) + (x0 * t0)) - (t0 / (x0 + t0))) - x0),3.8989839888686086

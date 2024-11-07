@@ -34,7 +34,7 @@ appendCol xs v = computeAs S <$> (stackInnerSlicesM . toList . computeAs B $ sno
 {-# INLINE appendCol #-}
 
 updateS :: Array S Ix1 Double -> [(Int, Double)] -> Array S Ix1 Double
-updateS vec new = fromStorableVector Seq $ toStorableVector vec // new
+updateS vec new = fromStorableVector compMode $ toStorableVector vec // new
 
 linSpace :: Int -> (Double, Double) -> [Double]
 linSpace num (lo, hi) = Prelude.take num $ iterate (\x -> x + step) lo
@@ -145,7 +145,7 @@ lu :: (PrimMonad m, MonadThrow m, MonadIO m) => SRMatrix -> m (SRMatrix, SRMatri
 lu mtx = do
     let (Sz2 m n) = size mtx
     u <- thawS $ computeAs S $ identityMatrix (Sz m)
-    l <- thawS $ A.replicate Seq (Sz2 m n) 0
+    l <- thawS $ A.replicate compMode (Sz2 m n) 0
 
     let buildLVal !i !j = do
             let go !k !s
@@ -187,7 +187,7 @@ lu mtx = do
 forwardSub :: (PrimMonad m, MonadThrow m, MonadIO m) => SRMatrix -> PVector -> m PVector
 forwardSub a b = do
     let (Sz m) = size b
-    x <- thawS $ A.replicate Seq (Sz1 m) 0
+    x <- thawS $ A.replicate compMode (Sz1 m) 0
     let coeff !i !j !s
             | j == i = pure s
             | otherwise = do let aij = a ! (i :. j)
@@ -205,7 +205,7 @@ forwardSub a b = do
 backwardSub :: (PrimMonad m, MonadThrow m, MonadIO m) => SRMatrix -> PVector -> m PVector
 backwardSub a b = do
     let (Sz m) = size b
-    x <- thawS $ A.replicate Seq (Sz1 m) 0
+    x <- thawS $ A.replicate compMode (Sz1 m) 0
     let coeff !i !j !s
             | j == m = pure s
             | otherwise = do let aij = a ! (i :. j)
@@ -233,9 +233,9 @@ cubicSplineCoefficients xs = Prelude.zip3 x y z'
       x = map fst xs
       y = map snd xs
       xdiff = zipWith (-) (tail x) x
-      xdiff' = fromList Seq xdiff :: Vector S Double
+      xdiff' = fromList compMode xdiff :: Vector S Double
       dydx :: Vector S Double
-      dydx  = fromList Seq $ Prelude.zipWith3 (\y0 y1 xd -> (y0-y1)/xd) (tail y) y xdiff
+      dydx  = fromList compMode $ Prelude.zipWith3 (\y0 y1 xd -> (y0-y1)/xd) (tail y) y xdiff
       n = length x
 
       w :: [Double]

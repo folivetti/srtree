@@ -102,7 +102,7 @@ predictionCI (Laplace stats) _ predFun jacFun _ xss tree theta alpha _ = zipWith
   where
     yhat     = A.toList $ predFun xss
     jac' :: A.Matrix A.S Double
-    jac'     = A.fromLists' A.Seq $ map A.toList $ jacFun xss
+    jac'     = A.fromLists' compMode $ map A.toList $ jacFun xss
     jac :: [PVector]
     jac      = A.toList $ A.outerSlices $ A.computeAs A.S $ A.transpose jac'
     n        = length yhat
@@ -112,7 +112,7 @@ predictionCI (Laplace stats) _ predFun jacFun _ xss tree theta alpha _ = zipWith
     lows     = zipWith (-) yhat $ map (*t) resStdErr
     highs    = zipWith (+) yhat $ map (*t) resStdErr
 
-    getResStdError row = sqrt $ (A.!.!) row $ A.fromList A.Seq $ map (row A.!.!) covs
+    getResStdError row = sqrt $ (A.!.!) row $ A.fromList compMode $ map (row A.!.!) covs
     resStdErr          = map getResStdError jac
 
 predictionCI (Profile _ _) dist predFun _ profFun xss tree theta alpha estPIs = zipWith3 f estPIs yhat $ take 10 xss'
@@ -129,7 +129,7 @@ predictionCI (Profile _ _) dist predFun _ profFun xss tree theta alpha estPIs = 
 
     f estPI yh xs =
               let t'            = replaceParam0 tree $ evalVar xs theta0
-                  (spline, yh') = profFun estPI (A.fromStorableVector A.Seq (theta' VS.// [(0, yh)])) t'
+                  (spline, yh') = profFun estPI (A.fromStorableVector compMode (theta' VS.// [(0, yh)])) t'
               in CI yh' (spline (-t)) (spline t)
 
 -- inverse function of the distributions 
@@ -209,11 +209,11 @@ getProfile :: Distribution
            -> Int
            -> Either PVector ProfileT
 getProfile dist mSErr xss ys tree theta stdErr_i tau_max ix
-  | stdErr_i == 0.0 = pure $ ProfileT (A.fromList A.Seq [-tau_max, tau_max]) (A.fromLists' A.Seq [theta', theta']) (theta A.! ix) (const (theta A.! ix)) (const tau_max)
+  | stdErr_i == 0.0 = pure $ ProfileT (A.fromList compMode [-tau_max, tau_max]) (A.fromLists' compMode [theta', theta']) (theta A.! ix) (const (theta A.! ix)) (const tau_max)
   | otherwise =
   do negDelta <- go kmax (-stdErr_i / 8) 0 1 mempty
      posDelta <- go kmax  (stdErr_i / 8) 0 1 p0
-     let (A.fromList A.Seq -> taus, A.fromLists' A.Seq . map A.toList -> thetas) = negDelta <> posDelta
+     let (A.fromList compMode -> taus, A.fromLists' compMode. map A.toList -> thetas) = negDelta <> posDelta
          (tau2theta, theta2tau)                       = createSplines taus thetas stdErr_i tau_max ix
      pure $ ProfileT taus thetas optTh tau2theta theta2tau
   where
@@ -260,9 +260,9 @@ getProfileCnstr dist mSErr xss ys tree theta stdErr_i tau_max ix
   | stdErr_i == 0.0 = pure $ ProfileT taus thetas theta_i (const theta_i) (const tau_max)
   | otherwise       = pure $ ProfileT taus thetas theta_i tau2theta (const tau_max)
   where
-    taus     = A.fromList A.Seq [-tau_max, tau_max]
+    taus     = A.fromList compMode [-tau_max, tau_max]
     theta'   = A.toList theta
-    thetas   = A.fromLists' A.Seq [theta', theta']
+    thetas   = A.fromLists' compMode [theta', theta']
     theta_i  = theta A.! ix
     getPoint = getEndPoint dist mSErr xss ys tree theta tau_max ix
     leftPt   = getPoint True
@@ -281,7 +281,7 @@ getEndPoint dist mSErr xss ys tree theta tau_max ix isLeft =
     nll_opt   = nll dist mSErr xss ys tree theta_opt
     loss_crit = nll_opt + tau_max
 
-    loss      = subtract loss_crit . nll dist mSErr xss ys tree . A.fromStorableVector A.Seq
+    loss      = subtract loss_crit . nll dist mSErr xss ys tree . A.fromStorableVector compMode
     obj       = (if isLeft then id else negate) . (VS.! ix)
 
     stop       = ObjectiveRelativeTolerance 1e-4 :| []
@@ -308,11 +308,11 @@ getProfileODE :: Distribution
            -> Either PVector ProfileT
 getProfileODE dist mSErr xss ys tree theta stdErr_i estCI tau_max ix
   | stdErr_i == 0.0 = pure dflt
-  | otherwise = let (A.fromList A.Seq -> taus, A.fromLists' A.Seq . map A.toList -> thetas) = solLeft <> ([0], [theta_opt]) <> solRight
+  | otherwise = let (A.fromList compMode -> taus, A.fromLists' compMode . map A.toList -> thetas) = solLeft <> ([0], [theta_opt]) <> solRight
                     (tau2theta, theta2tau) = createSplines taus thetas stdErr_i tau_max ix
                 in pure $ ProfileT taus thetas optTh tau2theta theta2tau
   where
-    dflt      = ProfileT (A.fromList A.Seq [-tau_max, tau_max]) (A.fromLists' A.Seq [theta', theta']) (theta A.! ix) (const (theta A.! ix)) (const tau_max)
+    dflt      = ProfileT (A.fromList compMode [-tau_max, tau_max]) (A.fromLists' compMode [theta', theta']) (theta A.! ix) (const (theta A.! ix)) (const tau_max)
     minimizer = fst . minimizeNLLNonUnique dist mSErr 100 xss ys tree
     grader    = snd . gradNLLNonUnique dist mSErr xss ys tree
     theta_opt = minimizer theta
@@ -327,7 +327,7 @@ getProfileODE dist mSErr xss ys tree theta stdErr_i estCI tau_max ix
     odeFun gamma _ u =
         let grad     = grader u
             w        = hessianNLL dist mSErr xss ys tree u
-            m        = A.makeArray A.Seq (A.Sz (p' :. p'))
+            m        = A.makeArray compMode (A.Sz (p' :. p'))
                          (\ (i :. j) -> if | i<p && j<p -> w A.! (i :. j)
                                            | i==ix      -> 1
                                            | j==ix      -> 1
@@ -336,7 +336,7 @@ getProfileODE dist mSErr xss ys tree theta stdErr_i estCI tau_max ix
 
             v        = A.computeAs A.S $ A.snoc (A.map (*(-gamma)) grad) 1
             dotTheta = unsafePerformIO $ luSolve m v
-        in A.fromStorableVector A.Seq $ VS.init $ A.toStorableVector dotTheta
+        in A.fromStorableVector compMode $ VS.init $ A.toStorableVector dotTheta
     tsHi = linSpace 50 (optTh, upper_ estCI)
     tsLo = linSpace 50 (optTh, lower_ estCI)
     scanOn sig = foldMap (calcTau sig) . f . scanl (rk (odeFun sig)) (optTh, theta_opt)
@@ -352,7 +352,7 @@ rk f (t, y) t' = (t', y !+! ((1.0/6.0) *. h' !*! (k1 !+! (2.0 *. k2) !+! (2.0 *.
   where
     h  = t' - t
     h', k1, k2, k3, k4 :: PVector
-    h' = A.replicate A.Seq (A.size y) h
+    h' = A.replicate compMode (A.size y) h
     k1 = f t y
     k2 = f (t + 0.5*h) (A.computeAs A.S $ A.zipWith3 (g 0.5) y h' k1) -- (y !+! 0.5*.h' A.!*! k1)
     k3 = f (t + 0.5*h) (A.computeAs A.S $ A.zipWith3 (g 0.5) y h' k2) -- (y !+! 0.5*.h' A.!*! k2)
@@ -379,7 +379,7 @@ getStatsFromModel dist mSErr xss ys tree theta = MkStats cov corr stdErr
     fexcept e = trace "cov NegDef" $ pure ident
     cov     = unsafePerformIO $ catch (invChol hess) fexcept
 
-    stdErr   = A.makeArray A.Seq (A.Sz1 k) (\ix -> sqrt $ cov A.! (ix :. ix))
+    stdErr   = A.makeArray compMode (A.Sz1 k) (\ix -> sqrt $ cov A.! (ix :. ix))
     stdErrSq = case outer stdErr stdErr of
                  Left _  -> error "stdErr size mismatch?"
                  Right v -> v

@@ -35,7 +35,7 @@ import qualified Data.Massiv.Array as M
 import Data.Maybe (fromMaybe)
 import Data.SRTree (Fix (..), SRTree (..), floatConstsToParam, relabelParams)
 import Data.SRTree.Derivative (deriveByParam)
-import Data.SRTree.Eval (PVector, SRMatrix, SRVector, evalTree)
+import Data.SRTree.Eval (PVector, SRMatrix, SRVector, compMode, evalTree)
 
 -- | Supported distributions for negative log-likelihood
 data Distribution = Gaussian | Bernoulli | Poisson
@@ -224,8 +224,8 @@ fisherNLL dist msErr xss ys tree theta = makeArray cmp (Sz p) build
     res    = delay ys - phi
 
     (phi, phi') = case dist of
-                    Gaussian  -> (yhat, M.replicate M.Seq (Sz m) 1)
-                    Bernoulli -> (logistic yhat, phi*(M.replicate M.Seq (Sz m) 1 - phi))
+                    Gaussian  -> (yhat, M.replicate compMode (Sz m) 1)
+                    Bernoulli -> (logistic yhat, phi*(M.replicate compMode (Sz m) 1 - phi))
                     Poisson   -> (exp yhat, phi)
 
 -- | Hessian of negative log-likelihood

@@ -111,7 +111,7 @@ randomIndividual hyperparams fitFun grow = do
     t <- randomTree hyperparams grow 
     let p = countParams t
     theta' <- replicateM p (randomRange (-1,1))
-    let ind = fitFun $ Individual t 0.0 (M.fromList M.Seq theta' :: PVector)
+    let ind = fitFun $ Individual t 0.0 (M.fromList compMode theta' :: PVector)
     pure ind
     --if isInfinite (_fit ind)
     --   then randomIndividual hyperparams fitFun grow 
@@ -193,7 +193,7 @@ evolve hp fitFun pop = do
     child <- crossover hp parent1 parent2
     child' <- mutate hp child
     let p = countParams (_tree child')
-    theta' <- M.fromList M.Seq <$> replicateM p (randomRange (-1,1))
+    theta' <- M.fromList compMode <$> replicateM p (randomRange (-1,1))
     pure $ fitFun child'{_params = theta'}
 {-# INLINE evolve #-}
 
