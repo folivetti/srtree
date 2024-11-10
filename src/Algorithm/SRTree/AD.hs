@@ -21,6 +21,7 @@ module Algorithm.SRTree.AD
          ( forwardMode
          , forwardModeUnique
          , reverseModeUnique
+         , reverseModeUniqueArr
          , forwardModeUniqueJac
          ) where
 
@@ -41,6 +42,8 @@ import Data.SRTree.Recursion ( cataM, cata, accu )
 import qualified Data.Vector as V
 import Debug.Trace (trace, traceShow)
 import GHC.IO (unsafePerformIO)
+import qualified Data.IntMap.Strict as IntMap
+import Data.List ( foldl' )
 
 applyUni :: (Index ix, Source r e, Floating e, Floating b) => Function -> Either (Array r ix e) b -> Either (Array D ix e) b
 applyUni f (Left t)  =
@@ -291,6 +294,99 @@ reverseModeUnique xss theta ys f t = unsafePerformIO $
                                  UMA.unsafeRead j ix
       combine j (Uni f gs) s = gs
       combine j (Bin op l r) s = l+r
+
+-- | Same as above, but using reverse mode with the tree encoded as an array, that is even faster.
+--reverseModeUniqueArr :: SRMatrix
+--                  -> PVector
+--                  -> SRVector
+--                  -> (SRVector -> SRVector)
+--                  -> Array S Ix1 (Int, Int, Int, Double) -- arity, opcode, ix, const val
+--                  -> (Array D Ix1 Double, Array S Ix1 Double)
+reverseModeUniqueArr xss theta ys f t =
+    let fwd = forward
+        v   = fwd IntMap.! 0
+        err = f v - delay ys
+        partial = reverseMode fwd
+    in unsafePerformIO $ do
+            jacob <- M.newMArray (Sz p) 0
+            combine partial jacob err
+            j <- UMA.unsafeFreeze (getComp xss) jacob
+            pure (v, j)
+
+  where
+      (Sz2 m _) = M.size xss
+      (Sz p)    = M.size theta
+
+      forward = foldr (makeFwd) IntMap.empty (IntMap.toAscList t)
+        where
+          makeFwd (j, (0, 0, ix, _)) fwd = IntMap.insert j (xss M.<! ix) fwd
+          makeFwd (j, (0, 1, ix, _)) fwd = IntMap.insert j (M.replicate (getComp xss) (M.Sz m) (theta M.! ix)) fwd
+          makeFwd (j, (0, 2, _, x))  fwd = IntMap.insert j (M.replicate (getComp xss) (M.Sz m) x) fwd
+          makeFwd (j, (1, f, _, _))  fwd =
+                                           let v   = fwd IntMap.! (2*j + 1)
+                                               val = M.map (evalFun (toEnum f)) v
+                                           in IntMap.insert j val fwd
+          makeFwd (j, (2, op, _, _)) fwd =
+                                           let l = fwd IntMap.! (2*j + 1)
+                                               r = fwd IntMap.! (2*j + 2)
+                                               val = M.zipWith (evalOp (toEnum op)) l r
+                                           in IntMap.insert j val fwd
+
+
+
+      -- reverse walks from the root to the leaf calculating the
+      -- partial derivative with respect to an arbitrary variable
+      -- up to that point
+      reverseMode fwd = foldr (makeRev) rev0 (IntMap.toDescList t)
+        where
+          rev0 = IntMap.insert 0 (M.replicate (getComp xss) (M.Sz m) 1) IntMap.empty
+
+
+          makeRev (j, (1, f, _, _))  rev = let v = fwd IntMap.! (2*j + 1)
+                                               dx = rev IntMap.! j
+                                               val = dx !*! (M.map (derivative (toEnum f)) v)
+                                           in IntMap.insert (2*j + 1) val rev
+          makeRev (j, (2, op, _, _)) rev = let l = fwd IntMap.! (2*j + 1)
+                                               r = fwd IntMap.! (2*j + 2)
+                                               dx = rev IntMap.! j
+                                               (dxl, dxr) = diff (toEnum op) dx l r
+                                           in IntMap.insert (2*j + 2) dxr $ IntMap.insert (2*j + 1) dxl rev
+          makeRev (j, _) rev = rev
+
+
+      -- dx is the current derivative so far
+      -- fx is the evaluation of the left branch
+      -- gx is the evaluation of the right branch
+      --
+      -- this should return a tuple, where the left element is
+      -- dx * d op(f(x), g(x)) / d f(x) and
+      -- the right branch dx * d op (f(x), g(x)) / d g(x)
+      arr1 !**! arr2 = M.zipWith (**) arr1 arr2
+
+      diff Add dx fx gy = (dx, dx)
+      diff Sub dx fx gy = (dx, M.map negate dx)
+      diff Mul dx fx gy = (dx !*! gy, dx !*! fx)
+      diff Div dx fx gy = (dx !/! gy, dx !*! (M.map negate fx !/! (gy !*! gy)))
+      diff Power dx fx gy = let dxl = dx !*! (fx !**! (M.map (subtract 1) gy))
+                                dv2 = fx !*! M.map log fx
+                            in (dxl !*! gy, dxl !*! dv2)
+      diff PowerAbs dx fx gy = let dxl = (gy !*! fx) !*! (fx !**! M.map abs (M.map (subtract 2) gy))
+                                   dxr = (M.map log (M.map abs fx)) !*! (fx !**! M.map abs gy)
+                               in (dxl !*! dx, dxr !*! dx)
+      diff AQ dx fx gy = let dxl = M.map recip (M.map (sqrt . (+1)) (gy !*! gy))
+                             dxy = fx !*! gy !*! (M.map (^3) dxl) -- / (sqrt (gy*gy + 1))
+                         in (dxl !*! dx, dxy !*! dx)
+
+
+      -- once we reach a leaf with a parameter, we return a singleton
+      -- with that derivative upwards until the root
+      --combine :: Array S Ix2 Double -> MArray (PrimState IO) S Ix1 Double -> Array D Ix1 Double -> IO ()
+      combine :: IntMap.IntMap (Array D Ix1 Double) -> MArray (PrimState IO) S Ix1 Double -> Array D Ix1 Double -> IO ()
+      combine partial jacob err = forM_ (IntMap.toAscList t) makeJacob
+        where
+            makeJacob (j, (0, 1, ix, _)) = do v <- dotM (partial IntMap.! j) err
+                                              UMA.unsafeWrite jacob ix v
+            makeJacob _ = pure ()
 
 
 -- | The function `forwardModeUnique` calculates the numerical gradient of the tree and evaluates the tree at the same time. It assumes that each parameter has a unique occurrence in the expression. This should be significantly faster than `forwardMode`.

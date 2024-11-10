@@ -41,7 +41,7 @@ type PVector  = M.Array S Ix1 Double
 type SRMatrix = M.Array S Ix2 Double
 
 compMode :: M.Comp
-compMode = M.Par'
+compMode = M.Seq
 
 -- Improve quality of life with Num and Floating instances for our matrices 
 instance Index ix => Num (M.Array D ix Double) where

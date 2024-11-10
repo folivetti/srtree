@@ -51,7 +51,7 @@ processTree args seed dset t ix = (basic, sseOrig, sseOpt, info, cis)
                 (Nothing, _) -> _expr basic
                 (_, Nothing) -> _expr basic
                 (Just xV, Just yV) -> _expr $ getBasicStats args' seed dset{_xTr = xV, _yTr = yV} tree theta0 ix
-    sseOrig = getSSE dset tree
+    sseOrig = getSSE dset t
     sseOpt  = getSSE dset (_expr basic)
     info    = getInfo args' dset (_expr basic) treeVal
     cis     = getCI args' dset basic (alpha args')

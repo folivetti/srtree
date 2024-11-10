@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Algorithm.SRTree.Opt 
@@ -17,9 +18,37 @@ import Algorithm.SRTree.Likelihoods
 import Algorithm.SRTree.NonlinearOpt
 import Data.Bifunctor (bimap, second)
 import Data.Massiv.Array
-import Data.SRTree (Fix (..), SRTree (..), floatConstsToParam, relabelParams)
+import Data.SRTree (Fix (..), SRTree (..), floatConstsToParam, relabelParams, countNodes)
 import Data.SRTree.Eval (evalTree, compMode)
 import qualified Data.Vector.Storable as VS
+import qualified Data.IntMap.Strict as IntMap
+import Data.SRTree.Recursion
+
+import Debug.Trace
+
+tree2arr :: Fix SRTree -> IntMap.IntMap (Int, Int, Int, Double)
+tree2arr tree = IntMap.fromList listTree
+  where
+    height = cata alg
+      where
+        alg (Var ix) = 1
+        alg (Const x) = 1
+        alg (Param ix) = 1
+        alg (Uni _ t) = 1 + t
+        alg (Bin _ l r) = 1 + max l r
+    listTree = accu indexer convert tree 0
+
+    indexer (Var ix) iy   = Var ix
+    indexer (Const x) iy  = Const x
+    indexer (Param ix) iy = Param ix
+    indexer (Bin op l r) iy = Bin op (l, 2*iy+1) (r, 2*iy+2)
+    indexer (Uni f t) iy = Uni f (t, 2*iy+1)
+
+    convert (Var ix) iy = [(iy, (0, 0, ix, -1))]
+    convert (Const x) iy = [(iy, (0, 2, -1, x))]
+    convert (Param ix) iy = [(iy, (0, 1, ix, -1))]
+    convert (Uni f t) iy = (iy, (1, fromEnum f, -1, -1)) : t
+    convert (Bin op l r) iy = (iy, (2, fromEnum op, -1, -1)) : (l <> r)
 
 -- | minimizes the negative log-likelihood of the expression
 minimizeNLL :: Distribution -> Maybe Double -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
@@ -30,10 +59,11 @@ minimizeNLL dist msErr niter xss ys tree t0
   where
     tree'      = relabelParams tree -- $ fst $ floatConstsToParam tree
     t0'        = toStorableVector t0
+    treeArr    = tree2arr tree'
     (Sz n)     = size t0
     (Sz m)     = size ys
-    funAndGrad = second (toStorableVector . computeAs S) . gradNLL dist msErr xss ys tree' . fromStorableVector compMode
-    (f, _)     = gradNLL dist msErr xss ys tree t0 -- if there's no parameter or no iterations
+    funAndGrad = second (toStorableVector . computeAs S) . gradNLLArr dist msErr xss ys treeArr . fromStorableVector compMode
+    (f, _)     = gradNLLArr dist msErr xss ys treeArr t0 -- if there's no parameter or no iterations
 
     algorithm  = LBFGS funAndGrad Nothing
     stop       = ObjectiveRelativeTolerance 1e-10 :| [MaximumEvaluations (fromIntegral niter)]
