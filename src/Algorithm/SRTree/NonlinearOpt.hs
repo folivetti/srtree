@@ -644,9 +644,9 @@ setupGlobalProblem gp@(GlobalProblem _ _ _ alg) = do
 
 solveProblem :: N.Opt -> Vector Double -> IO Solution
 solveProblem opt x0 = do
-  (N.Output outret outcost outx) <- N.optimize opt x0
+  (N.Output outret outcost outx nevals) <- N.optimize opt x0
   if (N.isSuccess outret)
-    then return $ Solution outcost outx outret
+    then return $ Solution outcost outx outret nevals
     else Ex.throw $ NloptException outret
 
 minimizeGlobal' :: GlobalProblem -> Vector Double -> IO Solution
@@ -903,6 +903,8 @@ data Solution = Solution
   , solutionParams :: Vector Double -- ^ The parameter vector which
                                     -- minimizes the objective
   , solutionResult :: N.Result      -- ^ Why the optimizer stopped
+
+  , nEvals :: Int                   -- ^ Number of evaluations until stop
   } deriving (Eq, Show, Read)
 
 applyAugLagAlgorithm :: N.Opt -> AugLagAlgorithm -> IO ()

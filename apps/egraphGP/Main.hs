@@ -67,7 +67,7 @@ fitnessFun x y x_val y_val _tree = do
     let tree         = relabelParams _tree
         nParams      = countParams tree
     thetaOrig <- rnd $ randomVec nParams --   = MA.replicate Seq nParams 1.0
-    let (theta, fit) = minimizeNLL Gaussian Nothing 50 x y tree thetaOrig
+    let (theta, fit, nEvs) = minimizeNLL Gaussian Nothing 50 x y tree thetaOrig
         tr           = negate . mse x y tree $ if nParams == 0 then thetaOrig else theta
         val          = negate . mse x_val y_val tree $ if nParams == 0 then thetaOrig else theta
         -- val       = r2 x y tree $ if nParams == 0 then thetaOrig else theta

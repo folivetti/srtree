@@ -51,11 +51,11 @@ tree2arr tree = IntMap.fromList listTree
     convert (Bin op l r) iy = (iy, (2, fromEnum op, -1, -1)) : (l <> r)
 
 -- | minimizes the negative log-likelihood of the expression
-minimizeNLL :: Distribution -> Maybe Double -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
+minimizeNLL :: Distribution -> Maybe Double -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
 minimizeNLL dist msErr niter xss ys tree t0
-  | niter == 0 = (t0, f)
-  | n == 0     = (t0, f)
-  | otherwise  = (fromStorableVector compMode t_opt, f)
+  | niter == 0 = (t0, f, 0)
+  | n == 0     = (t0, f, 0)
+  | otherwise  = (fromStorableVector compMode t_opt, f, nEvs)
   where
     tree'      = relabelParams tree -- $ fst $ floatConstsToParam tree
     t0'        = toStorableVector t0
@@ -63,15 +63,15 @@ minimizeNLL dist msErr niter xss ys tree t0
     j2ix       = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]
     (Sz n)     = size t0
     (Sz m)     = size ys
-    funAndGrad = second (toStorableVector . computeAs S) . gradNLLArr dist msErr xss ys treeArr j2ix . fromStorableVector compMode
+    funAndGrad = second (toStorableVector . computeAs S) . gradNLL dist msErr xss ys tree . fromStorableVector compMode
     (f, _)     = gradNLLArr dist msErr xss ys treeArr j2ix t0 -- if there's no parameter or no iterations
 
     algorithm  = LBFGS funAndGrad Nothing
-    stop       = ObjectiveRelativeTolerance 1e-6 :| [MaximumEvaluations (fromIntegral niter)]
+    stop       = ObjectiveRelativeTolerance 1e-20 :| [MaximumEvaluations (fromIntegral niter)]
     problem    = LocalProblem (fromIntegral n) stop algorithm
-    t_opt      = case minimizeLocal problem t0' of
-                  Right sol -> solutionParams sol
-                  Left e    -> t0'
+    (t_opt, nEvs) = case minimizeLocal problem t0' of
+                      Right sol -> (solutionParams sol, nEvals sol) -- traceShow (">>>>>>>", nEvals sol) $
+                      Left e    -> (t0', 0)
 
 -- | minimizes the likelihood assuming repeating parameters in the expression 
 minimizeNLLNonUnique :: Distribution -> Maybe Double -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
@@ -116,22 +116,22 @@ minimizeNLLWithFixedParam dist msErr niter xss ys tree ix t0
                   Left e    -> t0'
 
 -- | minimizes using Gaussian likelihood 
-minimizeGaussian :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
+minimizeGaussian :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
 minimizeGaussian = minimizeNLL Gaussian Nothing
 
 -- | minimizes using Binomial likelihood 
-minimizeBinomial :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
+minimizeBinomial :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
 minimizeBinomial = minimizeNLL Bernoulli Nothing
 
 -- | minimizes using Poisson likelihood 
-minimizePoisson :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
+minimizePoisson :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
 minimizePoisson = minimizeNLL Poisson Nothing
 
 -- estimates the standard error if not provided 
 estimateSErr :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Int -> Maybe Double
 estimateSErr Gaussian Nothing  xss ys theta0 t nIter = Just err
   where
-    theta  = fst $ minimizeNLL Gaussian (Just 1) nIter xss ys t theta0
+    (theta , _, _) = minimizeNLL Gaussian (Just 1) nIter xss ys t theta0
     (Sz m) = size ys
     (Sz p) = size theta
     ssr    = sse xss ys t theta

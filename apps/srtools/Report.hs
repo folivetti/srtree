@@ -40,6 +40,7 @@ basicFields = [ "Index"
               , "Number_of_nodes"
               , "Number_of_parameters"
               , "Parameters"
+              , "Number_of_evaluations"
               ]
 
 -- basic information about the tree
@@ -49,6 +50,7 @@ data BasicInfo = Basic { _index   :: Int
                        , _nNodes  :: Int
                        , _nParams :: Int
                        , _params  :: [Double]
+                       , _nEvals  :: Int
                        }
 
 -- optimization fields
@@ -127,13 +129,13 @@ getDataset args = do
 getBasicStats :: Args -> StdGen -> Datasets -> Fix SRTree -> [Double] -> Int -> BasicInfo
 getBasicStats args seed dset tree theta0 ix
   | anyNaN    = getBasicStats args (snd $ split seed) dset tree theta0 ix
-  | otherwise = Basic ix (infile args) tOpt nNodes nParams params
+  | otherwise = Basic ix (infile args) tOpt nNodes nParams params nEvs
   where
     -- (tree', theta0) = floatConstsToParam tree
     thetas          = if restart args
                         then A.fromList compMode $ take nParams (normals seed)
                         else A.fromList compMode theta0
-    t               = fst $ minimizeNLL (dist args) (msErr args) (niter args) (_xTr dset) (_yTr dset) tree thetas
+    (t,_,nEvs)      = minimizeNLL (dist args) (msErr args) (niter args) (_xTr dset) (_yTr dset) tree thetas
     tOpt            = paramsToConst (A.toList t) tree
     nNodes          = countNodes tOpt :: Int
     nParams         = length theta0

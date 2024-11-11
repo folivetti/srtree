@@ -613,6 +613,8 @@ data Output = Output
   , resultParameters :: V.Vector Double -- ^ Parameters corresponding
                                         -- to the minimum if
                                         -- optimization succeeded
+
+  , nEvals :: Int                       -- ^ number of evaluations
   }
 
 foreign import ccall "nlopt.h nlopt_optimize"
@@ -626,12 +628,14 @@ optimize :: Opt  -- ^ Optimizer object set up to solve the problem
          -> IO Output  -- ^ Results of the optimization run
 optimize optimizer x0 = withOpt optimizer $ \opt -> do
   vmut <- V.thaw $ V.unsafeCast x0
-  alloca $ \costPtr -> do
+  (result, outputCost, iceout) <- alloca $ \costPtr -> do
     result <- MV.unsafeWith vmut $ \xptr ->
       parseEnum <$> nlopt_optimize opt xptr costPtr
     outputCost <- peek . castPtr $ costPtr
     iceout <- V.unsafeFreeze (MV.unsafeCast vmut)
-    return $ Output result outputCost iceout
+    return (result, outputCost, iceout)
+  nEvals <- fromIntegral <$> get_numevals optimizer
+  return $ Output result outputCost iceout nEvals
 
 {- Objective function setup -}
 
@@ -962,6 +966,12 @@ set_maxeval = setScalar nlopt_set_maxeval fromIntegral
 
 get_maxeval :: Opt -> IO Word
 get_maxeval = getScalar nlopt_get_maxeval fromIntegral
+
+foreign import ccall "nlopt.h nlopt_get_numevals"
+  nlopt_get_numevals :: NloptOpt -> IO CInt
+
+get_numevals :: Opt -> IO CInt
+get_numevals = getScalar nlopt_get_numevals fromIntegral
 
 foreign import ccall "nlopt.h nlopt_set_maxtime"
   nlopt_set_maxtime :: NloptOpt -> CDouble -> IO CInt

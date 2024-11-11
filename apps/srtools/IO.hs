@@ -76,6 +76,7 @@ toCsv (basic, sseOrig, sseOpt, info, _) varnames = intercalate "," (sBasic <> sS
     sBasic    = [ show (_index basic), show (_fname basic), P.showExprWithVars varnames (_expr basic)
                 , show (_nNodes basic), show (_nParams basic)
                 , intercalate ";" (map show (_params basic))
+                , show (_nEvals basic)
                 ]
     sSSEOrig  = map (showF sseOrig) [_sseTr, _sseVal, _sseTe]
     sSSEOpt   = map (showF sseOpt)  [_sseTr, _sseVal, _sseTe]
