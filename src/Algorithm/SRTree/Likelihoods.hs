@@ -176,34 +176,34 @@ gradNLL Poisson _ xss (delay -> ys) tree theta
 
 -- | Gradient of the negative log-likelihood
 --Array B Ix1 (Int, Int, Int, Double)
-gradNLLArr :: Distribution -> Maybe Double -> SRMatrix -> PVector -> IntMap.IntMap (Int, Int, Int, Double) -> PVector -> (Double, SRVector)
-gradNLLArr Gaussian msErr xss ys tree theta =
+gradNLLArr :: Distribution -> Maybe Double -> SRMatrix -> PVector -> [(Int,(Int, Int, Int, Double))] -> IntMap.IntMap Int -> PVector -> (Double, SRVector)
+gradNLLArr Gaussian msErr xss ys tree j2ix theta =
   (nll' Gaussian sErr yhat ys', delay grad ./ (sErr * sErr))
   where
     (Sz m)       = M.size ys
     (Sz p)       = M.size theta
     ys'          = delay ys
-    (yhat, grad) = reverseModeUniqueArr xss theta ys' id tree
+    (yhat, grad) = reverseModeUniqueArr xss theta ys' id tree j2ix
     -- err          = yhat - delay ys
     --ssr          = sse xss ys tree theta
     est          = sqrt $ fromIntegral (m - p) -- $ ssr / fromIntegral (m - p)
     sErr         = getSErr Gaussian est msErr
 
-gradNLLArr Bernoulli _ xss (delay -> ys) tree theta
+gradNLLArr Bernoulli _ xss (delay -> ys) tree j2ix theta
   | M.any (\x -> x /= 0 && x /= 1) ys = error "For Bernoulli distribution the output must be either 0 or 1."
   | otherwise                         = (nll' Bernoulli 1.0 yhat ys, delay grad)
   where
-    (yhat, grad) = reverseModeUniqueArr xss theta ys logistic tree
+    (yhat, grad) = reverseModeUniqueArr xss theta ys logistic tree j2ix
     grad'        = M.map nanTo0 grad
     --err          = logistic yhat - ys
     nanTo0 x     = if isNaN x then 0 else x
 
-gradNLLArr Poisson _ xss (delay -> ys) tree theta
+gradNLLArr Poisson _ xss (delay -> ys) tree j2ix theta
   | M.any (<0) ys    = error "For Poisson distribution the output must be non-negative."
  -- | M.any isNaN grad = error $ "NaN gradient " <> show grad
   | otherwise        = (nll' Poisson 1.0 yhat ys, delay grad)
   where
-    (yhat, grad) = reverseModeUniqueArr xss theta ys exp tree
+    (yhat, grad) = reverseModeUniqueArr xss theta ys exp tree j2ix
     --err          = exp yhat - ys
 
 -- | Gradient of the negative log-likelihood

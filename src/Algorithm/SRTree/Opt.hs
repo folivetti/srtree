@@ -59,14 +59,15 @@ minimizeNLL dist msErr niter xss ys tree t0
   where
     tree'      = relabelParams tree -- $ fst $ floatConstsToParam tree
     t0'        = toStorableVector t0
-    treeArr    = tree2arr tree'
+    treeArr    = IntMap.toAscList $ tree2arr tree'
+    j2ix       = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]
     (Sz n)     = size t0
     (Sz m)     = size ys
-    funAndGrad = second (toStorableVector . computeAs S) . gradNLLArr dist msErr xss ys treeArr . fromStorableVector compMode
-    (f, _)     = gradNLLArr dist msErr xss ys treeArr t0 -- if there's no parameter or no iterations
+    funAndGrad = second (toStorableVector . computeAs S) . gradNLLArr dist msErr xss ys treeArr j2ix . fromStorableVector compMode
+    (f, _)     = gradNLLArr dist msErr xss ys treeArr j2ix t0 -- if there's no parameter or no iterations
 
     algorithm  = LBFGS funAndGrad Nothing
-    stop       = ObjectiveRelativeTolerance 1e-10 :| [MaximumEvaluations (fromIntegral niter)]
+    stop       = ObjectiveRelativeTolerance 1e-6 :| [MaximumEvaluations (fromIntegral niter)]
     problem    = LocalProblem (fromIntegral n) stop algorithm
     t_opt      = case minimizeLocal problem t0' of
                   Right sol -> solutionParams sol

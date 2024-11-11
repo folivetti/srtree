@@ -140,8 +140,8 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
   evaluateUnevaluated
   runEqSat myCost rewriteBasic2 1
 
-  while (numberOfEvalClasses nEvals) 1 $
-    \radius ->
+  while ((<nEvals) . snd) (1,1) $
+    \(radius, nEvs) ->
       do
        --nEvs  <- gets (FingerTree.size . _fitRangeDB . _eDB)
        nCls  <- gets (IM.size . _eClass)
@@ -179,7 +179,9 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
          do runEqSat myCost rewriteBasic2 1
             cleanDB
             pure ()
-       if b then pure (min 20 $ radius+1) else pure (max 1 $ radius-1)
+       let radius' = if b then (max 1 $ min (200 `div` maxSize) (radius+1)) else (max 1 $ radius-1)
+           nEvs'    = nEvs + if upd then 1 else 0
+       pure (radius', nEvs')
   eclasses <- gets (IntMap.toList . _eClass)
   -- forM_ eclasses $ \(_, v) -> (io.print) (Set.size (_eNodes v), Set.size (_parents v))
   paretoFront
@@ -271,7 +273,8 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
     insertRndExpr :: Int -> RndEGraph EClassId
     insertRndExpr maxSize =
       do grow <- rnd toss
-         t <- rnd $ Random.randomTree 2 8 maxSize rndTerm rndNonTerm2 grow
+         n <- rnd (randomFrom [3 .. maxSize])
+         t <- rnd $ Random.randomTree 2 8 n rndTerm rndNonTerm2 grow
          fromTree myCost t >>= canonical
 
     insertBestExpr :: RndEGraph EClassId
@@ -353,9 +356,8 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
           insertFitness c f p
           pure c
 
-while p arg prog = do b <- p
-                      when b do arg' <- prog arg
-                                while p arg' prog
+while p arg prog = do when (p arg) do arg' <- prog arg
+                                      while p arg' prog
 
                                 {-
 egraphGP :: SRMatrix -> PVector -> [Fix SRTree] -> Int -> RndEGraph (Fix SRTree, Double)

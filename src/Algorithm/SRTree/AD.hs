@@ -25,7 +25,7 @@ module Algorithm.SRTree.AD
          , forwardModeUniqueJac
          ) where
 
-import Control.Monad (forM_)
+import Control.Monad (forM_, foldM)
 import Control.Monad.ST ( runST )
 import Data.Bifunctor (bimap, first, second)
 import qualified Data.DList as DL
@@ -302,13 +302,20 @@ reverseModeUnique xss theta ys f t = unsafePerformIO $
 --                  -> (SRVector -> SRVector)
 --                  -> Array S Ix1 (Int, Int, Int, Double) -- arity, opcode, ix, const val
 --                  -> (Array D Ix1 Double, Array S Ix1 Double)
-reverseModeUniqueArr xss theta ys f t =
-    let fwd = forward
+reverseModeUniqueArr xss theta ys f t j2ix =
+    {-let fwd = forward
         v   = fwd IntMap.! 0
         err = f v - delay ys
         partial = reverseMode fwd
-    in unsafePerformIO $ do
-            jacob <- M.newMArray (Sz p) 0
+        in -}
+      unsafePerformIO $ do
+            fwd     <- M.newMArray (Sz2 m n) 0
+            partial <- M.newMArray (Sz2 m n) 0
+            jacob   <- M.newMArray (Sz p) 0
+            fwd' <- UMA.unsafeFreeze (getComp xss) fwd
+            let v = fwd' M.<! 0
+                err = M.computeAs S $ f v - delay ys
+            forward fwd
             combine partial jacob err
             j <- UMA.unsafeFreeze (getComp xss) jacob
             pure (v, j)
@@ -316,27 +323,78 @@ reverseModeUniqueArr xss theta ys f t =
   where
       (Sz2 m _) = M.size xss
       (Sz p)    = M.size theta
+      n         = length t
 
+      forward :: MArray (PrimState IO) S Ix2 Double -> IO ()
+      forward fwd = forM_ (Prelude.reverse t) makeFwd
+         where
+          makeFwd (j, (0, 0, ix, _)) = do let j' = j2ix IntMap.! j
+                                          forM_ [0..m-1] $ \i -> do
+                                            let val = xss M.! (i :. ix)
+                                            UMA.unsafeWrite fwd (i :. j') val
+          makeFwd (j, (0, 1, ix, _))     = do let j' = j2ix IntMap.! j
+                                                  v  = theta M.! ix
+                                              forM_ [0..m-1] $ \i -> do
+                                                  UMA.unsafeWrite fwd (i :. j') v
+          makeFwd (j, (0, 2, _, x))      = do let j' = j2ix IntMap.! j
+                                              forM_ [0..m-1] $ \i -> do
+                                                  UMA.unsafeWrite fwd (i :. j') x
+          makeFwd (j, (1, f, _, _))      = do let j' = j2ix IntMap.! j
+                                                  j2 = j2ix IntMap.! (2*j + 1)
+                                              forM_ [0..m-1] $ \i -> do
+                                                v <- UMA.unsafeRead fwd (i :. j2)
+                                                let val = evalFun (toEnum f) v
+                                                UMA.unsafeWrite fwd (i :. j') val
+          makeFwd (j, (2, op, _, _))     = do let j' = j2ix IntMap.! j
+                                                  j2 = j2ix IntMap.! (2*j + 1)
+                                                  j3 = j2ix IntMap.! (2*j + 2)
+                                              forM_ [0..m-1] $ \i -> do
+                                                l <- UMA.unsafeRead fwd (i :. j2)
+                                                r <- UMA.unsafeRead fwd (i :. j3)
+                                                let val = evalOp (toEnum op) l r
+                                                UMA.unsafeWrite fwd (i :. j') val
+                                                {-
       forward = foldr (makeFwd) IntMap.empty (IntMap.toAscList t)
         where
           makeFwd (j, (0, 0, ix, _)) fwd = IntMap.insert j (xss M.<! ix) fwd
           makeFwd (j, (0, 1, ix, _)) fwd = IntMap.insert j (M.replicate (getComp xss) (M.Sz m) (theta M.! ix)) fwd
           makeFwd (j, (0, 2, _, x))  fwd = IntMap.insert j (M.replicate (getComp xss) (M.Sz m) x) fwd
-          makeFwd (j, (1, f, _, _))  fwd =
-                                           let v   = fwd IntMap.! (2*j + 1)
+          makeFwd (j, (1, f, _, _))  fwd = let v   = fwd IntMap.! (2*j + 1)
                                                val = M.map (evalFun (toEnum f)) v
                                            in IntMap.insert j val fwd
-          makeFwd (j, (2, op, _, _)) fwd =
-                                           let l = fwd IntMap.! (2*j + 1)
+          makeFwd (j, (2, op, _, _)) fwd = let l = fwd IntMap.! (2*j + 1)
                                                r = fwd IntMap.! (2*j + 2)
                                                val = M.zipWith (evalOp (toEnum op)) l r
                                            in IntMap.insert j val fwd
-
+                                           -}
 
 
       -- reverse walks from the root to the leaf calculating the
       -- partial derivative with respect to an arbitrary variable
       -- up to that point
+      reverseMode :: MArray (PrimState IO) S Ix2 Double -> MArray (PrimState IO) S Ix2 Double -> IO ()
+      reverseMode fwd partial = do forM_ [0..m-1] $ \i -> UMA.unsafeWrite partial (i :. 0) 1
+                                   forM_ t makeRev
+        where
+          makeRev (j, (1, f, _, _)) = do forM_ [0..m-1] $ \i -> do
+                                           let dxj = j2ix IntMap.! j
+                                               vj  = j2ix IntMap.! (2*j + 1)
+                                           v <- UMA.unsafeRead fwd (i :. vj)
+                                           dx <- UMA.unsafeRead partial  (i :. dxj)
+                                           let val = dx * derivative (toEnum f) v
+                                           UMA.unsafeWrite partial (i :. vj) val
+          makeRev (j, (2, op, _, _)) = do forM_ [0..m-1] $ \i -> do
+                                            let dxj = j2ix IntMap.! j
+                                                lj  = j2ix IntMap.! (2*j + 1)
+                                                rj  = j2ix IntMap.! (2*j + 2)
+                                            l <- UMA.unsafeRead fwd (i :. lj)
+                                            r <- UMA.unsafeRead fwd (i :. rj)
+                                            dx <- UMA.unsafeRead partial  (i :. dxj)
+                                            let (dxl, dxr) = diff (toEnum op) dx l r
+                                            UMA.unsafeWrite partial (i :. lj) dxl
+                                            UMA.unsafeWrite partial (i :. rj) dxr
+          makeRev _ = pure ()
+          {-
       reverseMode fwd = foldr (makeRev) rev0 (IntMap.toDescList t)
         where
           rev0 = IntMap.insert 0 (M.replicate (getComp xss) (M.Sz m) 1) IntMap.empty
@@ -352,7 +410,7 @@ reverseModeUniqueArr xss theta ys f t =
                                                (dxl, dxr) = diff (toEnum op) dx l r
                                            in IntMap.insert (2*j + 2) dxr $ IntMap.insert (2*j + 1) dxl rev
           makeRev (j, _) rev = rev
-
+          -}
 
       -- dx is the current derivative so far
       -- fx is the evaluation of the left branch
@@ -364,7 +422,19 @@ reverseModeUniqueArr xss theta ys f t =
       arr1 !**! arr2 = M.zipWith (**) arr1 arr2
 
       diff Add dx fx gy = (dx, dx)
-      diff Sub dx fx gy = (dx, M.map negate dx)
+      diff Sub dx fx gy = (dx, negate dx)
+      diff Mul dx fx gy = (dx * gy, dx * fx)
+      diff Div dx fx gy = (dx / gy, dx * (negate fx / (gy * gy)))
+      diff Power dx fx gy = let dxl = dx * (fx ** (gy-1))
+                                dv2 = fx * log fx
+                            in (dxl * gy, dxl * dv2)
+      diff PowerAbs dx fx gy = let dxl = (gy * fx) * (fx ** abs (gy - 2))
+                                   dxr = (log (abs fx)) * (fx ** abs gy)
+                               in (dxl * dx, dxr * dx)
+      diff AQ dx fx gy = let dxl = recip ((sqrt . (+1)) (gy * gy))
+                             dxy = fx * gy * (dxl^3) -- / (sqrt (gy*gy + 1))
+                         in (dxl * dx, dxy * dx)
+                         {-
       diff Mul dx fx gy = (dx !*! gy, dx !*! fx)
       diff Div dx fx gy = (dx !/! gy, dx !*! (M.map negate fx !/! (gy !*! gy)))
       diff Power dx fx gy = let dxl = dx !*! (fx !**! (M.map (subtract 1) gy))
@@ -376,18 +446,28 @@ reverseModeUniqueArr xss theta ys f t =
       diff AQ dx fx gy = let dxl = M.map recip (M.map (sqrt . (+1)) (gy !*! gy))
                              dxy = fx !*! gy !*! (M.map (^3) dxl) -- / (sqrt (gy*gy + 1))
                          in (dxl !*! dx, dxy !*! dx)
-
+                         -}
 
       -- once we reach a leaf with a parameter, we return a singleton
       -- with that derivative upwards until the root
-      --combine :: Array S Ix2 Double -> MArray (PrimState IO) S Ix1 Double -> Array D Ix1 Double -> IO ()
+      combine ::  MArray (PrimState IO) S Ix2 Double -> MArray (PrimState IO) S Ix1 Double -> Array S Ix1 Double -> IO ()
+      combine partial jacob err = forM_ t makeJacob
+        where
+            makeJacob (j, (0, 1, ix, _)) = do let j' = j2ix IntMap.! j
+                                                  addI a b acc = do let v1 = err M.! a
+                                                                    v2 <- UMA.unsafeRead partial (a :. b)
+                                                                    pure (v1*v2 + acc)
+                                              acc <- foldM (\a i -> addI i j' a) 0 [0..m-1]
+                                              UMA.unsafeWrite jacob ix acc
+            makeJacob _ = pure ()
+            {-
       combine :: IntMap.IntMap (Array D Ix1 Double) -> MArray (PrimState IO) S Ix1 Double -> Array D Ix1 Double -> IO ()
       combine partial jacob err = forM_ (IntMap.toAscList t) makeJacob
         where
             makeJacob (j, (0, 1, ix, _)) = do v <- dotM (partial IntMap.! j) err
                                               UMA.unsafeWrite jacob ix v
             makeJacob _ = pure ()
-
+            -}
 
 -- | The function `forwardModeUnique` calculates the numerical gradient of the tree and evaluates the tree at the same time. It assumes that each parameter has a unique occurrence in the expression. This should be significantly faster than `forwardMode`.
 forwardModeUniqueJac  :: SRMatrix -> PVector -> Fix SRTree -> [PVector]
