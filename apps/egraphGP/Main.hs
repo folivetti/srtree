@@ -157,7 +157,7 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
                                      pure (ec, False)
                     BestFirst  -> do
                       ecsPareto <- getParetoEcsUpTo radius
-                      ecsBest   <- getBestEcs (isSizeOf (<=maxSize)) radius
+                      ecsBest   <- getTopECLassThat radius (isSizeOf (<=maxSize))
 
                       ecPareto     <- combineFrom ecsPareto
                       curFitPareto <- getFitness ecPareto
@@ -233,17 +233,7 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
                               then add myCost (Bin op e1 e2) >>= canonical
                               else add myCost (Bin op e2 e1) >>= canonical
 
-    getParetoEcsUpTo n = concat <$> (forM [1..maxSize] $ \i -> getBestEcsOfSize  i n)
-
-    getBestEcsOfSize i n = do
-      ecs <- getTopECLassWithSize i n
-      Prelude.mapM canonical (Prelude.take n ecs)
-
-    getBestEcs p n = do
-      ecs  <- getTopECLassThat n p
-      --fits <- Prelude.mapM getFitness ecs
-      --let sorted = sort $ Prelude.zip (Prelude.map (fmap negate) fits) ecs
-      Prelude.mapM canonical (Prelude.take n ecs)
+    getParetoEcsUpTo n = concat <$> (forM [1..maxSize] $ \i -> getTopECLassWithSize  i n)
 
     randomChildFrom ec maxL = do
       p <- rnd toss -- whether to go deeper or return this level
@@ -287,12 +277,6 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
                         pure ecId
         where powabs l r  = Fix (Bin PowerAbs l r)
 
-    getBestEclassThat p  =
-        do ecIds <- getTopECLassThat 1 p -- isValidFitness
-           --bestFit <- foldM (\acc -> getFitness >=> (pure . max acc . fromJust)) ((-1.0)/0.0) ecIds
-           --ecIds'  <- getEClassesThat (fitnessIs (== Just bestFit))
-           Prelude.mapM canonical $ Prelude.take 1 ecIds
-
     getBestExprWithSize n =
         do ec <- getTopECLassWithSize n 1
            if (not (null ec))
@@ -303,7 +287,7 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
             else pure []
 
     getBestExprThat p  =
-        do ec <- getBestEclassThat p
+        do ec <- getTopECLassThat 1 p
            if (not (null ec))
             then do
               bestFit <- getFitness $ head ec

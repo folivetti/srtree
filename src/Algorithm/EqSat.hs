@@ -57,7 +57,7 @@ eqSat expr rules costFun maxIt =
        --info2     <- gets ((IntMap.! 9) . _eClass)
        --traceShow (info, info2) $
        if not end -- if had an early stop
-         then do eqSat best rules costFun it -- reapplies eqsat on the best so far 
+         then do modify' (const emptyGraph) >> eqSat best rules costFun it -- reapplies eqsat on the best so far
          else pure best
 
 type CostMap = Map EClassId (Int, Fix SRTree)

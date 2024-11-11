@@ -76,7 +76,8 @@ getTopECLassThat n p = do
                                               else go m bests t
 getTopECLassWithSize :: Monad m => Int -> Int -> EGraphST m [EClassId]
 getTopECLassWithSize sz n = do
-  go n [] <$> gets ((IntMap.!? sz) . _sizeFitDB . _eDB)
+   gets (go n [] . (IntMap.!? sz) . _sizeFitDB . _eDB)
+    -- >>= mapM canonical
   where
     -- go :: Monad m => Int -> [EClassId] -> Maybe (RangeTree Double) -> EGraphST m [EClassId]
     go _ bests Nothing   = []

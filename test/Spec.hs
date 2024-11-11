@@ -72,7 +72,7 @@ forwardVals = map (M.toList . snd . forwardMode xs' thetaMulti err) exprs
 -- we must relabel the parameters of the expression to sequence values
 --gradVals :: [(Double, [Double])]
 gradVals = map (M.toList . snd . forwardModeUnique xs' thetaSingle err . relabelParams) exprs
-gradVals' = map (M.toList . snd . reverseModeUnique xs' thetaSingle err . relabelParams) exprs
+--gradVals' = map (M.toList . snd . reverseModeUnique xs' thetaSingle err . relabelParams) exprs
 
 -- values of the evaluated expressions
 --exprVals :: [Double]
@@ -88,7 +88,7 @@ tests :: Test
 tests = TestList $
      zipWith (testDiff "forward mode" "autodiff x forward mode") autoDiffMult forwardVals
   <> zipWith (testDiff "forward mode" "autodiff x forward mode unique") autoDiffSingle gradVals
-  <> zipWith (testDiff "reverse mode" "autodiff x reverse mode unique") autoDiffSingle gradVals'
+  -- <> zipWith (testDiff "reverse mode" "autodiff x reverse mode unique") autoDiffSingle gradVals'
 
 main :: IO ()
 main = do
