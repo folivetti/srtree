@@ -44,9 +44,9 @@ add costFun enode =
   do enode''   <- canonize enode                                             -- canonize e-node
      constEnode <- calculateConsts enode''
      let enode' = case constEnode of
-                     ConstVal x -> Const x
-                     ParamIx  x -> Param x
-                     _          -> enode''
+                    ConstVal x -> Const x
+                    ParamIx  x -> Param x
+                    _          -> enode''
      maybeEid <- gets ((Map.!? enode') . _eNodeToEClass)                -- check if canonical e-node exists
      case maybeEid of
        Just eid -> pure eid
@@ -146,6 +146,7 @@ merge costFun c1 c2 =
            $ modify' $ over (eDB . analysis) (_parents subC <>)
          updateDBs newC led ledC ledO sub subC subO
          modifyEClass costFun led
+         forM_ (_eNodes newC) $ \en -> addToDB (decodeEnode en) led
          pure led
 
     getLeaderSub c1 c1O c2 c2O =

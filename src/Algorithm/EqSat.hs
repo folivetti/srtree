@@ -116,7 +116,7 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty
 
         go it sch = do eNodes   <- gets _eNodeToEClass
                        eClasses <- gets _eClass
-                       --createDB
+                       --createDB -- TODO: partial db is still incomplete 
                        --db       <- gets (_patDB . _eDB) -- createDB -- creates the DB
 
                        -- step 1: match the rules

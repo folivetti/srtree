@@ -296,12 +296,13 @@ reverseModeUnique xss theta ys f t = unsafePerformIO $
       combine j (Bin op l r) s = l+r
 
 -- | Same as above, but using reverse mode with the tree encoded as an array, that is even faster.
---reverseModeUniqueArr :: SRMatrix
---                  -> PVector
---                  -> SRVector
---                  -> (SRVector -> SRVector)
---                  -> Array S Ix1 (Int, Int, Int, Double) -- arity, opcode, ix, const val
---                  -> (Array D Ix1 Double, Array S Ix1 Double)
+reverseModeUniqueArr :: SRMatrix
+                  -> PVector
+                  -> SRVector
+                  -> (Double -> Double)
+                  -> [(Int, (Int, Int, Int, Double))] -- arity, opcode, ix, const val
+                  -> IntMap.IntMap Int
+                  -> (Array D Ix1 Double, Array S Ix1 Double)
 reverseModeUniqueArr xss theta ys f t j2ix =
     {-let fwd = forward
         v   = fwd IntMap.! 0
@@ -312,18 +313,33 @@ reverseModeUniqueArr xss theta ys f t j2ix =
             fwd     <- M.newMArray (Sz2 m n) 0
             partial <- M.newMArray (Sz2 m n) 0
             jacob   <- M.newMArray (Sz p) 0
-            fwd' <- UMA.unsafeFreeze (getComp xss) fwd
-            let v = fwd' M.<! 0
-                err = M.computeAs S $ f v - delay ys
+            err     <- M.newMArray (Sz m) 0
+            val     <- M.newMArray (Sz m) 0
+            calculateYHat fwd val
+            let ys' = M.computeAs S ys
+            forM_ [0..m-1] $ \i -> do
+                vi <- UMA.unsafeRead fwd (i :. 0)
+                let vy = ys' M.! i
+                UMA.unsafeWrite err i (f vi - vy)
+            --fwd' <- UMA.unsafeFreeze (getComp xss) fwd
+            --let v = fwd' M.<! 0
+            --    err = M.computeAs S $ f v - delay ys
             forward fwd
+            reverseMode fwd partial
             combine partial jacob err
             j <- UMA.unsafeFreeze (getComp xss) jacob
-            pure (v, j)
+            v <- M.computeAs S <$> UMA.unsafeFreeze (getComp xss) val
+            pure (delay v, j)
 
   where
       (Sz2 m _) = M.size xss
       (Sz p)    = M.size theta
       n         = length t
+
+      calculateYHat :: MArray (PrimState IO) S Ix2 Double -> MArray (PrimState IO) S Ix1 Double -> IO ()
+      calculateYHat fwd yhat = forM_ [0..m-1] $ \i -> do
+          vi <- UMA.unsafeRead fwd (i :. 0)
+          UMA.unsafeWrite yhat i (f vi)
 
       forward :: MArray (PrimState IO) S Ix2 Double -> IO ()
       forward fwd = forM_ (Prelude.reverse t) makeFwd
@@ -376,17 +392,17 @@ reverseModeUniqueArr xss theta ys f t j2ix =
       reverseMode fwd partial = do forM_ [0..m-1] $ \i -> UMA.unsafeWrite partial (i :. 0) 1
                                    forM_ t makeRev
         where
-          makeRev (j, (1, f, _, _)) = do forM_ [0..m-1] $ \i -> do
-                                           let dxj = j2ix IntMap.! j
-                                               vj  = j2ix IntMap.! (2*j + 1)
+          makeRev (j, (1, f, _, _)) = do let dxj = j2ix IntMap.! j
+                                             vj  = j2ix IntMap.! (2*j + 1)
+                                         forM_ [0..m-1] $ \i -> do
                                            v <- UMA.unsafeRead fwd (i :. vj)
                                            dx <- UMA.unsafeRead partial  (i :. dxj)
                                            let val = dx * derivative (toEnum f) v
                                            UMA.unsafeWrite partial (i :. vj) val
-          makeRev (j, (2, op, _, _)) = do forM_ [0..m-1] $ \i -> do
-                                            let dxj = j2ix IntMap.! j
-                                                lj  = j2ix IntMap.! (2*j + 1)
-                                                rj  = j2ix IntMap.! (2*j + 2)
+          makeRev (j, (2, op, _, _)) = do let dxj = j2ix IntMap.! j
+                                              lj  = j2ix IntMap.! (2*j + 1)
+                                              rj  = j2ix IntMap.! (2*j + 2)
+                                          forM_ [0..m-1] $ \i -> do
                                             l <- UMA.unsafeRead fwd (i :. lj)
                                             r <- UMA.unsafeRead fwd (i :. rj)
                                             dx <- UMA.unsafeRead partial  (i :. dxj)
@@ -450,11 +466,11 @@ reverseModeUniqueArr xss theta ys f t j2ix =
 
       -- once we reach a leaf with a parameter, we return a singleton
       -- with that derivative upwards until the root
-      combine ::  MArray (PrimState IO) S Ix2 Double -> MArray (PrimState IO) S Ix1 Double -> Array S Ix1 Double -> IO ()
+      combine ::  MArray (PrimState IO) S Ix2 Double -> MArray (PrimState IO) S Ix1 Double -> MArray (PrimState IO) S Ix1 Double -> IO ()
       combine partial jacob err = forM_ t makeJacob
         where
             makeJacob (j, (0, 1, ix, _)) = do let j' = j2ix IntMap.! j
-                                                  addI a b acc = do let v1 = err M.! a
+                                                  addI a b acc = do v1 <- UMA.unsafeRead err a
                                                                     v2 <- UMA.unsafeRead partial (a :. b)
                                                                     pure (v1*v2 + acc)
                                               acc <- foldM (\a i -> addI i j' a) 0 [0..m-1]

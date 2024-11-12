@@ -64,10 +64,12 @@ minimizeNLL dist msErr niter xss ys tree t0
     (Sz n)     = size t0
     (Sz m)     = size ys
     funAndGrad = second (toStorableVector . computeAs S) . gradNLL dist msErr xss ys tree . fromStorableVector compMode
-    (f, _)     = gradNLLArr dist msErr xss ys treeArr j2ix t0 -- if there's no parameter or no iterations
+    (f, _)     = gradNLL dist msErr xss ys tree t0 -- if there's no parameter or no iterations
+    --debug1     = gradNLLArr dist msErr xss ys treeArr j2ix t0
+    --debug2     = gradNLL dist msErr xss ys tree t0
 
     algorithm  = LBFGS funAndGrad Nothing
-    stop       = ObjectiveRelativeTolerance 1e-20 :| [MaximumEvaluations (fromIntegral niter)]
+    stop       = ObjectiveRelativeTolerance 1e-10 :| [MaximumEvaluations (fromIntegral niter)]
     problem    = LocalProblem (fromIntegral n) stop algorithm
     (t_opt, nEvs) = case minimizeLocal problem t0' of
                       Right sol -> (solutionParams sol, nEvals sol) -- traceShow (">>>>>>>", nEvals sol) $

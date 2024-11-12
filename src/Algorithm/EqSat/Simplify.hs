@@ -63,7 +63,7 @@ isNotParam = constrainOnVal $
 isNotZero :: ConstrFun
 isNotZero = constrainOnVal $
     \case
-       ConstVal x -> abs x < 1e-9
+       ConstVal x -> abs x > 1e-9
        _          -> True
 
 -- check if the matched pattern is even 
@@ -117,6 +117,7 @@ rewriteBasic =
     , ("w" * "x") / ("z" * "y") :=> ("w" / "z") * ("x" / "y") -- TODO handle with power :| isConstPt "w" :| isConstPt "z" :| isNotZero "z"
     -- TODO: a + b*y :=> b * (a/b + y) :| isNotZero b
     , (("x" * "y") + ("z" * "w")) :=> "x" * ("y" + ("z" / "x") * "w") :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
+    -- , "a" * (("x" * "y") + ("z" * "w")) :=> ("a" * "x") * ("y" + ("z" / "x") * "w") :| isConstPt "a" :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
     , (("x" * "y") - ("z" * "w")) :=> "x" * ("y" - ("z" / "x") * "w") :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
     , (("x" * "y") * ("z" * "w")) :=> ("x" * "z") * ("y" * "w") :| isConstPt "x" :| isConstPt "z"
     -- , "x" + "y" :=> "y" * ("x" * "y" ** (-1) + 1) :| isNotZero "y" -- GABRIEL 
@@ -192,8 +193,8 @@ constReduction =
 --            univariates
 myCost :: SRTree Int -> Int
 myCost (Var _)      = 1
-myCost (Const _)    = 1
-myCost (Param _)    = 1
+myCost (Const _)    = 3
+myCost (Param _)    = 3
 myCost (Bin op l r) = 2 + l + r
 myCost (Uni _ t)    = 3 + t
 
