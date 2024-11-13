@@ -63,7 +63,7 @@ minimizeNLL dist msErr niter xss ys tree t0
     j2ix       = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]
     (Sz n)     = size t0
     (Sz m)     = size ys
-    funAndGrad = second (toStorableVector . computeAs S) . gradNLL dist msErr xss ys tree . fromStorableVector compMode
+    funAndGrad = second (toStorableVector . computeAs S) . gradNLLArr dist msErr xss ys treeArr j2ix
     (f, _)     = gradNLL dist msErr xss ys tree t0 -- if there's no parameter or no iterations
     --debug1     = gradNLLArr dist msErr xss ys treeArr j2ix t0
     --debug2     = gradNLL dist msErr xss ys tree t0

@@ -51,6 +51,8 @@ library:
   extra-libraries:     nlopt
   ghc-options:
     - -fwarn-incomplete-patterns
+    - -fdistinct-constructor-tables
+    - -finfo-table-map
 
 executables:
   tinygp:
@@ -109,7 +111,9 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     - -O2
-    #- -optc-O3
+    - -fdistinct-constructor-tables
+    - -finfo-table-map
+    - -optc-O3
     dependencies:
     - srtree
     - optparse-applicative >= 0.17 && < 0.19

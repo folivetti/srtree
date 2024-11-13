@@ -38,6 +38,7 @@ import Data.SRTree (Fix (..), SRTree (..), floatConstsToParam, relabelParams)
 import Data.SRTree.Derivative (deriveByParam)
 import Data.SRTree.Eval (PVector, SRMatrix, SRVector, compMode, evalTree)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.Vector.Storable as VS
 
 -- | Supported distributions for negative log-likelihood
 data Distribution = Gaussian | Bernoulli | Poisson
@@ -176,12 +177,12 @@ gradNLL Poisson _ xss (delay -> ys) tree theta
 
 -- | Gradient of the negative log-likelihood
 --Array B Ix1 (Int, Int, Int, Double)
-gradNLLArr :: Distribution -> Maybe Double -> SRMatrix -> PVector -> [(Int,(Int, Int, Int, Double))] -> IntMap.IntMap Int -> PVector -> (Double, SRVector)
+gradNLLArr :: Distribution -> Maybe Double -> SRMatrix -> PVector -> [(Int,(Int, Int, Int, Double))] -> IntMap.IntMap Int -> VS.Vector Double -> (Double, SRVector)
 gradNLLArr Gaussian msErr xss ys tree j2ix theta =
   (nll' Gaussian sErr yhat ys', delay grad ./ (sErr * sErr))
   where
     (Sz m)       = M.size ys
-    (Sz p)       = M.size theta
+    p            = VS.length theta
     ys'          = delay ys
     (yhat, grad) = reverseModeUniqueArr xss theta ys' id tree j2ix
     -- err          = yhat - delay ys

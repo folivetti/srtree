@@ -130,7 +130,7 @@ merge costFun c1 c2 =
   where
     mergeClasses :: Monad m => EClassId -> EClass -> EClassId -> EClassId -> EClass -> EClassId -> EGraphST m EClassId
     mergeClasses led ledC ledO sub subC subO =
-      do modify' $ over canonicalMap (IntMap.insert sub led) -- points sub e-class to leader to maintain consistency
+      do modify' $ over canonicalMap (IntMap.insert sub led . IntMap.insert subO led) -- points sub e-class to leader to maintain consistency
          let -- create new e-class with same id as led
              newC = EClass led
                            (_eNodes ledC `Set.union` _eNodes subC)

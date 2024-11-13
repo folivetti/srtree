@@ -79,6 +79,7 @@ instance Index ix => Fractional (M.Array D ix Double) where
 -- returns a vector with the same number of rows as xss and containing a single repeated value.
 replicateAs :: SRMatrix -> Double -> SRVector
 replicateAs xss c = let (Sz (m :. _)) = M.size xss in M.replicate (getComp xss) (Sz m) c
+{-# INLINE replicateAs #-}
 
 -- | Evaluates the tree given a vector of variable values, a vector of parameter values and a function that takes a Double and change to whatever type the variables have. This is useful when working with datasets of many values per variables.
 evalTree :: SRMatrix -> PVector -> Fix SRTree -> SRVector
@@ -184,6 +185,7 @@ evalInverse Exp    = log
 evalInverse Abs    = abs -- we assume abs(x) = sqrt(x^2) so y = sqrt(x^2) => x^2 = y^2 => x = sqrt(y^2) = x = abs(y)
 evalInverse Recip  = recip
 evalInverse Cube   = cbrt
+{-# INLINE evalInverse #-}
 
 -- | evals the right inverse of an operator 
 invright :: Floating a => Op -> a -> (a -> a)
@@ -194,6 +196,7 @@ invright Div v   = (*v)
 invright Power v = (**(1/v))
 invright PowerAbs v = (**(1/v))
 invright AQ v = (* sqrt (1 + v*v))
+{-# INLINE invright #-}
 
 -- | evals the left inverse of an operator 
 invleft :: Floating a => Op -> a -> (a -> a)
@@ -204,7 +207,9 @@ invleft Div v   = (v/) -- y = v / r => r = v/y
 invleft Power v = logBase v -- (/(log v)) . log -- y = v ^ r  log y = r log v r = log y / log v
 invleft PowerAbs v = logBase v . abs
 invleft AQ v = (v/)
+{-# INLINE invleft #-}
 
 -- | List of invertible functions
 invertibles :: [Function]
 invertibles = [Id, Sin, Cos, Tan, Tanh, ASin, ACos, ATan, ATanh, Sqrt, Square, Log, Exp, Recip]
+{-# INLINE invertibles #-}
