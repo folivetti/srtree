@@ -24,6 +24,7 @@ data Args = Args
       , rseed       :: Int
       , toScreen    :: Bool
       , useProfile  :: Bool
+      , simple      :: Bool
       , alpha       :: Double
       , ptype       :: PType
     } deriving Show
@@ -123,6 +124,9 @@ opt = Args
    <*> switch
         ( long "profile"
         <> help "If set, it will use profile likelihood to calculate the CIs." )
+   <*> switch
+       ( long "simple"
+       <> help "If set, calculates only SSE.")
    <*> option auto
        ( long "alpha"
        <> metavar "ALPHA"

@@ -342,7 +342,8 @@ reverseModeUniqueArr xss theta ys f t j2ix =
       toLin i j = i*m + j
 
       myForM_ [] _ = pure ()
-      myForM_ (!x:xs) f = f x >> myForM_ xs f
+      myForM_ (!x:xs) f = do !_ <- f x
+                             myForM_ xs f
       {-# INLINE myForM_ #-}
 
       calculateYHat :: MArray (PrimState IO) S Ix2 Double -> MArray (PrimState IO) S Ix1 Double -> IO ()

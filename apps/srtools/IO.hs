@@ -26,6 +26,10 @@ csvHeader :: String
 csvHeader = intercalate "," (basicFields <> optFields <> modelFields)
 {-# inline csvHeader #-}
 
+csvHeaderSimple :: String
+csvHeaderSimple = intercalate "," (basicFields <> optFields)
+{-# inline csvHeaderSimple #-}
+
 -- Open file if filename is not empty
 openWriteWithDefault :: Handle -> String -> IO Handle
 openWriteWithDefault dflt ""    = pure dflt
@@ -56,6 +60,27 @@ processTree args seed dset t ix = (basic, sseOrig, sseOpt, info, cis)
     info    = getInfo args' dset (_expr basic) treeVal
     cis     = getCI args' dset basic (alpha args')
 
+processTreeSimple :: Args        -- command line arguments
+            -> StdGen      -- random number generator
+            -> Datasets    -- datasets
+            -> Fix SRTree  -- expression in tree format
+            -> Int         -- index of the parsed expression
+            -> (BasicInfo, SSE, SSE)
+processTreeSimple args seed dset t ix = (basic, sseOrig, sseOpt)
+  where
+    (tree, theta0)  = floatConstsToParam t
+    mSErr'  = case dist args of
+                Gaussian -> estimateSErr Gaussian (msErr args)  (_xTr dset) (_yTr dset) (A.fromList compMode theta0) tree (niter args)
+                _        -> Nothing
+    args'   = args{ msErr = mSErr' }
+    basic   = getBasicStats args' seed dset tree theta0 ix
+    treeVal = case (_xVal dset, _yVal dset) of
+                (Nothing, _) -> _expr basic
+                (_, Nothing) -> _expr basic
+                (Just xV, Just yV) -> _expr $ getBasicStats args' seed dset{_xTr = xV, _yTr = yV} tree theta0 ix
+    sseOrig = getSSE dset t
+    sseOpt  = getSSE dset (_expr basic)
+
 -- print the results to a csv format (except CI)
 printResults :: Args -> StdGen -> Datasets -> [String] -> [Either String (Fix SRTree)] -> IO ()
 printResults args seed dset varnames exprs  = do
@@ -67,6 +92,18 @@ printResults args seed dset varnames exprs  = do
            Left  err -> hPutStrLn stderr ("invalid expression: " <> err)
            Right t   -> let treeData = processTree args seed dset t ix
                         in hPutStrLn hStat (toCsv treeData varnames)
+  unless (null (outfile args)) (hClose hStat)
+
+printResultsSimple :: Args -> StdGen -> Datasets -> [String] -> [Either String (Fix SRTree)] -> IO ()
+printResultsSimple args seed dset varnames exprs  = do
+  hStat <- openWriteWithDefault stdout (outfile args)
+  hPutStrLn hStat csvHeaderSimple
+  forM_ (zip [0..] exprs)
+     \(ix, tree) ->
+         case tree of
+           Left  err -> hPutStrLn stderr ("invalid expression: " <> err)
+           Right t   -> let treeData = processTreeSimple args seed dset t ix
+                        in hPutStrLn hStat (toCsvSimple treeData varnames)
   unless (null (outfile args)) (hClose hStat)
 
 -- change the stats into a string
@@ -82,6 +119,18 @@ toCsv (basic, sseOrig, sseOpt, info, _) varnames = intercalate "," (sBasic <> sS
     sSSEOpt   = map (showF sseOpt)  [_sseTr, _sseVal, _sseTe]
     sInfo     = map (showF info) [_bic, _bicVal, _aic, _aicVal, _evidence, _evidenceVal, _mdl, _mdlFreq, _mdlLatt, _mdlVal, _mdlFreqVal, _mdlLattVal, _nllTr, _nllVal, _nllTe, _cc, _cp]
               <> [intercalate ";" (map show (_fisher info))]
+    showF p f = show (f p)
+
+toCsvSimple :: (BasicInfo, SSE, SSE) -> [String] -> String
+toCsvSimple (basic, sseOrig, sseOpt) varnames = intercalate "," (sBasic <> sSSEOrig <> sSSEOpt)
+  where
+    sBasic    = [ show (_index basic), show (_fname basic), P.showExprWithVars varnames (_expr basic)
+                , show (_nNodes basic), show (_nParams basic)
+                , intercalate ";" (map show (_params basic))
+                , show (_nEvals basic)
+                ]
+    sSSEOrig  = map (showF sseOrig) [_sseTr, _sseVal, _sseTe]
+    sSSEOpt   = map (showF sseOpt)  [_sseTr, _sseVal, _sseTe]
     showF p f = show (f p)
 
 -- get trees of transformed features

@@ -21,7 +21,9 @@ main = do
   withInput (infile args) (from args) varnames False (simpl args)
     >>= if toScreen args
           then printResultsScreen args seed dset varnames' tgname  -- full report on screne
-          else printResults args seed dset varnames' -- csv file
+          else if simple args
+                 then printResultsSimple args seed dset varnames' -- csv file
+                 else printResults args seed dset varnames' -- csv file
   where    
     opts = info (opt <**> helper)
             ( fullDesc <> progDesc "Optimize the parameters of\
