@@ -1,0 +1,79 @@
+-d datasets/606_fri_c2_1000_10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS    10,07s  user 0,06s system 98% cpu 10,296 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                78 MB
+page faults from disk:     0
+other page faults:         20285
+ -d datasets/606_fri_c2_1000_10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS    0,52s  user 0,01s system 97% cpu 0,550 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                41 MB
+page faults from disk:     0
+other page faults:         7707
+ -d datasets/606_fri_c2_1000_10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS    3,47s  user 0,03s system 97% cpu 3,590 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                54 MB
+page faults from disk:     0
+other page faults:         13844
+ -d datasets/606_fri_c2_1000_10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS    101,47s  user 0,45s system 98% cpu 1:43,22 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                515 MB
+page faults from disk:     0
+other page faults:         132149
+ -d datasets/606_fri_c2_1000_10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS    100,31s  user 0,54s system 97% cpu 1:43,02 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                512 MB
+page faults from disk:     0
+other page faults:         131588
+ -d datasets/606_fri_c2_1000_10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS    100,90s  user 0,46s system 98% cpu 1:42,51 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                507 MB
+page faults from disk:     0
+other page faults:         130233
+ -d datasets/606_fri_c2_1000_10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS    0,38s  user 0,01s system 97% cpu 0,405 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                41 MB
+page faults from disk:     0
+other page faults:         7711
+ -d datasets/606_fri_c2_1000_10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS    1,02s  user 0,03s system 97% cpu 1,076 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                41 MB
+page faults from disk:     0
+other page faults:         8309
+ -d datasets/606_fri_c2_1000_10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS    105,87s  user 0,43s system 98% cpu 1:47,53 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                509 MB
+page faults from disk:     0
+other page faults:         130809
+ -d datasets/606_fri_c2_1000_10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS    104,46s  user 0,44s system 98% cpu 1:46,18 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                513 MB
+page faults from disk:     0
+other page faults:         131748
+^C
+ -d datasets/606_fri_c2_1000_10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS    102,40s  user 0,51s system 98% cpu 1:44,26 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                506 MB
+page faults from disk:     0
+other page faults:         129929
+

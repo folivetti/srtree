@@ -1,0 +1,170 @@
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   7,54s  user 0,09s system 97% cpu 7,816 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                133 MB
+page faults from disk:     0
+other page faults:         31247
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   0,02s  user 0,00s system 95% cpu 0,029 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                21 MB
+page faults from disk:     0
+other page faults:         2089
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   54,03s  user 0,38s system 98% cpu 55,277 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                519 MB
+page faults from disk:     0
+other page faults:         129876
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   53,26s  user 0,37s system 98% cpu 54,550 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                511 MB
+page faults from disk:     0
+other page faults:         127926
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   54,60s  user 0,44s system 98% cpu 55,946 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                527 MB
+page faults from disk:     0
+other page faults:         132014
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   54,81s  user 0,42s system 98% cpu 56,297 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                449 MB
+page faults from disk:     0
+other page faults:         111937
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   0,15s  user 0,02s system 95% cpu 0,168 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                22 MB
+page faults from disk:     0
+other page faults:         2688
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   0,16s  user 0,00s system 100% cpu 0,159 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                22 MB
+page faults from disk:     0
+other page faults:         2880
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   0,16s  user 0,01s system 96% cpu 0,175 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                23 MB
+page faults from disk:     0
+other page faults:         2992
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   0,17s  user 0,01s system 95% cpu 0,181 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                22 MB
+page faults from disk:     0
+other page faults:         2826
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   1,16s  user 0,01s system 95% cpu 1,225 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                42 MB
+page faults from disk:     0
+other page faults:         7960
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   56,12s  user 0,36s system 98% cpu 57,589 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                460 MB
+page faults from disk:     0
+other page faults:         114453
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   53,23s  user 0,38s system 98% cpu 54,593 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                513 MB
+page faults from disk:     0
+other page faults:         128135
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   52,64s  user 0,41s system 98% cpu 54,000 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                521 MB
+page faults from disk:     0
+other page faults:         130251
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   0,05s  user 0,00s system 93% cpu 0,053 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                20 MB
+page faults from disk:     0
+other page faults:         2125
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   54,17s  user 0,43s system 98% cpu 55,472 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                513 MB
+page faults from disk:     0
+other page faults:         128162
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   0,86s  user 0,02s system 95% cpu 0,921 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                39 MB
+page faults from disk:     0
+other page faults:         7180
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   54,16s  user 0,35s system 98% cpu 55,433 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                444 MB
+page faults from disk:     0
+other page faults:         110865
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   53,91s  user 0,41s system 98% cpu 55,219 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                522 MB
+page faults from disk:     0
+other page faults:         130661
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   54,30s  user 0,37s system 98% cpu 55,606 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                411 MB
+page faults from disk:     0
+other page faults:         102240
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   49,89s  user 4,22s system 98% cpu 55,066 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                525 MB
+page faults from disk:     0
+other page faults:         131283
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   0,23s  user 0,00s system 95% cpu 0,245 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                25 MB
+page faults from disk:     0
+other page faults:         3204
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   53,28s  user 0,35s system 98% cpu 54,617 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                496 MB
+page faults from disk:     0
+other page faults:         124127
+^C
+ -d datasets/192_vineyard.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>   18,75s  user 0,20s system 97% cpu 19,454 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                251 MB
+page faults from disk:     0
+other page faults:         61517
+

@@ -92,7 +92,7 @@ main :: IO ()
 main = do
   --args <- pure (Args "nikuradse_2.csv" 100) -- execParser opts
   args <- execParser opts
-  ((x, y, _, _), _, _) <- loadDataset (dataset args) True
+  ((x, y, _, _), _, _, _) <- loadDataset (dataset args) True
   print "opa"
 
   where

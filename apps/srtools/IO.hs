@@ -9,13 +9,12 @@ import Control.Monad ( unless, forM_ )
 import System.Random ( StdGen )
 
 import Data.SRTree ( SRTree (..), Fix (..), var, floatConstsToParam, relabelVars )
-import Algorithm.SRTree.Opt ( estimateSErr )
 import Algorithm.SRTree.Likelihoods ( Distribution (..) )
 import Algorithm.SRTree.ConfidenceIntervals ( printCI, BasicStats(_stdErr, _corr), CI )
 import qualified Data.SRTree.Print as P
 import Data.SRTree.Eval ( compMode )
 
-import Args ( Args(outfile, alpha,msErr,dist,niter) )
+import Args ( Args(outfile, alpha,dist,niter) )
 import Report
 import Data.SRTree.Recursion ( cata )
 
@@ -46,19 +45,16 @@ processTree :: Args        -- command line arguments
 processTree args seed dset t ix = (basic, sseOrig, sseOpt, info, cis)
   where
     (tree, theta0)  = floatConstsToParam t
-    mSErr'  = case dist args of
-                Gaussian -> estimateSErr Gaussian (msErr args)  (_xTr dset) (_yTr dset) (A.fromList compMode theta0) tree (niter args)
-                _        -> Nothing
-    args'   = args{ msErr = mSErr' }
-    basic   = getBasicStats args' seed dset tree theta0 ix
+
+    basic   = getBasicStats args seed dset tree theta0 ix
     treeVal = case (_xVal dset, _yVal dset) of
                 (Nothing, _) -> _expr basic
                 (_, Nothing) -> _expr basic
-                (Just xV, Just yV) -> _expr $ getBasicStats args' seed dset{_xTr = xV, _yTr = yV} tree theta0 ix
+                (Just xV, Just yV) -> _expr $ getBasicStats args seed dset{_xTr = xV, _yTr = yV} tree theta0 ix
     sseOrig = getSSE dset t
     sseOpt  = getSSE dset (_expr basic)
-    info    = getInfo args' dset (_expr basic) treeVal
-    cis     = getCI args' dset basic (alpha args')
+    info    = getInfo args dset (_expr basic) treeVal
+    cis     = getCI args dset basic (alpha args)
 
 processTreeSimple :: Args        -- command line arguments
             -> StdGen      -- random number generator
@@ -69,15 +65,12 @@ processTreeSimple :: Args        -- command line arguments
 processTreeSimple args seed dset t ix = (basic, sseOrig, sseOpt)
   where
     (tree, theta0)  = floatConstsToParam t
-    mSErr'  = case dist args of
-                Gaussian -> estimateSErr Gaussian (msErr args)  (_xTr dset) (_yTr dset) (A.fromList compMode theta0) tree (niter args)
-                _        -> Nothing
-    args'   = args{ msErr = mSErr' }
-    basic   = getBasicStats args' seed dset tree theta0 ix
+
+    basic   = getBasicStats args seed dset tree theta0 ix
     treeVal = case (_xVal dset, _yVal dset) of
                 (Nothing, _) -> _expr basic
                 (_, Nothing) -> _expr basic
-                (Just xV, Just yV) -> _expr $ getBasicStats args' seed dset{_xTr = xV, _yTr = yV} tree theta0 ix
+                (Just xV, Just yV) -> _expr $ getBasicStats args seed dset{_xTr = xV, _yTr = yV} tree theta0 ix
     sseOrig = getSSE dset t
     sseOpt  = getSSE dset (_expr basic)
 

@@ -51,8 +51,8 @@ tree2arr tree = IntMap.fromList listTree
     convert (Bin op l r) iy = (iy, (2, fromEnum op, -1, -1)) : (l <> r)
 
 -- | minimizes the negative log-likelihood of the expression
-minimizeNLL :: Distribution -> Maybe Double -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
-minimizeNLL dist msErr niter xss ys tree t0
+minimizeNLL :: Distribution -> Maybe SRMatrix -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
+minimizeNLL dist mXerr mYerr niter xss ys tree t0
   | niter == 0 = (t0, f, 0)
   | n == 0     = (t0, f, 0)
   | otherwise  = (fromStorableVector compMode t_opt, f, nEvs)
@@ -63,8 +63,8 @@ minimizeNLL dist msErr niter xss ys tree t0
     j2ix       = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]
     (Sz n)     = size t0
     (Sz m)     = size ys
-    funAndGrad = second (toStorableVector . computeAs S) . gradNLLArr dist msErr xss ys treeArr j2ix
-    (f, _)     = gradNLL dist msErr xss ys tree t0 -- if there's no parameter or no iterations
+    funAndGrad = second (toStorableVector . computeAs S) . gradNLLArr dist mXerr mYerr xss ys treeArr j2ix
+    (f, _)     = gradNLL dist mXerr mYerr xss ys tree t0 -- if there's no parameter or no iterations
     --debug1     = gradNLLArr dist msErr xss ys treeArr j2ix t0
     --debug2     = gradNLL dist msErr xss ys tree t0
 
@@ -76,8 +76,8 @@ minimizeNLL dist msErr niter xss ys tree t0
                       Left e    -> (t0', 0)
 
 -- | minimizes the likelihood assuming repeating parameters in the expression 
-minimizeNLLNonUnique :: Distribution -> Maybe Double -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
-minimizeNLLNonUnique dist msErr niter xss ys tree t0
+minimizeNLLNonUnique :: Distribution -> Maybe SRMatrix -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
+minimizeNLLNonUnique dist mXerr mYerr niter xss ys tree t0
   | niter == 0 = (t0, f)
   | n == 0     = (t0, f)
   | otherwise  = (fromStorableVector compMode t_opt, f)
@@ -85,8 +85,8 @@ minimizeNLLNonUnique dist msErr niter xss ys tree t0
     t0'        = toStorableVector t0
     (Sz n)     = size t0
     (Sz m)     = size ys
-    funAndGrad = second (toStorableVector . computeAs S) . gradNLLNonUnique dist msErr xss ys tree . fromStorableVector compMode
-    (f, _)     = gradNLLNonUnique dist msErr xss ys tree t0 -- if there's no parameter or no iterations
+    funAndGrad = second (toStorableVector . computeAs S) . gradNLLNonUnique dist mXerr mYerr xss ys tree . fromStorableVector compMode
+    (f, _)     = gradNLLNonUnique dist mXerr mYerr xss ys tree t0 -- if there's no parameter or no iterations
 
     algorithm  = LBFGS funAndGrad Nothing
     stop       = ObjectiveRelativeTolerance 1e-5 :| [MaximumEvaluations (fromIntegral niter)]
@@ -96,8 +96,8 @@ minimizeNLLNonUnique dist msErr niter xss ys tree t0
                   Left e    -> t0'
 
 -- | minimizes the function while keeping the parameter ix fixed (used to calculate the profile)
-minimizeNLLWithFixedParam :: Distribution -> Maybe Double -> Int -> SRMatrix -> PVector -> Fix SRTree -> Int -> PVector -> PVector
-minimizeNLLWithFixedParam dist msErr niter xss ys tree ix t0
+minimizeNLLWithFixedParam :: Distribution -> Maybe SRMatrix -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> Int -> PVector -> PVector
+minimizeNLLWithFixedParam dist mXerr mYerr niter xss ys tree ix t0
   | niter == 0 = t0
   | n == 0     = t0
   | n > m      = t0
@@ -107,8 +107,8 @@ minimizeNLLWithFixedParam dist msErr niter xss ys tree ix t0
     (Sz n)     = size t0
     (Sz m)     = size ys
     setTo0     = (VS.// [(ix, 0.0)])
-    funAndGrad = second (setTo0 . toStorableVector . computeAs S). gradNLLNonUnique dist msErr xss ys tree . fromStorableVector compMode
-    (f, _)     = gradNLLNonUnique dist msErr xss ys tree t0 -- if there's no parameter or no iterations
+    funAndGrad = second (setTo0 . toStorableVector . computeAs S). gradNLLNonUnique dist mXerr mYerr xss ys tree . fromStorableVector compMode
+    (f, _)     = gradNLLNonUnique dist mXerr mYerr xss ys tree t0 -- if there's no parameter or no iterations
 
     algorithm  = LBFGS funAndGrad Nothing
     stop       = ObjectiveRelativeTolerance 1e-5 :| [MaximumEvaluations (fromIntegral niter)]
@@ -119,16 +119,17 @@ minimizeNLLWithFixedParam dist msErr niter xss ys tree ix t0
 
 -- | minimizes using Gaussian likelihood 
 minimizeGaussian :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
-minimizeGaussian = minimizeNLL Gaussian Nothing
+minimizeGaussian = minimizeNLL Gaussian Nothing Nothing
 
 -- | minimizes using Binomial likelihood 
 minimizeBinomial :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
-minimizeBinomial = minimizeNLL Bernoulli Nothing
+minimizeBinomial = minimizeNLL Bernoulli Nothing Nothing
 
 -- | minimizes using Poisson likelihood 
 minimizePoisson :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
-minimizePoisson = minimizeNLL Poisson Nothing
+minimizePoisson = minimizeNLL Poisson Nothing Nothing
 
+{-
 -- estimates the standard error if not provided 
 estimateSErr :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Int -> Maybe Double
 estimateSErr Gaussian Nothing  xss ys theta0 t nIter = Just err
@@ -140,3 +141,4 @@ estimateSErr Gaussian Nothing  xss ys theta0 t nIter = Just err
     err    = sqrt $ ssr / fromIntegral (m - p)
 estimateSErr _        (Just s) _   _  _ _ _   = Just s
 estimateSErr _        _        _   _  _ _ _   = Nothing
+-}

@@ -43,6 +43,9 @@ dependencies:
 - exceptions >= 0.10.7 && < 0.11 
 - hashable >= 1.4.4.0 && < 1.6
 - list-shuffle >= 1.0.0.1 && < 1.1
+- scheduler >= 2.0.0.1 && < 3
+- unliftio >= 0.2.10 && < 1
+- unliftio-core 
 
 library:
   source-dirs: src
@@ -53,6 +56,7 @@ library:
     - -fwarn-incomplete-patterns
     - -fdistinct-constructor-tables
     - -finfo-table-map
+    - -threaded
 
 executables:
   tinygp:
@@ -114,6 +118,7 @@ executables:
     - -fdistinct-constructor-tables
     - -finfo-table-map
     - -optc-O3
+    - -eventlog
     dependencies:
     - srtree
     - optparse-applicative >= 0.17 && < 0.19

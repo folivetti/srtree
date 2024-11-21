@@ -1,0 +1,72 @@
+ -d datasets/522_pm10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>  2>   1,17s  user 0,02s system 99% cpu 1,204 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                34 MB
+page faults from disk:     0
+other page faults:         5400
+ -d datasets/522_pm10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>  2>   110,05s  user 0,49s system 98% cpu 1:52,17 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                482 MB
+page faults from disk:     0
+other page faults:         120432
+ -d datasets/522_pm10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>  2>   106,20s  user 0,53s system 98% cpu 1:48,30 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                504 MB
+page faults from disk:     0
+other page faults:         126167
+ -d datasets/522_pm10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>  2>   100,28s  user 0,51s system 98% cpu 1:42,55 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                491 MB
+page faults from disk:     0
+other page faults:         122628
+ -d datasets/522_pm10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>  2>   101,30s  user 0,50s system 98% cpu 1:43,47 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                491 MB
+page faults from disk:     0
+other page faults:         122941
+ -d datasets/522_pm10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>  2>   102,13s  user 0,46s system 98% cpu 1:44,22 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                498 MB
+page faults from disk:     0
+other page faults:         124162
+ -d datasets/522_pm10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>  2>   108,10s  user 0,48s system 98% cpu 1:50,23 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                489 MB
+page faults from disk:     0
+other page faults:         122340
+ -d datasets/522_pm10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>  2>   2,13s  user 0,02s system 96% cpu 2,223 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                40 MB
+page faults from disk:     0
+other page faults:         7245
+ -d datasets/522_pm10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>  2>   109,02s  user 0,46s system 98% cpu 1:50,91 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                506 MB
+page faults from disk:     0
+other page faults:         126561
+^C
+ -d datasets/522_pm10.tsv.gz -g 50000 -a BestFirst -s 30 -k 3 +RTS -N1 >>  2>   92,67s  user 0,45s system 98% cpu 1:34,38 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                411 MB
+page faults from disk:     0
+other page faults:         101953
+

@@ -35,6 +35,8 @@ module Data.SRTree
          , constsToParam
          , floatConstsToParam
          , paramsToConst
+         , removeProtectedOps
+         , convertProtectedOps
          , Fix (..)
          )
          where
@@ -64,5 +66,7 @@ import Data.SRTree.Internal
          , constsToParam
          , floatConstsToParam
          , paramsToConst
+         , removeProtectedOps
+         , convertProtectedOps
          , Fix (..)
          )

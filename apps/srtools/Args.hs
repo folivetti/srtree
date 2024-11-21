@@ -19,7 +19,6 @@ data Args = Args
       , hasHeader   :: Bool
       , simpl       :: Bool
       , dist        :: Distribution
-      , msErr       :: Maybe Double
       , restart     :: Bool
       , rseed       :: Int
       , toScreen    :: Bool
@@ -62,11 +61,14 @@ opt = Args
                \ It will auto-detect and handle gzipped file based on gz extension. \
                \ It will also auto-detect the delimiter.\n\
                \ The filename can include extra information: \
-               \ filename.csv:start:end:target:vars where start and end \
+               \ filename.csv:start:end:target:cols:yerr:xerr where start and end \
                \ corresponds to the range of rows that should be used for fitting,\
                \ target is the column index (or name) of the target variable and cols\
-               \ is a comma separated list of column indeces or names of the variables\
-               \ in the same order as used by the symbolic model." )
+               \ is a comma separated list of column indices or names of the variables\
+               \ in the same order as used by the symbolic model.\
+               \ The yerr field corresponds to the column with the error of the target,\
+               \ while xerr a comma separated indices of the columns with the error of the\
+               \ variables. If nothing passed, it will ignore measurement errors." )
    <*> strOption
        ( long "test"
        <> metavar "TEST"
@@ -97,13 +99,6 @@ opt = Args
                 \ the avaliable distributions.\
                 \ The default is Gaussian."
         )
-   <*> option s2Reader
-       ( long "sErr"
-       <> metavar "Serr"
-       <> showDefault
-       <> value Nothing
-       <> help "Estimated standard error of the data.\
-                \ If not passed, it uses the model MSE.")
    <*> switch
         ( long "restart"
         <> help "If set, it samples the initial values of\
@@ -170,9 +165,9 @@ sralgsReader =
   where
     errMsg = "unknown algorithm. Available options are " <> intercalate "," sralgsHelp
 
-s2Reader :: ReadM (Maybe Double)
-s2Reader =
-  str >>= \s -> mkReader ("wrong format " <> s) Just s
+--s2Reader :: ReadM (Maybe Double)
+--s2Reader =
+--  str >>= \s -> mkReader ("wrong format " <> s) Just s
 
 distRead :: ReadM Distribution
 distRead =

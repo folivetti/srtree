@@ -97,11 +97,11 @@ readFileToLines filename = do
 -- input variables. These will be renamed internally as x0, x1, ... in the order
 -- of this list.
 splitFileNameParams :: FilePath -> (FilePath, [B.ByteString])
-splitFileNameParams (B.pack -> filename) = (B.unpack fname, take 4 params)
+splitFileNameParams (B.pack -> filename) = (B.unpack fname, take 6 params)
   where
     (fname : params') = B.split ':' filename
     -- fill up the empty parameters with an empty string
-    params            = params' <> replicate (4 - min 4 (length params')) B.empty
+    params            = params' <> replicate (6 - min 6 (length params')) B.empty
 {-# inline splitFileNameParams #-}
 
 -- | Tries to parse a string into an int
@@ -114,8 +114,8 @@ parseVal xs = case readMaybe xs of
 -- | Given a map between PVector name and indeces,
 -- the target PVector and the variables SRMatrix,
 -- returns the indices of the variables SRMatrix and the target
-getColumns :: [(B.ByteString, Int)] -> B.ByteString -> B.ByteString -> ([Int], Int)
-getColumns headerMap target columns = (ixs, iy)
+getColumns :: [(B.ByteString, Int)] -> B.ByteString -> B.ByteString -> B.ByteString -> B.ByteString -> ([Int], Int, [Int], Int)
+getColumns headerMap target columns target_error columns_error = (ixs, iy, ixs_error, iy_error)
   where
       n_cols  = length headerMap
       getIx c = case parseVal c of
@@ -136,6 +136,13 @@ getColumns headerMap target columns = (ixs, iy)
       iy = if B.null target
               then n_cols - 1
               else getIx $ B.unpack target
+      ixs_error = if B.null columns
+                   then []
+                   else map (getIx . B.unpack) $ B.split ',' columns
+      -- if the target PVector is ommitted, use the last one
+      iy_error = if B.null target
+                  then (-1)
+                  else getIx $ B.unpack target
 {-# inline getColumns #-}
 
 -- | Given the start and end rows, it returns the 
@@ -176,7 +183,7 @@ getRows (B.unpack -> start) (B.unpack -> end) nRows
 -- of the target variable
 -- **features** is a comma separated list of SRMatrix names or indices to be used as
 -- input variables of the regression model.
-loadDataset :: FilePath -> Bool -> IO ((SRMatrix, PVector, SRMatrix, PVector), String, String)
+loadDataset :: FilePath -> Bool -> IO ((SRMatrix, PVector, SRMatrix, PVector), (Maybe SRMatrix, Maybe PVector, Maybe SRMatrix, Maybe PVector), String, String)
 loadDataset filename hasHeader = do  
   csv <- readFileToLines fname
   pure $ processData csv params hasHeader
@@ -184,8 +191,8 @@ loadDataset filename hasHeader = do
     (fname, params) = splitFileNameParams filename
 
 -- support function that does everything for loadDataset
-processData :: [[B.ByteString]] -> [B.ByteString] -> Bool -> ((SRMatrix, PVector, SRMatrix, PVector), String, String)
-processData csv params hasHeader = ((x_train, y_train, x_val, y_val) , varnames, targetname)
+processData :: [[B.ByteString]] -> [B.ByteString] -> Bool -> ((SRMatrix, PVector, SRMatrix, PVector), (Maybe SRMatrix, Maybe PVector, Maybe SRMatrix, Maybe PVector), String, String)
+processData csv params hasHeader = ((x_train, y_train, x_val, y_val) , (x_err_train, y_err_train, x_err_val, y_err_val), varnames, targetname)
   where
     ncols             = length $ head csv
     nrows             = length csv - fromEnum hasHeader
@@ -197,18 +204,26 @@ processData csv params hasHeader = ((x_train, y_train, x_val, y_val) , varnames,
                                         ]
     targetname        = if hasHeader then (B.unpack . fst . fromJust . find ((==iy).snd) $ header) else "y"
     -- get rows and SRMatrix indices
-    (st, end) = getRows (params !! 0) (params !! 1) nrows
-    (ixs, iy) = getColumns header (params !! 2) (params !! 3)
+    (st, end)                  = getRows (params !! 0) (params !! 1) nrows
+    (ixs, iy, ixs_err, iy_err) = getColumns header (params !! 2) (params !! 3) (params !! 4) (params !! 5)
 
     -- load data and split sets
     datum   = loadMtx content
     p       = length ixs
 
     x       = M.computeAs S $ M.throwEither $ M.stackInnerSlicesM $ map (datum <!) ixs
+    x_err   = M.computeAs S $ M.throwEither $ M.stackInnerSlicesM $ map (datum <!) ixs_err
     y       = datum <! iy
+    y_err   = datum <! iy_err
+
     x_train = M.computeAs S $ M.extractFromTo' (st :. 0) (end+1 :. p) x
     y_train = M.computeAs S $ M.extractFromTo' st (end+1) y 
     x_val   = M.computeAs S $ M.throwEither $ M.deleteRowsM st (Sz1 $ end - st + 1) x
     y_val   = M.computeAs S $ M.throwEither $ M.deleteColumnsM st (Sz1 $ end - st + 1) y
+
+    x_err_train = if null ixs_err then Nothing else Just $ M.computeAs S $ M.extractFromTo' (st :. 0) (end+1 :. p) x_err
+    y_err_train = if iy_err == -1 then Nothing else Just $ M.computeAs S $ M.extractFromTo' st (end+1) y_err
+    x_err_val   = if null ixs_err then Nothing else Just $ M.computeAs S $ M.throwEither $ M.deleteRowsM st (Sz1 $ end - st + 1) x_err
+    y_err_val   = if iy_err == -1 then Nothing else Just $ M.computeAs S $ M.throwEither $ M.deleteColumnsM st (Sz1 $ end - st + 1) y_err
 {-# inline processData #-}
 

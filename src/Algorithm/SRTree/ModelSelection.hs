@@ -28,24 +28,24 @@ import qualified Data.Vector.Storable as VS
 
 
 -- | Bayesian information criterion
-bic :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
-bic dist mSErr xss ys theta tree = (p + 1) * log n + 2 * nll dist mSErr xss ys tree theta
+bic :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+bic dist mXerr mYerr xss ys theta tree = (p + 1) * log n + 2 * nll dist mXerr mYerr xss ys tree theta
   where
     (A.Sz (fromIntegral -> p)) = A.size theta
     (A.Sz (fromIntegral -> n)) = A.size ys
 {-# INLINE bic #-}
 
 -- | Akaike information criterion
-aic :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
-aic dist mSErr xss ys theta tree = 2 * (p + 1) + 2 * nll dist mSErr xss ys tree theta
+aic :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+aic dist mXerr mYerr xss ys theta tree = 2 * (p + 1) + 2 * nll dist mXerr mYerr xss ys tree theta
   where
     (A.Sz (fromIntegral -> p)) = A.size theta
     (A.Sz (fromIntegral -> n)) = A.size ys
 {-# INLINE aic #-}
 
 -- | Evidence 
-evidence :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
-evidence dist mSErr xss ys theta tree = (1 - b) * nll dist mSErr xss ys tree theta - p / 2 * log b
+evidence :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+evidence dist mXerr mYerr xss ys theta tree = (1 - b) * nll dist mXerr mYerr xss ys tree theta - p / 2 * log b
   where
     (A.Sz (fromIntegral -> p)) = A.size theta
     (A.Sz (fromIntegral -> n)) = A.size ys
@@ -54,34 +54,34 @@ evidence dist mSErr xss ys theta tree = (1 - b) * nll dist mSErr xss ys tree the
 
 -- | MDL as described in 
 -- Bartlett, Deaglan J., Harry Desmond, and Pedro G. Ferreira. "Exhaustive symbolic regression." IEEE Transactions on Evolutionary Computation (2023).
-mdl :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
-mdl dist mSErr xss ys theta tree = nll' dist mSErr xss ys theta' tree
+mdl :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+mdl dist mXerr mYerr xss ys theta tree = nll' dist mXerr mYerr xss ys theta' tree
                                   + logFunctional tree
-                                  + logParameters dist mSErr xss ys theta tree
+                                  + logParameters dist mXerr mYerr xss ys theta tree
   where
-    fisher = fisherNLL dist mSErr xss ys tree theta
+    fisher = fisherNLL dist mXerr mYerr xss ys tree theta
     theta' = A.computeAs A.S $ A.zipWith (\t f -> if isSignificant t f then t else 0.0) theta fisher
     isSignificant v f = abs (v / sqrt(12 / f) ) >= 1
 {-# INLINE mdl #-}
 
 -- | MDL Lattice as described in
 -- Bartlett, Deaglan, Harry Desmond, and Pedro Ferreira. "Priors for symbolic regression." Proceedings of the Companion Conference on Genetic and Evolutionary Computation. 2023.
-mdlLatt :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
-mdlLatt dist mSErr xss ys theta tree = nll' dist mSErr xss ys theta' tree
+mdlLatt :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+mdlLatt dist mXerr mYerr xss ys theta tree = nll' dist mXerr mYerr xss ys theta' tree
                                      + logFunctional tree
-                                     + logParametersLatt dist mSErr xss ys theta tree
+                                     + logParametersLatt dist mXerr mYerr xss ys theta tree
   where
-    fisher = fisherNLL dist mSErr xss ys tree theta
+    fisher = fisherNLL dist mXerr mYerr xss ys tree theta
     theta' = A.computeAs A.S $ A.zipWith (\t f -> if isSignificant t f then t else 0.0) theta fisher
     isSignificant v f = abs (v / sqrt(12 / f) ) >= 1
 {-# INLINE mdlLatt #-}
 
 -- | same as `mdl` but weighting the functional structure by frequency calculated using a wiki information of
 -- physics and engineering functions
-mdlFreq :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
-mdlFreq dist mSErr xss ys theta tree = nll dist mSErr xss ys tree theta
+mdlFreq :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+mdlFreq dist mXerr mYerr xss ys theta tree = nll dist mXerr mYerr xss ys tree theta
                                      + logFunctionalFreq tree
-                                     + logParameters dist mSErr xss ys theta tree
+                                     + logParameters dist mXerr mYerr xss ys theta tree
 {-# INLINE mdlFreq #-}
 
 -- log of the functional complexity
@@ -107,11 +107,11 @@ logFunctionalFreq tree = treeToNat tree'
 {-# INLINE logFunctionalFreq #-}
 
 -- log of the parameters complexity
-logParameters :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
-logParameters dist mSErr xss ys theta tree = -(p / 2) * log 3 + 0.5 * logFisher + logTheta
+logParameters :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+logParameters dist mXerr mYerr xss ys theta tree = -(p / 2) * log 3 + 0.5 * logFisher + logTheta
   where
     -- p      = fromIntegral $ VS.length theta
-    fisher = fisherNLL dist mSErr xss ys tree theta
+    fisher = fisherNLL dist mXerr mYerr xss ys tree theta
 
     (logTheta, logFisher, p) = foldr addIfSignificant (0, 0, 0)
                              $ zip (A.toList theta) (A.toList fisher)
@@ -123,11 +123,11 @@ logParameters dist mSErr xss ys theta tree = -(p / 2) * log 3 + 0.5 * logFisher 
     isSignificant v f = abs (v / sqrt(12 / f) ) >= 1
 
 -- same as above but for the Lattice 
-logParametersLatt :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
-logParametersLatt dist mSErr xss ys theta tree = 0.5 * p * (1 - log 3) + 0.5 * log detFisher
+logParametersLatt :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+logParametersLatt dist mXerr mYerr xss ys theta tree = 0.5 * p * (1 - log 3) + 0.5 * log detFisher
   where
-    fisher = fisherNLL dist mSErr xss ys tree theta
-    detFisher = det $ hessianNLL dist mSErr xss ys tree theta
+    fisher = fisherNLL dist mXerr mYerr xss ys tree theta
+    detFisher = det $ hessianNLL dist mXerr mYerr xss ys tree theta
 
     (logTheta, logFisher, p) = foldr addIfSignificant (0, 0, 0)
                              $ zip (A.toList theta) (A.toList fisher)
@@ -139,8 +139,8 @@ logParametersLatt dist mSErr xss ys theta tree = 0.5 * p * (1 - log 3) + 0.5 * l
     isSignificant v f = abs (v / sqrt(12 / f) ) >= 1
 
 -- flipped version of nll
-nll' :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
-nll' dist mSErr xss ys theta tree = nll dist mSErr xss ys tree theta
+nll' :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+nll' dist mXerr mYerr xss ys theta tree = nll dist mXerr mYerr xss ys tree theta
 {-# INLINE nll' #-}
 
 treeToNat :: Fix SRTree -> Double

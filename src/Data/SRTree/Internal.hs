@@ -41,6 +41,8 @@ module Data.SRTree.Internal
          , constsToParam
          , floatConstsToParam
          , paramsToConst
+         , removeProtectedOps
+         , convertProtectedOps
          , Fix (..)
          )
          where
@@ -93,6 +95,32 @@ data Function =
   | Recip
   | Cube
      deriving (Show, Read, Eq, Ord, Enum)
+
+removeProtectedOps :: Fix SRTree -> Fix SRTree 
+removeProtectedOps = cata alg 
+  where 
+    alg (Var ix)           = var ix
+    alg (Param ix)         = param ix
+    alg (Const x)          = constv x
+    alg (Bin PowerAbs l r) = l ** r
+    alg (Bin op l r)       = Fix $ Bin op l r
+    alg (Uni SqrtAbs t)    = Fix $ Uni Sqrt t
+    alg (Uni LogAbs t)     = Fix $ Uni Log t
+    alg (Uni f t)          = Fix $ Uni f t
+{-# INLINE removeProtectedOps #-}
+
+convertProtectedOps :: Fix SRTree -> Fix SRTree 
+convertProtectedOps = cata alg 
+  where 
+    alg (Var ix)           = var ix
+    alg (Param ix)         = param ix
+    alg (Const x)          = constv x
+    alg (Bin PowerAbs l r) = abs l ** r
+    alg (Bin op l r)       = Fix $ Bin op l r
+    alg (Uni SqrtAbs t)    = sqrt (abs t)
+    alg (Uni LogAbs t)     = log (abs t)
+    alg (Uni f t)          = Fix $ Uni f t
+{-# INLINE convertProtectedOps #-}
 
 -- | create a tree with a single node representing a variable
 var :: Int -> Fix SRTree

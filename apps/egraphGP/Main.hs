@@ -13,6 +13,7 @@ import Algorithm.EqSat.Queries
 import Algorithm.EqSat.Info
 import Algorithm.EqSat.DB
 import Algorithm.SRTree.Likelihoods
+import Algorithm.SRTree.ModelSelection
 import Algorithm.SRTree.Opt
 import Control.Lens (element, makeLenses, over, (&), (+~), (-~), (.~), (^.))
 import Control.Monad (foldM, forM_, forM, when, unless, filterM, (>=>), replicateM, replicateM_)
@@ -29,7 +30,7 @@ import Options.Applicative as Opt hiding (Const)
 import Random
 import System.Random
 import qualified Data.HashSet as Set
-import Data.List ( sort, maximumBy, intercalate, sortOn )
+import Data.List ( sort, maximumBy, intercalate, sortOn, intersperse )
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
 import qualified Data.Sequence as FingerTree
@@ -41,6 +42,9 @@ import List.Shuffle ( shuffle )
 import Debug.Trace
 import Algorithm.EqSat (runEqSat)
 
+import Control.Scheduler 
+import Control.Monad.IO.Unlift
+import Data.SRTree (convertProtectedOps)
 -- Insert random expression 
 -- Evaluate random subtree 
 -- Insert new random parent eNode 
@@ -67,12 +71,12 @@ fitnessFun x y x_val y_val _tree = do
     let tree         = relabelParams _tree
         nParams      = countParams tree
     thetaOrig <- rnd $ randomVec nParams --   = MA.replicate Seq nParams 1.0
-    let (theta, fit, nEvs) = minimizeNLL Gaussian Nothing 50 x y tree thetaOrig
+    let (theta, fit, nEvs) = minimizeNLL Gaussian Nothing Nothing 50 x y tree thetaOrig
         tr           = negate . mse x y tree $ if nParams == 0 then thetaOrig else theta
         val          = negate . mse x_val y_val tree $ if nParams == 0 then thetaOrig else theta
         -- val       = r2 x y tree $ if nParams == 0 then thetaOrig else theta
     pure $ if isNaN val || isNaN tr
-            then (-1/0, theta) -- infinity
+            then (-(1/0), theta) -- infinity
             else (min tr val, theta)
 {-# INLINE fitnessFun #-}
 
@@ -133,7 +137,7 @@ rewriteBasic2 =
     , ("w" * "x") + ("z" * "x") :=> ("w" + "z") * "x" -- :| isConstPt "w" :| isConstPt "z"
     ]
 
-egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
+egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize printPareto = do
   ec <- insertRndExpr maxSize
   updateIfNothing ec
   insertTerms
@@ -173,9 +177,8 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
                                             Nothing -> do ec <- insertRndExpr maxSize >>= canonical
                                                           pure (ec, True)
                                             Just c  -> pure (c, False)
-
        upd <- updateIfNothing ecN
-       when (upd)
+       when upd
          do runEqSat myCost rewriteBasic2 1
             cleanDB
             pure ()
@@ -184,7 +187,10 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
        pure (radius', nEvs')
   eclasses <- gets (IntMap.toList . _eClass)
   -- forM_ eclasses $ \(_, v) -> (io.print) (Set.size (_eNodes v), Set.size (_parents v))
-  paretoFront
+  io $ putStrLn "id,Expression,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test"
+  if printPareto
+    then paretoFront
+    else printBest
   --ft <- gets (_fitRangeDB . _eDB)
   --io . print $ Foldable.toList ft
 
@@ -222,9 +228,9 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
         p2  <- rnd (randomFrom ecs)
         l1  <- rnd (randomFrom [1..maxSize-2])
         l2  <- rnd (randomFrom [1..(maxSize - l1 - 1)])
-        e1  <- randomChildFrom p1 l1
+        e1  <- randomChildFrom p1 l1 >>= canonical
         ml  <- gets (_size . _info . (IM.! e1) . _eClass)
-        e2  <- randomChildFrom p2 l2
+        e2  <- randomChildFrom p2 l2 >>= canonical
         case nt of
           Uni Id ()    -> canonical e1
           Uni f ()     -> add myCost (Uni f e1) >>= canonical
@@ -235,8 +241,9 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
 
     getParetoEcsUpTo n = concat <$> (forM [1..maxSize] $ \i -> getTopECLassWithSize  i n)
 
-    randomChildFrom ec maxL = do
+    randomChildFrom ec' maxL = do
       p <- rnd toss -- whether to go deeper or return this level
+      ec <- canonical ec'
       l <- gets (_size . _info . (IM.! ec) . _eClass )
 
       if p || l >= maxL
@@ -283,7 +290,7 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
             then do
               bestFit <- getFitness $ head ec
               bestP   <- gets (_theta . _info . (IM.! (head ec)) . _eClass)
-              (:[]) . (,bestP) . (,bestFit) <$> getBest (head ec)
+              (:[]) . (,bestP) . (,bestFit) . (,ec) <$> getBest (head ec)
             else pure []
 
     getBestExprThat p  =
@@ -301,29 +308,44 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize = do
                f <- gets (_fitness . _info . (IM.! ec) . _eClass)
                io . putStrLn $ showExpr t <> " " <> show f
 
-    paretoFront = go 1 (-1.0/0.0)
+    printExpr ix ec = do 
+        fit <- fromJust <$> getFitness ec 
+        theta <- gets (fromJust . _theta . _info . (IM.! ec) . _eClass)
+        ((best, mf), mtheta) <- (,theta) . (,fit) <$> getBest ec
+        let best'     = relabelParams best
+            expr      = paramsToConst (MA.toList theta) best'
+            unprotect = convertProtectedOps expr 
+            mse_train = negate fit
+            mse_val   = mse x_val y_val best' theta
+            mse_te    = mse x_te y_te best' theta
+            r2_train  = r2 x y best' theta
+            r2_val    = r2 x_val y_val best' theta
+            r2_te     = r2 x_te y_te best' theta
+            nll_train  = nll Gaussian Nothing Nothing x y best' theta
+            nll_val    = nll Gaussian Nothing Nothing x_val y_val best' theta
+            nll_te     = nll Gaussian Nothing Nothing x_te y_te best' theta
+            mdl_train  = mdl Gaussian Nothing Nothing x y theta unprotect
+            mdl_val    = mdl Gaussian Nothing Nothing x_val y_val theta unprotect
+            mdl_te     = mdl Gaussian Nothing Nothing x_te y_te theta unprotect
+            vals      = intercalate "," $ Prelude.map show [mse_train, mse_val, mse_te, r2_train, r2_val, r2_te, nll_train, nll_val, nll_te, mdl_train, mdl_val, mdl_te]
+        io . putStrLn $ show ix <> "," <> showExpr expr <> "," <> show (countNodes $ convertProtectedOps expr) <> "," <> vals
+
+    printBest = do
+      bec <- gets (snd . getGreatest . _fitRangeDB . _eDB) >>= canonical
+      printExpr 0 bec
+
+    paretoFront = go 1 0 (-(1.0/0.0))
       where
-        go n f
+        go n ix f
           | n > maxSize = pure ()
           | otherwise   = do
               ecList <- getBestExprWithSize n
-              if (not (null ecList))
-                 then do let ((best, mf), mtheta) = head ecList
-                             best' = relabelParams best
-                         x_tot <- MA.computeAs MA.S <$> (MA.concatOuterM $ Prelude.map MA.toLoadArray [x, x_val])
-                         y_tot <- MA.computeAs MA.S <$> (MA.concatOuterM $ Prelude.map MA.toLoadArray [y, y_val])
-
-                         --(fit_tr, theta) <- fitnessFunRep x_tot y_tot x_tot y_tot best'
-                         let fit = fromJust mf
-                             fit_tr = fit
-                             theta = fromJust mtheta
-                             fit_te = mse x_te y_te best' theta
-                             str_th = intercalate ";" $ Prelude.map show $ MA.toList theta
-
-                         when (fit > f) do
-                           io . putStrLn $ showExpr best <> "," <> str_th <> "," <> show (negate fit) <> "," <> show (negate fit_tr) <> "," <> show fit_te
-                         go (n+1) (max fit f)
-                 else go (n+1) f
+              if not (null ecList)
+                 then do let (((best, ec), mf), mtheta) = head ecList
+                             improved = fromJust mf > f 
+                         when improved $ printExpr ix (head ec)
+                         go (n+1) (ix + if improved then 1 else 0) (max f (fromJust mf))
+                 else go (n+1) ix f
 
     evaluateUnevaluated = do
           ec <- gets (IntSet.toList . _unevaluated . _eDB)
@@ -485,11 +507,13 @@ egraphGP x y terms nEvals = do
                 rebuild myCost
                 -}
 data Args = Args
-  { dataset  :: String,
-    gens     :: Int,
-    _alg     :: Alg,
-    _maxSize :: Int,
-    _split   :: Int
+  { _dataset   :: String,
+    _testData  :: String,
+    gens       :: Int,
+    _alg       :: Alg,
+    _maxSize   :: Int,
+    _split     :: Int,
+    _printPareto :: Bool 
   }
   deriving (Show)
 
@@ -501,6 +525,12 @@ opt = Args
        <> short 'd'
        <> metavar "INPUT-FILE"
        <> help "CSV dataset." )
+  <*> strOption
+       ( long "test"
+       <> short 't'
+       <> value ""
+       <> showDefault
+       <> help "test data")
    <*> option auto
       ( long "generations"
       <> short 'g'
@@ -520,7 +550,12 @@ opt = Args
   <*> option auto
        ( long "split"
        <> short 'k'
-       <> help "k-split ratio training-test")
+       <> value 1 
+       <> showDefault
+       <> help "k-split ratio training-validation")
+  <*> switch
+       ( long "print-pareto"
+       <> help "print Pareto front instead of best found expression")
 
 chunksOf :: Int -> [e] -> [[e]]
 chunksOf i ls = Prelude.map (Prelude.take i) (build (splitter ls))
@@ -562,21 +597,22 @@ splitData x y k = do if k == 1
     comp_x     = MA.getComp x
     comp_y     = MA.getComp y
 
+getTrain ((a, b, _, _), _, _, _) = (a,b)
+
 main :: IO ()
 main = do
   --args <- pure (Args "nikuradse_2.csv" 100) -- execParser opts
   args <- execParser opts
   g <- getStdGen
-  ((x, y, _, _), _, _) <- loadDataset (dataset args) True
-  let ((x', x_te, y', y_te),g') = runState (splitData x y $ _split args) g
-      ((x_tr, x_val, y_tr, y_val),g'') = runState (splitData x' y' 2) g'
+  ((x, y, _, _), _, _, _) <- loadDataset (_dataset args) True
+  (x_te, y_te) <- if null (_testData args) 
+                    then pure (x, y)
+                    else getTrain <$> loadDataset (_testData args) True 
+  let ((x_tr, x_val, y_tr, y_val),g') = runState (splitData x y $ _split args) g
   let (Sz2 _ nFeats) = MA.size x
       terms          = [var ix | ix <- [0 .. nFeats-1]] <> [param 0] -- [param ix | ix <- [0 .. 5]]
-      alg            = evalStateT (egraphSearch (_alg args) x_tr y_tr x_val y_val x_te y_te terms (gens args) (_maxSize args)) emptyGraph
-  --(bestExpr, fit) <- evalStateT alg g
-  --printExpr bestExpr
-  --print fit
-  evalStateT alg g''
+      alg            = evalStateT (egraphSearch (_alg args) x_tr y_tr x_val y_val x_te y_te terms (gens args) (_maxSize args) (_printPareto args)) emptyGraph
+  evalStateT alg g'
 
   where
     opts = Opt.info (opt <**> helper)
