@@ -55,7 +55,7 @@ minimizeNLL :: Distribution -> Maybe SRMatrix -> Maybe PVector -> Int -> SRMatri
 minimizeNLL dist mXerr mYerr niter xss ys tree t0
   | niter == 0 = (t0, f, 0)
   | n == 0     = (t0, f, 0)
-  | otherwise  = (fromStorableVector compMode t_opt, f, nEvs)
+  | otherwise  = (fromStorableVector compMode t_opt, nll dist mXerr mYerr xss ys tree (fromStorableVector compMode t_opt), nEvs)
   where
     tree'      = relabelParams tree -- $ fst $ floatConstsToParam tree
     t0'        = toStorableVector t0
@@ -63,12 +63,14 @@ minimizeNLL dist mXerr mYerr niter xss ys tree t0
     j2ix       = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]
     (Sz n)     = size t0
     (Sz m)     = size ys
-    funAndGrad = second (toStorableVector . computeAs S) . gradNLLArr dist mXerr mYerr xss ys treeArr j2ix
+    funAndGrad = if dist == ROXY
+                    then second (toStorableVector . computeAs S) . gradNLL dist mXerr mYerr xss ys tree . fromStorableVector compMode
+                    else second (toStorableVector . computeAs S) . gradNLLArr dist mXerr mYerr xss ys treeArr j2ix
     (f, _)     = gradNLL dist mXerr mYerr xss ys tree t0 -- if there's no parameter or no iterations
     --debug1     = gradNLLArr dist msErr xss ys treeArr j2ix t0
     --debug2     = gradNLL dist msErr xss ys tree t0
 
-    algorithm  = LBFGS funAndGrad Nothing
+    algorithm  = TNEWTON funAndGrad Nothing
     stop       = ObjectiveRelativeTolerance 1e-8 :| [ObjectiveAbsoluteTolerance 1e-8, MaximumEvaluations (fromIntegral niter)]
     problem    = LocalProblem (fromIntegral n) stop algorithm
     (t_opt, nEvs) = case minimizeLocal problem t0' of

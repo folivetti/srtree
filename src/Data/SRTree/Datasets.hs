@@ -136,13 +136,13 @@ getColumns headerMap target columns target_error columns_error = (ixs, iy, ixs_e
       iy = if B.null target
               then n_cols - 1
               else getIx $ B.unpack target
-      ixs_error = if B.null columns
+      ixs_error = if B.null columns_error
                    then []
-                   else map (getIx . B.unpack) $ B.split ',' columns
+                   else map (getIx . B.unpack) $ B.split ',' columns_error
       -- if the target PVector is ommitted, use the last one
-      iy_error = if B.null target
+      iy_error = if B.null target_error
                   then (-1)
-                  else getIx $ B.unpack target
+                  else getIx $ B.unpack target_error
 {-# inline getColumns #-}
 
 -- | Given the start and end rows, it returns the 

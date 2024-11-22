@@ -37,16 +37,21 @@ import Data.Massiv.Array hiding (all, map, read, replicate, tail, take, zip)
 import qualified Data.Massiv.Array as M
 import qualified Data.Massiv.Array.Mutable as Mut
 import Data.Maybe (fromMaybe)
-import Data.SRTree (Fix (..), SRTree (..), floatConstsToParam, relabelParams)
-import Data.SRTree.Derivative (deriveByParam)
-import Data.SRTree.Eval (PVector, SRMatrix, SRVector, compMode, evalTree)
+import Data.SRTree
+import Data.SRTree.Recursion ( cata )
+import Data.SRTree.Derivative (deriveByParam, derivative)
+import Data.SRTree.Eval
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Vector.Storable as VS
 import GHC.IO (unsafePerformIO)
+import Data.Maybe
+
+import Debug.Trace
+import Data.SRTree.Print
 
 -- | Supported distributions for negative log-likelihood
 data Distribution = Gaussian | Bernoulli | Poisson | ROXY
-    deriving (Show, Read, Enum, Bounded)
+    deriving (Show, Read, Enum, Bounded, Eq)
 
 -- | Sum-of-square errors or Sum-of-square residues
 sse :: SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
@@ -137,7 +142,57 @@ nll Poisson _ _ xss ys tree theta
     yhat     = evalTree xss theta tree
     notValid = M.any (<0)
 
-nll ROXY mXerr mYerr xss ys tree theta = undefined
+nll ROXY mXerr mYerr xss ys tree theta
+  | isNothing mXerr || isNothing mYerr = error "Can't calculate ROXY nll without x,y-errors."
+  | p < num_params + 3 = error "We need 3 additional parameters for ROXY."
+  | n > 1              = error "For ROXY dataset must contain a single variable."
+  | otherwise          = 0.5 * M.sum neglogP
+  where
+    (Sz p')      = M.size theta
+    (Sz2 m n) = M.size xss
+    p            = fromIntegral p'
+    num_params   = countParams tree
+    x0           = xss <! 0
+    xErr0        = (fromJust mXerr) <! 0
+    yErr         = fromJust mYerr
+    (sig, mu_gauss, w_gauss) = (theta ! num_params, theta ! (num_params + 1), theta ! (num_params + 2))
+
+    -- TODO: if this hangs, you must do map, etc.
+    applyDer :: Op -> Array D Ix1 Double -> Array D Ix1 Double -> Array D Ix1 Double -> Array D Ix1 Double -> Array D Ix1 Double
+    applyDer Add l dl r dr = dl+dr
+    applyDer Sub l dl r dr = dl-dr
+    applyDer Mul l dl r dr = l*dr + r*dl
+    applyDer Div l dl r dr = (dl*r - dr*l) / (l^2)
+    applyDer Power l dl r dr = l ** (r.-1) * (r*dl + l * log l * dr)
+    applyDer PowerAbs l dl r dr = (abs l ** r) * (dr * log (abs l) + r * dl / l)
+    applyDer AQ l dl r dr = ((1 +. r*r) * dl - l * r * dr) / M.map (**1.5) (1 +. r*r)
+
+    (yhat, grad) = cata alg tree
+      where
+        alg (Var ix)   = (x0, M.replicate compMode (Sz m) 1)
+        alg (Param ix) = (M.replicate compMode (Sz m) (theta M.! ix), M.replicate compMode (Sz m) 0)
+        alg (Const x)  = (M.replicate compMode (Sz m) x, M.replicate compMode (Sz m) 0)
+        alg (Uni f (val, der))  = (M.map (evalFun f) val, M.map (derivative f) val * der)
+        alg (Bin op (valL, derL) (valR, derR)) = (M.zipWith (evalOp op) valL valR, applyDer op valL derL valR derR)
+
+    f            = M.map (logBase 10) (abs yhat)
+    fprime       = grad / (log 10 *. yhat) * x0 .* log 10
+    logX         = M.map (logBase 10) x0
+    logY         = M.map (logBase 10) (delay ys)
+    logXErr      = (xErr0 / (x0 .* log 10)) ^ (2  :: Int)
+    logYErr      = (delay yErr / (delay ys .* log 10)) ^ (2  :: Int)
+    -- nll
+    w_gauss2     = w_gauss ^ 2
+    s2           = delay $ logYErr .+ sig^2
+    den          = fprime ^ 2 .* w_gauss2 * logXErr + s2 * (w_gauss2 +. logXErr)
+
+    neglogP = log (2 * pi)
+        +. log den
+        + (w_gauss2 *. (f - logY)*(f - logY)
+           + logXErr * (fprime * (mu_gauss -. logX) + f - logY)^2
+           + s2 * (logX .- mu_gauss)^2) / den
+
+
 
 nll' :: Distribution -> PVector -> SRVector -> SRVector -> Double
 nll' Gaussian yErr yhat ys = 0.5*(err + log (2*pi*M.sum yErr))
@@ -189,10 +244,11 @@ gradNLL ROXY mXerr mYerr xss ys tree theta =
    (f, delay grad)
   where
     (Sz p) = M.size theta
+    (Sz2 m n) = M.size xss
     yhat   = predict Gaussian tree theta xss
     f      = nll ROXY mXerr mYerr xss ys tree theta
     grad   = makeArray @S (getComp xss) (Sz p) finiteDiff
-    eps    = 1e-6
+    eps    = 1e-8
 
     finiteDiff ix = unsafePerformIO $ do
                       theta' <- Mut.thaw theta
@@ -200,7 +256,8 @@ gradNLL ROXY mXerr mYerr xss ys tree theta =
                       Mut.writeM theta' ix (v + eps)
                       theta'' <- Mut.freezeS theta'
                       let f'= nll ROXY mXerr mYerr xss ys tree theta''
-                      pure  $ (f' - f)/eps
+                          g = (f' - f)/eps
+                      pure g
 
 -- | Gradient of the negative log-likelihood
 --Array B Ix1 (Int, Int, Int, Double)
@@ -247,12 +304,10 @@ gradNLLArr ROXY mXerr mYerr xss ys tree j2ix theta =
    (f, delay grad)
   where
     p      = VS.length theta
-    (yhat, _) = reverseModeUniqueArr xss theta (delay ys) (M.replicate (getComp xss) (M.size ys) 1) id tree j2ix
     f      = nll ROXY mXerr mYerr xss ys tree' (M.fromStorableVector compMode theta)
     grad   = makeArray @S (getComp xss) (Sz p) finiteDiff
     eps    = 1e-6
     tree'  = (arr2tree $ IntMap.fromList tree)
-
 
     arr2tree :: IntMap.IntMap (Int, Int, Int, Double) -> Fix SRTree
     arr2tree arr = go 0
@@ -267,12 +322,13 @@ gradNLLArr ROXY mXerr mYerr xss ys tree j2ix theta =
                     2 -> Fix $ Bin (toEnum opCode) (go $ 2*ix + 1) (go $ 2*ix + 2)
 
     finiteDiff ix = unsafePerformIO $ do
+                      print (showExpr tree')
                       theta' <- Mut.thaw (M.fromStorableVector compMode theta)
                       v <- Mut.readM theta' ix
                       Mut.writeM theta' ix (v + eps)
                       theta'' <- Mut.freezeS theta'
                       let f' = nll ROXY mXerr mYerr xss ys tree' theta''
-                      pure $ (f' - f)/eps
+                      pure $ (f - f') / eps
 
 -- | Gradient of the negative log-likelihood
 gradNLLNonUnique :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (Double, SRVector)
@@ -321,7 +377,7 @@ gradNLLNonUnique ROXY mXerr mYerr xss ys tree theta =
                       Mut.writeM theta' ix (v + eps)
                       theta'' <- Mut.freezeS theta'
                       let f' = nll ROXY mXerr mYerr xss ys tree theta''
-                      pure $ (f' - f)/eps
+                      pure $ (f - f')/eps
 
 -- | Fisher information of negative log-likelihood
 fisherNLL :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> SRVector

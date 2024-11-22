@@ -66,23 +66,23 @@ myCost (Uni _ t)    = 3 + t
 data Alg = OnlyRandom | BestFirst deriving (Show, Read, Eq)
 
 -- experiment 1 80/30
-fitnessFun :: SRMatrix -> PVector -> SRMatrix -> PVector -> Fix SRTree -> RndEGraph (Double, PVector)
-fitnessFun x y x_val y_val _tree = do
+fitnessFun :: Distribution -> SRMatrix -> PVector -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> Maybe SRMatrix -> Maybe PVector -> Fix SRTree -> RndEGraph (Double, PVector)
+fitnessFun distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val _tree = do
     let tree         = relabelParams _tree
-        nParams      = countParams tree
+        nParams      = countParams tree + if distribution == ROXY then 3 else 0
+    -- io . print $ showExpr tree
     thetaOrig <- rnd $ randomVec nParams --   = MA.replicate Seq nParams 1.0
-    let (theta, fit, nEvs) = minimizeNLL Gaussian Nothing Nothing 50 x y tree thetaOrig
-        tr           = negate . mse x y tree $ if nParams == 0 then thetaOrig else theta
-        val          = negate . mse x_val y_val tree $ if nParams == 0 then thetaOrig else theta
-        -- val       = r2 x y tree $ if nParams == 0 then thetaOrig else theta
+    let (theta, fit, nEvs) = minimizeNLL distribution mXErr mYErr 50 x y tree thetaOrig
+        tr           = negate $ nll distribution mXErr mYErr x y tree $ if nParams == 0 then thetaOrig else theta
+        val          = negate $ nll distribution mXErr_val mYErr_val x_val y_val tree $ if nParams == 0 then thetaOrig else theta
     pure $ if isNaN val || isNaN tr
             then (-(1/0), theta) -- infinity
             else (min tr val, theta)
 {-# INLINE fitnessFun #-}
 
-fitnessFunRep :: SRMatrix -> PVector -> SRMatrix -> PVector -> Fix SRTree -> RndEGraph (Double, PVector)
-fitnessFunRep x y x_val y_val _tree = do
-    fits <- replicateM 1 (fitnessFun x y x_val y_val _tree)
+fitnessFunRep :: Distribution -> SRMatrix -> PVector -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> Maybe SRMatrix -> Maybe PVector -> Fix SRTree -> RndEGraph (Double, PVector)
+fitnessFunRep distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val _tree = do
+    fits <- replicateM 1 (fitnessFun distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val _tree)
     pure (maximumBy (compare `on` fst) fits)
 {-# INLINE fitnessFunRep #-}
 
@@ -137,7 +137,7 @@ rewriteBasic2 =
     , ("w" * "x") + ("z" * "x") :=> ("w" + "z") * "x" -- :| isConstPt "w" :| isConstPt "z"
     ]
 
-egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize printPareto = do
+egraphSearch alg distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val x_te mXErr_te y_te mYErr_te terms nEvals maxSize printPareto = do
   ec <- insertRndExpr maxSize
   updateIfNothing ec
   insertTerms
@@ -205,7 +205,7 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize printPareto = do
       case mf of
         Nothing -> do
           t <- getBest ec
-          (f, p) <- fitnessFunRep x y x_val y_val t
+          (f, p) <- fitnessFunRep distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val t
           insertFitness ec f p
           pure True
         Just _ -> pure False
@@ -278,7 +278,7 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize printPareto = do
     insertBestExpr = do --let t =  "t0" / (recip ("t1" - "x0") + powabs "t2" "x0")
                         let t = ((("t0" + (powabs "t0" "x0")) / "t0") * "x0")
                         ecId <- fromTree myCost t >>= canonical
-                        (f, p) <- fitnessFunRep x y x_val y_val t
+                        (f, p) <- fitnessFunRep distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val t
                         insertFitness ecId f p
                         io . putStrLn $ "Best fit global: " <> show f
                         pure ecId
@@ -315,18 +315,18 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize printPareto = do
         let best'     = relabelParams best
             expr      = paramsToConst (MA.toList theta) best'
             unprotect = convertProtectedOps expr 
-            mse_train = negate fit
+            mse_train = mse x y best' theta
             mse_val   = mse x_val y_val best' theta
             mse_te    = mse x_te y_te best' theta
             r2_train  = r2 x y best' theta
             r2_val    = r2 x_val y_val best' theta
             r2_te     = r2 x_te y_te best' theta
-            nll_train  = nll Gaussian Nothing Nothing x y best' theta
-            nll_val    = nll Gaussian Nothing Nothing x_val y_val best' theta
-            nll_te     = nll Gaussian Nothing Nothing x_te y_te best' theta
-            mdl_train  = mdl Gaussian Nothing Nothing x y theta unprotect
-            mdl_val    = mdl Gaussian Nothing Nothing x_val y_val theta unprotect
-            mdl_te     = mdl Gaussian Nothing Nothing x_te y_te theta unprotect
+            nll_train  = nll distribution mXErr mYErr x y best' theta
+            nll_val    = nll distribution mXErr_val mYErr_val x_val y_val best' theta
+            nll_te     = nll distribution mXErr_te mYErr_te x_te y_te best' theta
+            mdl_train  = mdl distribution mXErr mYErr x y theta unprotect
+            mdl_val    = mdl distribution mXErr_val mYErr_val x_val y_val theta unprotect
+            mdl_te     = mdl distribution mXErr_te mYErr_te x_te y_te theta unprotect
             vals      = intercalate "," $ Prelude.map show [mse_train, mse_val, mse_te, r2_train, r2_val, r2_te, nll_train, nll_val, nll_te, mdl_train, mdl_val, mdl_te]
         io . putStrLn $ show ix <> "," <> showExpr expr <> "," <> show (countNodes $ convertProtectedOps expr) <> "," <> vals
 
@@ -351,169 +351,29 @@ egraphSearch alg x y x_val y_val x_te y_te terms nEvals maxSize printPareto = do
           ec <- gets (IntSet.toList . _unevaluated . _eDB)
           forM_ ec $ \c -> do
               t <- getBest c
-              (f, p) <- fitnessFun x y x_val y_val t
+              (f, p) <- fitnessFun distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val t
               insertFitness c f p
 
     evaluateRndUnevaluated = do
           ec <- gets (IntSet.toList . _unevaluated . _eDB)
           c <- rnd . randomFrom $ ec 
           t <- getBest c
-          (f, p) <- fitnessFun x y x_val y_val t
+          (f, p) <- fitnessFun distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val t
           insertFitness c f p
           pure c
 
 while p arg prog = do when (p arg) do arg' <- prog arg
                                       while p arg' prog
 
-                                {-
-egraphGP :: SRMatrix -> PVector -> [Fix SRTree] -> Int -> RndEGraph (Fix SRTree, Double)
-egraphGP x y terms nEvals = do
-    replicateM_ 200 insertRndExpr
-    getBestExpr
-    runEqSat myCost rewrites 50
-    evaluateUnevaluated
-    paretoFront
-    getBestExpr
-  where
-    paretoFront = do 
-        forM_ [1..10] $ \i ->
-            do (best, fit) <- getBestExprThat (evaluated &&& isSizeOf (==i))
-               io . putStrLn $ showExpr best <> " " <> show fit 
-
-    evaluateUnevaluated = do 
-          ec <- getEClassesThat unevaluated
-          forM_ ec $ \c -> do 
-              t <- getBest c 
-              f <- fitnessFun x y t
-              updateFitness f c 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-------------------- GARBAGE CODE -------------------
-    go i = do n <- getEClassesThat isValidFitness
-              unless (length n >= nEvals)
-                do gpStep
-                   when (i `mod` 1000 == 0) (getBestExpr >>= (io . print . snd))
-                   when (i `mod` 1000000 == 0) $ do
-                     n <- gets (IM.size . _eClass)
-                     --io $ putStrLn ("before: " <> show n)
-                     applyMergeOnlyDftl myCost
-                     n1 <- gets (IM.size . _eClass)
-                     when (n1 < n) $ io $ print (n,n1)
-                     --io $ putStrLn ("after: " <> show n1)
-                   go (i+1)
-
-    rndTerm    = Random.randomFrom terms
-    rndNonTerm = Random.randomFrom [Bin Add () (), Bin Sub () (), Bin Mul () (), Bin Div () ()
-                                   , Bin PowerAbs () (),  Uni Recip ()]
-
-    getBestExpr :: RndEGraph (Fix SRTree, Double) 
-    getBestExpr = do ecIds <- getEClassesThat evaluated -- isValidFitness
-                     nc    <- gets (IM.size . _eClass)
-                     io . putStrLn $ "Evaluated expressions: " <> show (length ecIds) <> " / " <> show nc
-                     bestFit <- foldM (\acc -> getFitness >=> (pure . max acc . fromJust)) ((-1.0)/0.0) ecIds
-                     ecIds'  <- getEClassesThat (fitnessIs (== Just bestFit))
-                     (,bestFit) <$> getBest (head ecIds')
-
-    getBestExprThat p  = 
-        do ecIds <- getEClassesThat p -- isValidFitness
-           nc    <- gets (IM.size . _eClass)
-           bestFit <- foldM (\acc -> getFitness >=> (pure . max acc . fromJust)) ((-1.0)/0.0) ecIds
-           ecIds'  <- getEClassesThat (fitnessIs (== Just bestFit))
-           (,bestFit) <$> getBest (head ecIds')
-
-    insertRndExpr :: RndEGraph () 
-    insertRndExpr = do grow <- rnd toss
-                       t <- rnd $ Random.randomTree 2 6 10 rndTerm rndNonTerm grow
-                       f <- fitnessFun x y t
-                       ecId <- fromTree myCost t >>= canonical
-                       -- io $ print ('i', showExpr t, f)
-                       updateFitness f ecId
-
-    evalRndSubTree :: RndEGraph ()
-    evalRndSubTree = do ecIds <- getEClassesThat unevaluated
-                        unless (null ecIds) do
-                            rndId <- rnd $ randomFrom ecIds
-                            rndId' <- canonical rndId 
-                            t     <- getBest rndId'
-                            f <- fitnessFun x y t
-                            -- io $ print ('e', showExpr t, f)
-                            updateFitness f rndId'
-
-    tournament :: Int -> [EClassId] -> RndEGraph EClassId
-    tournament n ecIds = do 
-        (c0:cs) <- replicateM n (rnd (randomFrom ecIds))
-        f0 <- gets (_fitness . _info . (IM.! c0) . _eClass)
-        snd <$> foldM (\(facc, acc) c -> gets (_fitness . _info . (IM.! c) . _eClass)
-                                           >>= \f -> if f > facc
-                                                        then pure (f, c)
-                                                        else pure (facc, acc)) (f0, c0) cs
-
-    insertRndParent :: RndEGraph ()
-    insertRndParent = do nt    <- rnd rndNonTerm
-                         meId <- case nt of
-                                  Uni f  _   -> do ecIds <- getEClassesThat (isSizeOf (<10) &&& isValidFitness &&& funDoesNotExistWith nt)
-                                                   if null ecIds
-                                                      then pure Nothing 
-                                                      else do rndId <- tournament 5 ecIds
-                                                              sz <- getSize rndId
-                                                              if sz < 10 
-                                                                 then do node <- canonize (Uni f rndId)
-                                                                         Just <$> add myCost node
-                                                                 else pure Nothing
-                                  Bin op _ _ -> do ecIds <- getEClassesThat (isSizeOf (<9) &&& isValidFitness)
-                                                   if null ecIds
-                                                      then pure Nothing
-                                                      else do rndIdLeft <- rnd $ randomFrom ecIds
-                                                              sz1 <- getSize rndIdLeft
-                                                              ecIds' <- getEClassesThat (isSizeOf (< (10 - sz1)) &&& isValidFitness &&& opDoesNotExistWith nt rndIdLeft)
-                                                              if null ecIds'
-                                                                 then pure Nothing
-                                                                 else do rndIdRight <- rnd $ randomFrom ecIds'
-                                                                         rndIdRight <- tournament 5 ecIds'
-                                                                         sz2 <- getSize rndIdRight
-                                                                         if sz1 + sz2 < 10
-                                                                           then Just <$> (canonize (Bin op rndIdLeft rndIdRight)
-                                                                                  >>= add myCost)
-                                                                           else pure Nothing
-                         when (isJust meId) do
-                           let eId = fromJust meId
-                           eId' <- canonical eId
-                           curFit <- gets (_fitness . _info . (IM.! eId') . _eClass)
-                           when (isNothing curFit) do
-                               t <- getBest eId'
-                               f <- fitnessFun x y t
-                               updateFitness f eId'
-                               -- io $ print ('p', showExpr t, f)
-
-    gpStep :: RndEGraph () 
-    gpStep = do choice <- rnd $ randomFrom [2,2,3,3,3]
-                if | choice == 1 -> insertRndExpr
-                   | choice == 2 -> insertRndParent
-                   | otherwise   -> evalRndSubTree
-                rebuild myCost
-                -}
 data Args = Args
-  { _dataset   :: String,
-    _testData  :: String,
-    gens       :: Int,
-    _alg       :: Alg,
-    _maxSize   :: Int,
-    _split     :: Int,
-    _printPareto :: Bool 
+  { _dataset      :: String,
+    _testData     :: String,
+    gens          :: Int,
+    _alg          :: Alg,
+    _maxSize      :: Int,
+    _split        :: Int,
+    _printPareto  :: Bool,
+    _distribution :: Distribution
   }
   deriving (Show)
 
@@ -556,6 +416,12 @@ opt = Args
   <*> switch
        ( long "print-pareto"
        <> help "print Pareto front instead of best found expression")
+  <*> option auto
+       ( long "distribution"
+       <> short 'd'
+       <> value Gaussian
+       <> showDefault
+       <> help "distribution of the data.")
 
 chunksOf :: Int -> [e] -> [[e]]
 chunksOf i ls = Prelude.map (Prelude.take i) (build (splitter ls))
@@ -566,30 +432,21 @@ chunksOf i ls = Prelude.map (Prelude.take i) (build (splitter ls))
   build :: ((a -> [a] -> [a]) -> [a] -> [a]) -> [a]
   build g = g (:) []
 
-splitData :: SRMatrix -> PVector -> Int -> State StdGen (SRMatrix, SRMatrix, PVector, PVector)
-splitData x y k = do if k == 1
-                         then pure (x, x, y, y)
-                         else do
-                          ixs' <- (state . shuffle) [0 .. sz-1]
-                          let ixs = chunksOf k ixs' -- $ sortOn (\ix -> y MA.! ix) [0 .. sz-1]
-                          --ixs <- forM sortedIxs $ \is -> state (shuffle is)
-                          let xl     = MA.toLists x :: [MA.ListItem MA.Ix2 Double]
-                              x_tr   = MA.fromLists' comp_x [xl !! ix | ixs_i <- ixs, ix <- Prelude.tail ixs_i]
-                              x_te   = MA.fromLists' comp_x [xl !! ix | ixs_i <- ixs, let ix = Prelude.head ixs_i]
-                              y_tr   = MA.fromList comp_y [y MA.! ix | ixs_i <- ixs, ix <- Prelude.tail ixs_i]
-                              y_te   = MA.fromList comp_y [y MA.! ix | ixs_i <- ixs, let ix = Prelude.head ixs_i]
+splitData :: SRMatrix -> PVector -> Maybe SRMatrix -> Maybe PVector ->Int -> State StdGen (SRMatrix, SRMatrix, PVector, PVector, Maybe SRMatrix, Maybe PVector, Maybe SRMatrix, Maybe PVector)
+splitData x y mXErr mYErr k = do
+  if k == 1
+    then pure (x, x, y, y, mXErr, mYErr, mXErr, mYErr)
+    else do
+      ixs' <- (state . shuffle) [0 .. sz-1]
+      let ixs = chunksOf k ixs'
 
-                                                                                          {-
-                          ixs <- state (shuffle [0 .. sz-1])
-                          let ixs_tr = sort $ Prelude.take qty_tr ixs
-                              ixs_te = sort $ Prelude.drop qty_tr ixs
-
-                              x_tr   = MA.fromLists' comp_x [xl !! ix | ix <- ixs_tr]
-                              x_te   = MA.fromLists' comp_x [xl !! ix | ix <- ixs_te]
-                              y_tr   = MA.fromList comp_y [y MA.! ix | ix <- ixs_tr]
-                              y_te   = MA.fromList comp_y [y MA.! ix | ix <- ixs_te]
-                              -}
-                          pure (x_tr, x_te, y_tr, y_te)
+      let (x_tr, x_te) = getX ixs x
+          (y_tr, y_te) = getY ixs y
+          mX = fmap (getX ixs) mXErr
+          (x_err_tr, x_err_te) = (fmap fst mX, fmap snd mX)
+          mY = fmap (getY ixs) mYErr
+          (y_err_tr, y_err_te) = (fmap fst mY, fmap snd mY)
+      pure (x_tr, x_te, y_tr, y_te, x_err_tr, y_err_tr, x_err_te, y_err_te)
   where
     (MA.Sz sz) = MA.size y
     --qty_tr     = round (thr * fromIntegral sz)
@@ -597,21 +454,31 @@ splitData x y k = do if k == 1
     comp_x     = MA.getComp x
     comp_y     = MA.getComp y
 
-getTrain ((a, b, _, _), _, _, _) = (a,b)
+    getX :: [[Int]] -> SRMatrix -> (SRMatrix, SRMatrix)
+    getX ixs xs' = let xs = MA.toLists xs' :: [MA.ListItem MA.Ix2 Double]
+                    in ( MA.fromLists' comp_x [xs !! ix | ixs_i <- ixs, ix <- Prelude.tail ixs_i]
+                       , MA.fromLists' comp_x [xs !! ix | ixs_i <- ixs, let ix = Prelude.head ixs_i]
+                       )
+    getY :: [[Int]] -> PVector -> (PVector, PVector)
+    getY ixs ys  = ( MA.fromList comp_y [ys MA.! ix | ixs_i <- ixs, ix <- Prelude.tail ixs_i]
+                   , MA.fromList comp_y [ys MA.! ix | ixs_i <- ixs, let ix = Prelude.head ixs_i]
+                   )
+
+getTrain ((a, b, _, _), (c,d,_,_), _, _) = (a,b,c,d)
 
 main :: IO ()
 main = do
   --args <- pure (Args "nikuradse_2.csv" 100) -- execParser opts
   args <- execParser opts
   g <- getStdGen
-  ((x, y, _, _), _, _, _) <- loadDataset (_dataset args) True
-  (x_te, y_te) <- if null (_testData args) 
-                    then pure (x, y)
+  ((x, y, _, _), (mXErr, mYErr, _, _), _, _) <- loadDataset (_dataset args) True
+  (x_te, y_te, mXErr_te, mYErr_te) <- if null (_testData args)
+                    then pure (x, y, mXErr, mYErr)
                     else getTrain <$> loadDataset (_testData args) True 
-  let ((x_tr, x_val, y_tr, y_val),g') = runState (splitData x y $ _split args) g
+  let ((x_tr, x_val, y_tr, y_val, mXErr_tr, mYErr_tr, mXErr_val, mYErr_val),g') = runState (splitData x y mXErr mYErr $ _split args) g
   let (Sz2 _ nFeats) = MA.size x
       terms          = [var ix | ix <- [0 .. nFeats-1]] <> [param 0] -- [param ix | ix <- [0 .. 5]]
-      alg            = evalStateT (egraphSearch (_alg args) x_tr y_tr x_val y_val x_te y_te terms (gens args) (_maxSize args) (_printPareto args)) emptyGraph
+      alg            = evalStateT (egraphSearch (_alg args) (_distribution args) x_tr y_tr mXErr_tr mYErr_tr x_val y_val mXErr_val mYErr_val x_te mXErr_te y_te mYErr_te terms (gens args) (_maxSize args) (_printPareto args)) emptyGraph
   evalStateT alg g'
 
   where
