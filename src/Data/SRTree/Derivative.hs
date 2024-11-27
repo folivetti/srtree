@@ -44,7 +44,7 @@ deriveBy p dx = fst (mutu alg1 alg2)
       alg1 (Bin Mul l r)      = fst l * snd r + snd l * fst r
       alg1 (Bin Div l r)      = (fst l * snd r - snd l * fst r) / snd r ** 2
       alg1 (Bin Power l r)    = snd l ** (snd r - 1) * (snd r * fst l + snd l * log (snd l) * fst r)
-      alg1 (Bin PowerAbs l r) = (abs (snd l) ** (snd r)) * (fst r * log (abs (snd l)) + snd r * fst l / snd l)
+      alg1 (Bin PowerAbs l r) = (powabs (snd l) (snd r)) * (fst r * log (abs (snd l)) + snd r * fst l / snd l)
       alg1 (Bin AQ l r)       = ((1 + snd r * snd r) * fst l - snd l * snd r * fst r) / (1 + snd r * snd r) ** 1.5
 
       alg2 (Var ix)    = var ix
@@ -52,6 +52,8 @@ deriveBy p dx = fst (mutu alg1 alg2)
       alg2 (Const c)   = Fix (Const c)
       alg2 (Uni f t)   = Fix (Uni f $ snd t)
       alg2 (Bin f l r) = Fix (Bin f (snd l) (snd r))
+      --(abs (snd l) ** (snd r))
+      powabs l r = Fix (Bin PowerAbs l r)
 
 -- | Derivative of each supported function
 -- For a function h(f) it returns the derivative dh/df

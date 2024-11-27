@@ -111,6 +111,7 @@ executable egraphGP
     , list-shuffle >=1.0.0.1 && <1.1
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
+    , normaldistribution >=1.1.0.3 && <1.2
     , optparse-applicative >=0.17 && <0.19
     , random ==1.2.*
     , scheduler >=2.0.0.1 && <3

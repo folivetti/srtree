@@ -43,10 +43,20 @@ add :: Monad m => CostFun -> ENode -> EGraphST m EClassId
 add costFun enode =
   do enode''   <- canonize enode                                             -- canonize e-node
      constEnode <- calculateConsts enode''
-     let enode' = case constEnode of
-                    ConstVal x -> Const x
-                    ParamIx  x -> Param x
-                    _          -> enode''
+     enode' <- case constEnode of
+                 ConstVal x -> pure $ Const x
+                 ParamIx  x -> pure $ Param x
+                 _          -> case enode'' of
+                                 Bin Sub c1 c2 -> do constType <- gets (_consts . _info . (IntMap.! c2) . _eClass)
+                                                     pure $ case constType of
+                                                              ParamIx x -> Bin Add c1 c2
+                                                              _         -> enode''
+                                 Bin Div c1 c2 -> do constType <- gets (_consts . _info . (IntMap.! c2) . _eClass)
+                                                     pure $ case constType of
+                                                              ParamIx x -> Bin Mul c1 c2
+                                                              _         -> enode''
+                                 _             -> pure $ enode''
+
      maybeEid <- gets ((Map.!? enode') . _eNodeToEClass)                -- check if canonical e-node exists
      case maybeEid of
        Just eid -> pure eid

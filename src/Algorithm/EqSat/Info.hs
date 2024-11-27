@@ -68,6 +68,8 @@ joinData (EData c1 b1 cn1 fit1 p1 sz1) (EData c2 b2 cn2 fit2 p2 sz2) =
     combineConsts (ParamIx ix) (ParamIx iy) = ParamIx (min ix iy)
     combineConsts NotConst x = x
     combineConsts x NotConst = x
+    combineConsts (ParamIx ix) (ConstVal x) = ConstVal x
+    combineConsts (ConstVal x) (ParamIx ix) = ConstVal x -- p - p = 0
     combineConsts x y = error (show x <> " " <> show y)
 
 -- | Calculate e-node data (constant values and cost)
@@ -146,6 +148,7 @@ combineConsts (Param ix)   = ParamIx ix
 combineConsts (Var _)      = NotConst
 combineConsts (Uni f t)    = case t of
                               ConstVal x -> ConstVal $ evalFun f x
+                              -- ParamIx  x -> ParamIx x
                               _          -> t
 combineConsts (Bin op l r) = evalOp' l r
   where

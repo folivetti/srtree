@@ -1,0 +1,100 @@
+
+id,Expression,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test
+0,(-0.10000532831943117 + (Recip(((-0.4614005119048298 - x0) / x0)) - x0)),10,88.9862656118459,88.9862656118459,88.9862656118459,-3.5323254694775077,-3.5323254694775077,-3.5323254694775077,-987.1162858463789,-987.1162858463789,-987.1162858463789,55900.79856935261,55900.79856935261,55900.79856935261
+stack run egraphGP -- -d  -g 300 -a BestFirst -s 15 -k 1 -d ROXY +RTS -N1   179,51s  user 1,06s system 99% cpu 3:00,73 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                83 MB
+page faults from disk:     0
+other page faults:         265471
+/home/olivetti/Projects/srtools/srtree/package.yaml: Ignoring unrecognized field $.library.extra-include-dirs
+id,Expression,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test
+0,(x0 - (((x0 + x0) * -0.35338217725898474) * (Abs((x0 + 1.1025506292459786e-2)) ^ -0.6422455299037637))),14,1.5345531431285573,1.5345531431285573,1.5345531431285573,0.9218408116460788,0.9218408116460788,0.9218408116460788,-987.2311007180609,-987.2311007180609,-987.2311007180609,230.55573483974547,230.55573483974547,230.55573483974547
+stack run egraphGP -- -d  -g 300 -a BestFirst -s 15 -k 1 -d ROXY +RTS -N1   179,79s  user 1,06s system 99% cpu 3:01,03 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                83 MB
+page faults from disk:     0
+other page faults:         271819
+/home/olivetti/Projects/srtools/srtree/package.yaml: Ignoring unrecognized field $.library.extra-include-dirs
+id,Expression,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test
+0,((x0 + x0) + 0.14827251677898404),5,16.839027431207743,16.839027431207743,16.839027431207743,0.142340086046565,0.142340086046565,0.142340086046565,-435.8599994870232,-435.8599994870232,-435.8599994870232,1975.8209744766934,1975.8209744766934,1975.8209744766934
+stack run egraphGP -- -d  -g 300 -a BestFirst -s 15 -k 1 -d ROXY +RTS -N1   186,77s  user 1,10s system 99% cpu 3:08,04 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                99 MB
+page faults from disk:     0
+other page faults:         276715
+/home/olivetti/Projects/srtools/srtree/package.yaml: Ignoring unrecognized field $.library.extra-include-dirs
+id,Expression,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test
+0,(-0.14898250743853336 + (Abs((0.46205827778408637 * x0)) ^ -0.24618429796898533)),8,23.37758432063636,23.37758432063636,23.37758432063636,-0.190687350488989,-0.190687350488989,-0.190687350488989,13568.019485660472,13568.019485660472,13568.019485660472,45684.78080648866,45684.78080648866,45684.78080648866
+stack run egraphGP -- -d  -g 300 -a BestFirst -s 15 -k 1 -d ROXY +RTS -N1   173,34s  user 1,08s system 99% cpu 2:54,56 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                97 MB
+page faults from disk:     0
+other page faults:         187390
+/home/olivetti/Projects/srtools/srtree/package.yaml: Ignoring unrecognized field $.library.extra-include-dirs
+id,Expression,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test
+0,(((((x0 + x0) - x0) * -0.5405321181796858) - x0) + -0.18819282057036515),11,130.47649051830146,130.47649051830146,130.47649051830146,-5.645541501018061,-5.645541501018061,-5.645541501018061,-648.1168742016439,-648.1168742016439,-648.1168742016439,49718.09155103968,49718.09155103968,49718.09155103968
+stack run egraphGP -- -d  -g 300 -a BestFirst -s 15 -k 1 -d ROXY +RTS -N1   168,51s  user 1,14s system 99% cpu 2:49,79 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                83 MB
+page faults from disk:     0
+other page faults:         241395
+/home/olivetti/Projects/srtools/srtree/package.yaml: Ignoring unrecognized field $.library.extra-include-dirs
+id,Expression,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test
+0,(Abs(Recip((2.52536440178702 * x0))) ^ -0.6628864164620348),7,4.891458744091089,4.891458744091089,4.891458744091089,0.7508639912428097,0.7508639912428097,0.7508639912428097,-565.1666136325009,-565.1666136325009,-565.1666136325009,43781.70667991697,43781.70667991697,43781.70667991697
+stack run egraphGP -- -d  -g 300 -a BestFirst -s 15 -k 1 -d ROXY +RTS -N1   170,38s  user 1,19s system 99% cpu 2:51,72 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                83 MB
+page faults from disk:     0
+other page faults:         265614
+/home/olivetti/Projects/srtools/srtree/package.yaml: Ignoring unrecognized field $.library.extra-include-dirs
+id,Expression,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test
+0,(x0 + (Abs((x0 * -0.47955363093977366)) ^ 0.4193636937578423)),8,1.572225376515413,1.572225376515413,1.572225376515413,0.9199220568618729,0.9199220568618729,0.9199220568618729,-977.7429580431905,-977.7429580431905,-977.7429580431905,163166.54842034265,163166.54842034265,163166.54842034265
+stack run egraphGP -- -d  -g 300 -a BestFirst -s 15 -k 1 -d ROXY +RTS -N1   181,22s  user 1,27s system 99% cpu 3:02,63 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                87 MB
+page faults from disk:     0
+other page faults:         274018
+/home/olivetti/Projects/srtools/srtree/package.yaml: Ignoring unrecognized field $.library.extra-include-dirs
+id,Expression,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test
+0,((Abs((Abs((x0 * -0.2530950506230103)) ^ -0.4512751634248944)) ^ -0.37185710707444186) + x0),11,1.553104041035171,1.553104041035171,1.553104041035171,0.9208959612639921,0.9208959612639921,0.9208959612639921,8839.12337323866,8839.12337323866,8839.12337323866,2666.6507686884547,2666.6507686884547,2666.6507686884547
+stack run egraphGP -- -d  -g 300 -a BestFirst -s 15 -k 1 -d ROXY +RTS -N1   178,60s  user 1,22s system 99% cpu 2:59,93 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                84 MB
+page faults from disk:     0
+other page faults:         210044
+/home/olivetti/Projects/srtools/srtree/package.yaml: Ignoring unrecognized field $.library.extra-include-dirs
+id,Expression,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test
+0,(x0 + (0.1881937009009893 - ((x0 + x0) * -0.27026599034395593))),9,5.418610198961077,5.418610198961077,5.418610198961077,0.7240146572613045,0.7240146572613045,0.7240146572613045,-648.1168741408936,-648.1168741408936,-648.1168741408936,43660.01832855032,43660.01832855032,43660.01832855032
+stack run egraphGP -- -d  -g 300 -a BestFirst -s 15 -k 1 -d ROXY +RTS -N1   175,47s  user 1,05s system 99% cpu 2:57,42 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                82 MB
+page faults from disk:     0
+other page faults:         264659
+/home/olivetti/Projects/srtools/srtree/package.yaml: Ignoring unrecognized field $.library.extra-include-dirs
+id,Expression,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test
+0,((((-0.5877712101902388 + (-0.8082790086975575 * x0)) * -0.6687451289217192) + -0.2048763076167545) + x0),11,5.418620549199505,5.418620549199505,5.418620549199505,0.7240141300940062,0.7240141300940062,0.7240141300940062,-648.1168742201802,-648.1168742201802,-648.1168742201802,673.1158408935312,673.1158408935312,673.1158408935312
+stack run egraphGP -- -d  -g 300 -a BestFirst -s 15 -k 1 -d ROXY +RTS -N1   168,40s  user 1,09s system 99% cpu 2:49,63 total
+avg shared (code):         0 KB
+avg unshared (data/stack): 0 KB
+total (sum):               0 KB
+max memory:                89 MB
+page faults from disk:     0
+other page faults:         279520

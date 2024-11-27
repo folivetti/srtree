@@ -6,6 +6,7 @@ import Control.Monad
 import Data.SRTree 
 import Data.SRTree.Eval
 import Data.Massiv.Array as MA
+import Data.Random.Normal
 
 type Rng a = StateT StdGen IO a 
 
@@ -30,7 +31,7 @@ randomFrom funs = do n <- randomRange (0, length funs - 1)
 {-# INLINE randomFrom #-}
 
 randomVec :: Int -> Rng PVector
-randomVec n = MA.fromList compMode <$> replicateM n (randomRange (-3.0, 3.0))
+randomVec n = MA.fromList compMode <$> replicateM n ((*0.1) <$> state normal) -- (randomRange (-0.5, 0.5))
 
 randomTree :: Int -> Int -> Int -> Rng (Fix SRTree) -> Rng (SRTree ()) -> Bool -> Rng (Fix SRTree)
 randomTree minDepth maxDepth maxSize genTerm genNonTerm grow 

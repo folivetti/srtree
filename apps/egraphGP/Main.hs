@@ -38,6 +38,7 @@ import Data.Function ( on )
 import qualified Data.Foldable as Foldable
 import qualified Data.IntMap as IntMap
 import List.Shuffle ( shuffle )
+import Algorithm.SRTree.NonlinearOpt
 
 import Debug.Trace
 import Algorithm.EqSat (runEqSat)
@@ -66,23 +67,29 @@ myCost (Uni _ t)    = 3 + t
 data Alg = OnlyRandom | BestFirst deriving (Show, Read, Eq)
 
 -- experiment 1 80/30
-fitnessFun :: Distribution -> SRMatrix -> PVector -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> Maybe SRMatrix -> Maybe PVector -> Fix SRTree -> RndEGraph (Double, PVector)
-fitnessFun distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val _tree = do
+fitnessFun :: Int -> Distribution -> SRMatrix -> PVector -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> Maybe SRMatrix -> Maybe PVector -> Fix SRTree -> Bool -> RndEGraph (Double, PVector)
+fitnessFun nIter distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val _tree useNewton = do
     let tree         = relabelParams _tree
-        nParams      = countParams tree + if distribution == ROXY then 3 else 0
+        nParams      = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
+        (Sz2 m' _)    = MA.size x
     -- io . print $ showExpr tree
-    thetaOrig <- rnd $ randomVec nParams --   = MA.replicate Seq nParams 1.0
-    let (theta, fit, nEvs) = minimizeNLL distribution mXErr mYErr 50 x y tree thetaOrig
-        tr           = negate $ nll distribution mXErr mYErr x y tree $ if nParams == 0 then thetaOrig else theta
-        val          = negate $ nll distribution mXErr_val mYErr_val x_val y_val tree $ if nParams == 0 then thetaOrig else theta
+    thetaOrig <- (rnd $ randomVec nParams) --   = MA.replicate Seq nParams 1.0
+    let (theta, fit, nEvs) = minimizeNLL' (if useNewton then TNEWTON_PRECOND else VAR1) distribution mXErr mYErr nIter x y tree thetaOrig
+        evalF a b c d = if distribution == Gaussian
+                          then negate $ mse a b tree $ if nParams == 0 then thetaOrig else theta
+                          else negate $ nll distribution c d a b tree $ if nParams == 0 then thetaOrig else theta
+        tr           = evalF x y mXErr mYErr -- negate $ nll distribution mXErr mYErr x y tree $ if nParams == 0 then thetaOrig else theta
+        val          = evalF x_val y_val mXErr_val mYErr_val -- negate $ nll distribution mXErr_val mYErr_val x_val y_val tree $ if nParams == 0 then thetaOrig else theta
     pure $ if isNaN val || isNaN tr
             then (-(1/0), theta) -- infinity
             else (min tr val, theta)
 {-# INLINE fitnessFun #-}
 
-fitnessFunRep :: Distribution -> SRMatrix -> PVector -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> Maybe SRMatrix -> Maybe PVector -> Fix SRTree -> RndEGraph (Double, PVector)
-fitnessFunRep distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val _tree = do
-    fits <- replicateM 1 (fitnessFun distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val _tree)
+fitnessFunRep :: Int -> Int -> Distribution -> SRMatrix -> PVector -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> Maybe SRMatrix -> Maybe PVector -> Fix SRTree -> RndEGraph (Double, PVector)
+fitnessFunRep nRep nIter distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val _tree = do
+    let useNewton = cycle [True, False]
+    --fits <- replicateM nRep (fitnessFun nIter distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val _tree)
+    fits <- Prelude.mapM (fitnessFun nIter distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val _tree) $ Prelude.take nRep useNewton
     pure (maximumBy (compare `on` fst) fits)
 {-# INLINE fitnessFunRep #-}
 
@@ -135,10 +142,13 @@ rewriteBasic2 =
     , ("x" * "y") * "z" :=> "x" * ("y" * "z")
     , ("x" * "y") + ("x" * "z") :=> "x" * ("y" + "z")
     , ("w" * "x") + ("z" * "x") :=> ("w" + "z") * "x" -- :| isConstPt "w" :| isConstPt "z"
+    --, "x" - "x" :=> 0
+    --, "x" / "x" :=> 1 -- :| isNotZero "x"
     ]
 
-egraphSearch alg distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val x_te mXErr_te y_te mYErr_te terms nEvals maxSize printPareto = do
+egraphSearch alg distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val x_te mXErr_te y_te mYErr_te terms nEvals maxSize printPareto printTrace = do
   ec <- insertRndExpr maxSize
+  --ec <- insertBestExpr
   updateIfNothing ec
   insertTerms
   evaluateUnevaluated
@@ -177,11 +187,21 @@ egraphSearch alg distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val x_
                                             Nothing -> do ec <- insertRndExpr maxSize >>= canonical
                                                           pure (ec, True)
                                             Just c  -> pure (c, False)
-       upd <- updateIfNothing ecN
-       when upd
-         do runEqSat myCost rewriteBasic2 1
-            cleanDB
+       when (nEvs `mod` 100 == 0) $ do
+          runEqSat myCost rewriteBasic2 1 -- run eqsat to try to find already evaluated equivalent form
+          cleanDB
+
+       ecN' <- canonical ecN
+       upd <- updateIfNothing ecN'
+       when (upd && printTrace)
+         do --runEqSat myCost rewriteBasic2 1
+
+            --ecN' <- canonical ecN
+            _tree <- getBest ecN'
+            fi <- negate . fromJust <$> getFitness ecN'
+            io . putStrLn $ showExpr _tree <> "," <> show fi
             pure ()
+       --cleanDB
        let radius' = if b then (max 1 $ min (200 `div` maxSize) (radius+1)) else (max 1 $ radius-1)
            nEvs'    = nEvs + if upd then 1 else 0
        pure (radius', nEvs')
@@ -195,6 +215,11 @@ egraphSearch alg distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val x_
   --io . print $ Foldable.toList ft
 
   where
+    slowIter = 30
+    slowRep = 1
+    longIter = 1000
+    longRep = 5
+
     numberOfEvalClasses :: Monad m => Int -> EGraphST m Bool
     numberOfEvalClasses nEvs =
       (subtract <$> gets (IntSet.size . _unevaluated . _eDB) <*> gets (IM.size . _eClass))
@@ -205,7 +230,7 @@ egraphSearch alg distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val x_
       case mf of
         Nothing -> do
           t <- getBest ec
-          (f, p) <- fitnessFunRep distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val t
+          (f, p) <- fitnessFunRep slowRep slowIter distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val t
           insertFitness ec f p
           pure True
         Just _ -> pure False
@@ -259,7 +284,7 @@ egraphSearch alg distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val x_
           else pure ec
 
     nonTerms   = [ Bin Add () (), Bin Sub () (), Bin Mul () (), Bin Div () ()
-                 , Bin PowerAbs () (),  Uni Recip (), Uni LogAbs (), Uni Exp (), Uni Sin (), Uni SqrtAbs ()]
+                 , Bin PowerAbs () (),  Uni Recip ()] -- , Uni LogAbs (), Uni Exp (), Uni Sin (), Uni SqrtAbs ()]
     rndTerm    = Random.randomFrom terms
     rndNonTerm = Random.randomFrom $ (Uni Id ()) : nonTerms
     rndNonTerm2 = Random.randomFrom nonTerms
@@ -276,9 +301,10 @@ egraphSearch alg distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val x_
 
     insertBestExpr :: RndEGraph EClassId
     insertBestExpr = do --let t =  "t0" / (recip ("t1" - "x0") + powabs "t2" "x0")
-                        let t = ((("t0" + (powabs "t0" "x0")) / "t0") * "x0")
+                        --let t = ((("t0" + (powabs "t0" "x0")) / "t0") * "x0")
+                        let t = "t0" / (recip ("t0" + "x0") - powabs "t0" "x0")
                         ecId <- fromTree myCost t >>= canonical
-                        (f, p) <- fitnessFunRep distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val t
+                        (f, p) <- fitnessFunRep slowRep slowIter distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val t
                         insertFitness ecId f p
                         io . putStrLn $ "Best fit global: " <> show f
                         pure ecId
@@ -310,8 +336,10 @@ egraphSearch alg distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val x_
 
     printExpr ix ec = do 
         fit <- fromJust <$> getFitness ec 
-        theta <- gets (fromJust . _theta . _info . (IM.! ec) . _eClass)
-        ((best, mf), mtheta) <- (,theta) . (,fit) <$> getBest ec
+        --theta <- gets (fromJust . _theta . _info . (IM.! ec) . _eClass)
+        --((best, mf), mtheta) <- (,theta) . (,fit) <$> getBest ec
+        best <- getBest ec
+        (_, theta) <- fitnessFunRep longRep longIter distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val best
         let best'     = relabelParams best
             expr      = paramsToConst (MA.toList theta) best'
             unprotect = convertProtectedOps expr 
@@ -351,14 +379,14 @@ egraphSearch alg distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val x_
           ec <- gets (IntSet.toList . _unevaluated . _eDB)
           forM_ ec $ \c -> do
               t <- getBest c
-              (f, p) <- fitnessFun distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val t
+              (f, p) <- fitnessFunRep slowRep slowIter distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val t
               insertFitness c f p
 
     evaluateRndUnevaluated = do
           ec <- gets (IntSet.toList . _unevaluated . _eDB)
           c <- rnd . randomFrom $ ec 
           t <- getBest c
-          (f, p) <- fitnessFun distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val t
+          (f, p) <- fitnessFunRep slowRep slowIter distribution x y mXErr mYErr x_val y_val mXErr_val mYErr_val t
           insertFitness c f p
           pure c
 
@@ -373,6 +401,7 @@ data Args = Args
     _maxSize      :: Int,
     _split        :: Int,
     _printPareto  :: Bool,
+    _trace        :: Bool,
     _distribution :: Distribution
   }
   deriving (Show)
@@ -416,6 +445,9 @@ opt = Args
   <*> switch
        ( long "print-pareto"
        <> help "print Pareto front instead of best found expression")
+  <*> switch
+       ( long "trace"
+       <> help "print all evaluated expressions.")
   <*> option auto
        ( long "distribution"
        <> short 'd'
@@ -477,8 +509,10 @@ main = do
                     else getTrain <$> loadDataset (_testData args) True 
   let ((x_tr, x_val, y_tr, y_val, mXErr_tr, mYErr_tr, mXErr_val, mYErr_val),g') = runState (splitData x y mXErr mYErr $ _split args) g
   let (Sz2 _ nFeats) = MA.size x
-      terms          = [var ix | ix <- [0 .. nFeats-1]] <> [param 0] -- [param ix | ix <- [0 .. 5]]
-      alg            = evalStateT (egraphSearch (_alg args) (_distribution args) x_tr y_tr mXErr_tr mYErr_tr x_val y_val mXErr_val mYErr_val x_te mXErr_te y_te mYErr_te terms (gens args) (_maxSize args) (_printPareto args)) emptyGraph
+      terms          = if _distribution args == ROXY
+                          then [var 0, param 0]
+                          else [var ix | ix <- [0 .. nFeats-1]] <> [param 0] -- [param ix | ix <- [0 .. 5]]
+      alg            = evalStateT (egraphSearch (_alg args) (_distribution args) x_tr y_tr mXErr_tr mYErr_tr x_val y_val mXErr_val mYErr_val x_te mXErr_te y_te mYErr_te terms (gens args) (_maxSize args) (_printPareto args) (_trace args)) emptyGraph
   evalStateT alg g'
 
   where

@@ -122,6 +122,7 @@ executables:
     dependencies:
     - srtree
     - optparse-applicative >= 0.17 && < 0.19
+    - normaldistribution >= 1.1.0.3 && < 1.2 
   ieeexplore:
     main:                Main.hs
     source-dirs:         apps/ieeexplore

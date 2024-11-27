@@ -51,38 +51,51 @@ tree2arr tree = IntMap.fromList listTree
     convert (Bin op l r) iy = (iy, (2, fromEnum op, -1, -1)) : (l <> r)
 
 -- | minimizes the negative log-likelihood of the expression
-minimizeNLL :: Distribution -> Maybe SRMatrix -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
-minimizeNLL dist mXerr mYerr niter xss ys tree t0
+minimizeNLL' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> Distribution -> Maybe SRMatrix -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
+minimizeNLL' alg dist mXerr mYerr niter xss ys tree t0
   | niter == 0 = (t0, f, 0)
   | n == 0     = (t0, f, 0)
-  | otherwise  = (fromStorableVector compMode t_opt, nll dist mXerr mYerr xss ys tree (fromStorableVector compMode t_opt), nEvs)
+  | otherwise  = (t_opt', nll dist mXerr mYerr xss ys tree t_opt', nEvs)
   where
-    tree'      = relabelParams tree -- $ fst $ floatConstsToParam tree
+    tree'      = if dist == ROXY
+                    then nllROXY $ relabelParams tree -- $ fst $ floatConstsToParam tree
+                    else if dist == Gaussian
+                          then nllGAUSS (fromIntegral m) $ relabelParams tree
+                          else relabelParams tree
     t0'        = toStorableVector t0
     treeArr    = IntMap.toAscList $ tree2arr tree'
     j2ix       = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]
     (Sz n)     = size t0
     (Sz m)     = size ys
     funAndGrad = if dist == ROXY
-                    then second (toStorableVector . computeAs S) . gradNLL dist mXerr mYerr xss ys tree . fromStorableVector compMode
-                    else second (toStorableVector . computeAs S) . gradNLLArr dist mXerr mYerr xss ys treeArr j2ix
+                    then second (toStorableVector . computeAs S) . gradNLLArrROXY dist xss ys treeArr j2ix
+                    else if dist == Gaussian
+                          then second (toStorableVector . computeAs S) . gradNLLArrROXY dist xss ys treeArr j2ix
+                          else second (toStorableVector . computeAs S) . gradNLLArr dist mXerr mYerr xss ys treeArr j2ix
     (f, _)     = gradNLL dist mXerr mYerr xss ys tree t0 -- if there's no parameter or no iterations
     --debug1     = gradNLLArr dist msErr xss ys treeArr j2ix t0
     --debug2     = gradNLL dist msErr xss ys tree t0
 
-    algorithm  = TNEWTON funAndGrad Nothing
+    algorithm  = alg funAndGrad Nothing -- PRAXIS (fst . funAndGrad) [] Nothing -- TNEWTON funAndGrad Nothing
     stop       = ObjectiveRelativeTolerance 1e-8 :| [ObjectiveAbsoluteTolerance 1e-8, MaximumEvaluations (fromIntegral niter)]
     problem    = LocalProblem (fromIntegral n) stop algorithm
     (t_opt, nEvs) = case minimizeLocal problem t0' of
                       Right sol -> (solutionParams sol, nEvals sol) -- traceShow (">>>>>>>", nEvals sol) $
                       Left e    -> (t0', 0)
+    t_opt'      = fromStorableVector compMode t_opt
+    debugGrad t = let g1 = gradNLL dist mXerr mYerr xss ys tree . fromStorableVector compMode $ t
+                      g2 = gradNLLArr dist mXerr mYerr xss ys treeArr j2ix t
+                  in traceShow (t, g1, g2) $ second (toStorableVector . computeAs S) g2
+
+minimizeNLL :: Distribution -> Maybe SRMatrix -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
+minimizeNLL = minimizeNLL' TNEWTON
 
 -- | minimizes the likelihood assuming repeating parameters in the expression 
 minimizeNLLNonUnique :: Distribution -> Maybe SRMatrix -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
 minimizeNLLNonUnique dist mXerr mYerr niter xss ys tree t0
   | niter == 0 = (t0, f)
   | n == 0     = (t0, f)
-  | otherwise  = (fromStorableVector compMode t_opt, f)
+  | otherwise  = (fromStorableVector compMode t_opt, nll dist mXerr mYerr xss ys tree (fromStorableVector compMode t_opt))
   where
     t0'        = toStorableVector t0
     (Sz n)     = size t0
@@ -90,8 +103,8 @@ minimizeNLLNonUnique dist mXerr mYerr niter xss ys tree t0
     funAndGrad = second (toStorableVector . computeAs S) . gradNLLNonUnique dist mXerr mYerr xss ys tree . fromStorableVector compMode
     (f, _)     = gradNLLNonUnique dist mXerr mYerr xss ys tree t0 -- if there's no parameter or no iterations
 
-    algorithm  = LBFGS funAndGrad Nothing
-    stop       = ObjectiveRelativeTolerance 1e-5 :| [MaximumEvaluations (fromIntegral niter)]
+    algorithm  = TNEWTON funAndGrad Nothing
+    stop       = ObjectiveRelativeTolerance 1e-8 :| [ObjectiveAbsoluteTolerance 1e-8, MaximumEvaluations (fromIntegral niter)]
     problem    = LocalProblem (fromIntegral n) stop algorithm
     t_opt      = case minimizeLocal problem t0' of
                   Right sol -> solutionParams sol
@@ -112,8 +125,8 @@ minimizeNLLWithFixedParam dist mXerr mYerr niter xss ys tree ix t0
     funAndGrad = second (setTo0 . toStorableVector . computeAs S). gradNLLNonUnique dist mXerr mYerr xss ys tree . fromStorableVector compMode
     (f, _)     = gradNLLNonUnique dist mXerr mYerr xss ys tree t0 -- if there's no parameter or no iterations
 
-    algorithm  = LBFGS funAndGrad Nothing
-    stop       = ObjectiveRelativeTolerance 1e-5 :| [MaximumEvaluations (fromIntegral niter)]
+    algorithm  = TNEWTON funAndGrad Nothing
+    stop       = ObjectiveRelativeTolerance 1e-8 :| [ObjectiveAbsoluteTolerance 1e-8, MaximumEvaluations (fromIntegral niter)]
     problem    = LocalProblem (fromIntegral n) stop algorithm
     t_opt      = case minimizeLocal problem t0' of
                   Right sol -> solutionParams sol
