@@ -22,26 +22,24 @@ module Algorithm.SRTree.Likelihoods
   , rmse
   , r2
   , nll
-  , nllGAUSS
-  , nllROXY
   , predict
+  , buildNLL
   , gradNLL
   , gradNLLArr
-  , gradNLLArrROXY
-  , gradNLLNonUnique
   , fisherNLL
   , getSErr
   , hessianNLL
+  , tree2arr
   )
     where
 
-import Algorithm.SRTree.AD ( forwardMode, reverseModeUnique, reverseModeUniqueArr, reverseModeUniqueArrROXY ) -- ( reverseModeUnique )
+import Algorithm.SRTree.AD ( reverseModeArr )
 import Data.Massiv.Array hiding (all, map, read, replicate, tail, take, zip)
 import qualified Data.Massiv.Array as M
 import qualified Data.Massiv.Array.Mutable as Mut
 import Data.Maybe (fromMaybe)
 import Data.SRTree
-import Data.SRTree.Recursion ( cata )
+import Data.SRTree.Recursion ( cata, accu )
 import Data.SRTree.Derivative (deriveByParam, deriveByVar, derivative)
 import Data.SRTree.Eval
 import qualified Data.IntMap.Strict as IntMap
@@ -53,7 +51,9 @@ import Debug.Trace
 import Data.SRTree.Print
 
 -- | Supported distributions for negative log-likelihood
-data Distribution = OLS | Gaussian | Bernoulli | Poisson | ROXY -- OLS: ordinary least square
+-- MSE refers to mean squared error
+-- HGaussian is Gaussian with heteroscedasticity, where the error should be provided
+data Distribution = MSE | Gaussian | HGaussian | Bernoulli | Poisson | ROXY
     deriving (Show, Read, Enum, Bounded, Eq)
 
 -- | Sum-of-square errors or Sum-of-square residues
@@ -113,24 +113,38 @@ negSum = negate . M.sum
 {-# inline negSum #-}
 
 -- | Negative log-likelihood
-nll :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
+nll :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
 
--- | Gaussian distribution
-nll Gaussian mXerr mYerr xss ys t theta =
+-- | Mean Squared error (not a distribution)
+nll MSE _ xss ys t theta = mse xss ys t theta
+
+-- | Gaussian distribution, theta must contain an additional parameter corresponding
+-- to variance.
+nll Gaussian mYerr xss ys t theta
+  | nParams == p' = error "For Gaussian distribution theta must contain the variance as its last value."
+  | otherwise     = 0.5*(sse xss ys t theta / s + m*log (2*pi*s))
+  where
+    s       = theta M.! (p' - 1)
+    (Sz m') = M.size ys 
+    (Sz p') = M.size theta
+    nParams = countParams t
+    m       = fromIntegral m'
+    p       = fromIntegral p'
+
+-- | Gaussian with heteroscedasticity, it needs a valid mYerr
+nll HGaussian mYerr xss ys t theta =
   case mYerr of
-    Nothing   -> 0.5*(sse xss ys t theta / s + m*log (2*pi*s))
+    Nothing   -> error "For HGaussian, you must provide the measured error for the target variable."
     Just yErr -> 0.5*(sseError xss ys yErr t theta + M.sum (M.map (log . (2*) . (pi*)) yErr))
   where
-    -- f(x)/t0^2 => -2f(x)/t0^3 + 2m/(t0) -- *2pi/(2pit0)
-    s       = theta M.! (p' - 1) -- M.sum (M.map ((^2) . (subtract avgY)) yHat) / (m-p)
-    (Sz m') = M.size ys 
+    (Sz m') = M.size ys
     (Sz p') = M.size theta
     m       = fromIntegral m'
     p       = fromIntegral p'
 
 -- | Bernoulli distribution of f(x; theta) is, given phi = 1 / (1 + exp (-f(x; theta))),
 -- y log phi + (1-y) log (1 - phi), assuming y \in {0,1}
-nll Bernoulli _ _ xss ys tree theta
+nll Bernoulli _ xss ys tree theta
   | notValid ys = error "For Bernoulli distribution the output must be either 0 or 1."
   | otherwise   = negate . M.sum $ delay ys * yhat - log (1 + exp yhat)
   where
@@ -138,7 +152,7 @@ nll Bernoulli _ _ xss ys tree theta
     yhat     = evalTree xss theta tree
     notValid = M.any (\x -> x /= 0 && x /= 1)
 
-nll Poisson _ _ xss ys tree theta
+nll Poisson _ xss ys tree theta
   | notValid ys = error "For Poisson distribution the output must be non-negative."
   -- | M.any isNaN yhat = error $ "NaN predictions " <> show theta
   | otherwise   = negate . M.sum $ ys' * yhat - ys' * log ys' - exp yhat
@@ -147,8 +161,8 @@ nll Poisson _ _ xss ys tree theta
     yhat     = evalTree xss theta tree
     notValid = M.any (<0)
 
-nll ROXY mXerr mYerr xss ys tree theta
-  | isNothing mXerr || isNothing mYerr = error "Can't calculate ROXY nll without x,y-errors."
+nll ROXY mYerr xss ys tree theta
+  | isNothing mYerr = error "Can't calculate ROXY nll without x,y-errors."
   | p < num_params + 3 = error "We need 3 additional parameters for ROXY."
   | n /= 1 && n/=5     = error "For ROXY dataset must contain a single variable, or 1 variable + 4 cached data."
   | otherwise          = if isNaN negLL then (1.0/0.0) else negLL
@@ -157,8 +171,14 @@ nll ROXY mXerr mYerr xss ys tree theta
     (Sz2 m n)    = M.size xss
     p            = fromIntegral p'
     num_params   = countParams tree
+
     x0           = xss <! 0
-    xErr0        = (fromJust mXerr) <! 0
+    logX         = xss <! 1
+    logY         = xss <! 2
+    logXErr      = xss <! 3
+    logYErr      = xss <! 4
+
+
     yErr         = fromJust mYerr
     one          = M.replicate compMode (Sz m) 1
     zero         = M.replicate compMode (Sz m) 0
@@ -184,11 +204,7 @@ nll ROXY mXerr mYerr xss ys tree theta
 
     f            = M.map (logBase 10) (abs yhat)
     fprime       = grad / (log 10 *. yhat) * x0 .* log 10
-    -- CACHE THIS!
-    logX         = if n==5 then xss <! 1 else M.map (logBase 10) x0
-    logY         = if n==5 then xss <! 2 else M.map (logBase 10) (delay ys)
-    logXErr      = if n==5 then xss <! 3 else (xErr0 / (x0 .* log 10)) ^ (2  :: Int)
-    logYErr      = if n==5 then xss <! 4 else (delay yErr / (delay ys .* log 10)) ^ (2  :: Int)
+
     -- nll
     w_gauss2     = w_gauss ^ 2
     s2           = delay $ logYErr .+ sig^2
@@ -202,10 +218,12 @@ nll ROXY mXerr mYerr xss ys tree theta
     negLL = 0.5 * M.sum neglogP
 
 -- WARNING: pass tree with parameters
-buildNLL OLS m tree = (tree - var (-1)) ** 2 / constv m
+-- TODO: handle error similar to ROXY
+buildNLL MSE m tree = (tree - var (-1)) ** 2 / constv m
 buildNLL Gaussian m tree = (tree - var (-1)) ** 2 / param p + constv m * log (2*pi* param p)
   where
     p = countParams tree
+buildNLL HGaussian m tree = (tree - var (-1)) ** 2 / var (-2) + constv m * log (2*pi* var (-2))
 buildNLL Poisson m tree = var (-1) * log (var (-1)) + exp tree - var (-1) * tree
 buildNLL Bernoulli m tree = log (1 + exp tree) - var (-1) * tree
 buildNLL ROXY m tree = neglogP
@@ -230,54 +248,26 @@ buildNLL ROXY m tree = neglogP
                 + s2 * (logX - mu_gauss) ** 2
                 ) / den
 
-
-nll' :: Distribution -> PVector -> SRVector -> SRVector -> Double
-nll' Gaussian yErr yhat ys = if isNaN nll then 1e7 else nll
-  where
-    (Sz m') = M.size ys
-    m    = fromIntegral m'
-    err  = M.sum $ ((delay ys - yhat) ^ (2 :: Int) / (delay yErr))
-    nll  = 0.5*(err + M.sum (M.map (log . (*2) . (*pi)) yErr))
-
-nll' Bernoulli _ yhat ys = negate . M.sum $ ys * yhat - log (1 + exp yhat)
-nll' Poisson _ yhat ys   = negate . M.sum $ ys * yhat - ys * log ys - exp yhat
-{-# INLINE nll' #-}
-
 -- | Prediction for different distributions
 predict :: Distribution -> Fix SRTree -> PVector -> SRMatrix -> SRVector
+predict MSE       tree theta xss = evalTree xss theta tree
 predict Gaussian  tree theta xss = evalTree xss theta tree
 predict Bernoulli tree theta xss = logistic $ evalTree xss theta tree
 predict Poisson   tree theta xss = exp $ evalTree xss theta tree
+predict ROXY      tree theta xss = evalTree xss theta tree
 
 -- | Gradient of the negative log-likelihood
-gradNLL :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (Double, SRVector)
-gradNLL Gaussian mXerr mYerr xss ys tree theta =
-  (nll Gaussian mXerr mYerr xss ys tree theta, delay grad)
+gradNLL :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (Double, SRVector)
+gradNLL dist mYerr xss ys tree theta = gradNLLArr dist xss ys mYerr treeArr j2ix (toStorableVector theta)
   where
-    (Sz m)       = M.size ys
-    (Sz p)       = M.size theta
-    ys'          = delay ys
-    (yhat, grad) = reverseModeUnique xss theta ys' yErr id tree
-    yErr         = case mYerr of
-                     Nothing -> delay $ M.replicate @S (M.getComp xss) (Sz m) est
-                     Just e  -> delay e
-    est          = fromIntegral (m - p)
+    (Sz2 m _) = M.size xss
+    tree'     = buildNLL dist (fromIntegral m) tree
+    treeArr   = IntMap.toAscList $ tree2arr tree'
+    j2ix      = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]
 
-gradNLL Bernoulli mXerr mYerr xss ys tree theta
-  | M.any (\x -> x /= 0 && x /= 1) ys = error "For Bernoulli distribution the output must be either 0 or 1."
-  | otherwise                         = (nll Bernoulli mXerr mYerr xss ys tree theta, delay grad)
-  where
-    (yhat, grad) = reverseModeUnique xss theta (delay ys) (M.replicate (getComp xss) (M.size ys) 1) logistic tree
-    grad'        = M.map nanTo0 grad
-    nanTo0 x     = if isNaN x then 0 else x
-
-gradNLL Poisson mXerr mYerr xss ys tree theta
-  | M.any (<0) ys    = error "For Poisson distribution the output must be non-negative."
- -- | M.any isNaN grad = error $ "NaN gradient " <> show grad
-  | otherwise        = (nll Poisson mXerr mYerr xss ys tree theta, delay grad)
-  where
-    (yhat, grad) = reverseModeUnique xss theta (delay ys) (M.replicate (getComp xss) (M.size ys) 1) exp tree
-
+    {-
+    -- EXAMPLE OF FINITE DIFFERENCE
+    -- Implement for debugging
 gradNLL ROXY mXerr mYerr xss ys tree theta =
    (f, delay grad)
   where
@@ -296,128 +286,48 @@ gradNLL ROXY mXerr mYerr xss ys tree theta =
                       let f'= nll ROXY mXerr mYerr xss ys tree theta''
                           g = (f' - f)/eps
                       pure $ if isNaN g then (1/0) else g
+                      -}
+
+nanTo0 x = if isNaN x || isInfinite x then 0 else x
+{-# INLINE nanTo0 #-}
 
 -- | Gradient of the negative log-likelihood
---Array B Ix1 (Int, Int, Int, Double)
-gradNLLArr :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> [(Int,(Int, Int, Int, Double))] -> IntMap.IntMap Int -> VS.Vector Double -> (Double, SRVector)
-gradNLLArr Gaussian mXerr mYerr xss ys tree j2ix theta =
-  (nll' Gaussian yErr yhat (delay ys), delay grad)
+gradNLLArr MSE xss ys mYerr tree j2ix theta =
+  (M.sum yhat, delay grad')
   where
-    (Sz m)       = M.size ys
-    p            = VS.length theta
-    ys'          = delay ys
-    (yhat, grad) = reverseModeUniqueArr xss theta ys' (delay yErr) id tree j2ix
-    yErr         = case mYerr of
-                     Nothing -> M.replicate (getComp xss) (Sz m) est
-                     Just e  -> e
-
-    est          = 1 -- theta VS.! (p-1)  -- fromIntegral (m - p)
-
-gradNLLArr Bernoulli mXerr mYerr xss (delay -> ys) tree j2ix theta
-  | M.any (\x -> x /= 0 && x /= 1) ys = error "For Bernoulli distribution the output must be either 0 or 1."
-  | otherwise                         = (nll' Bernoulli yErr yhat ys, delay grad)
-  where
-    (yhat, grad) = reverseModeUniqueArr xss theta ys (M.replicate (getComp xss) (M.size ys) 1) logistic tree j2ix
+    (yhat, grad) = reverseModeArr xss ys mYerr theta tree j2ix
     grad'        = M.map nanTo0 grad
-    (Sz m)       = M.size ys
-    --err          = logistic yhat - ys
-    nanTo0 x     = if isNaN x then 0 else x
-    yErr         = case mYerr of
-                     Nothing -> M.replicate (getComp xss) (Sz m) 1
-                     Just e  -> e
-
-gradNLLArr Poisson mXerr mYerr xss (delay -> ys) tree j2ix theta
-  | M.any (<0) ys    = error "For Poisson distribution the output must be non-negative."
- -- | M.any isNaN grad = error $ "NaN gradient " <> show grad
-  | otherwise        = (nll' Poisson yErr yhat ys, delay grad)
+gradNLLArr Gaussian xss ys mYerr tree j2ix theta =
+  (M.sum yhat, delay grad')
   where
-    (yhat, grad) = reverseModeUniqueArr xss theta ys (M.replicate (getComp xss) (M.size ys) 1) exp tree j2ix
-    --err          = exp yhat - ys
-    (Sz m)       = M.size ys
-    yErr         = case mYerr of
-                     Nothing -> M.replicate (getComp xss) (Sz m) 1
-                     Just e  -> e
-
--- | TODO: this is "hacky" and should be improved
-gradNLLArr ROXY mXerr mYerr xss ys tree j2ix theta =
-  ((*0.5) $ M.sum yhat, M.map (*(0.5)) $ delay grad)
-  where
-    (Sz m)       = M.size ys
-    p            = VS.length theta
-    ys'          = delay ys
-    (yhat, grad) = reverseModeUniqueArr xss theta ys' (delay yErr) (const 0) tree j2ix
-    yErr         = M.map negate ys
-
-gradNLLArrROXY OLS xss ys tree j2ix theta =
-  (M.sum yhat, delay grad)
-  where
-    (yhat, grad) = reverseModeUniqueArrROXY xss ys theta tree j2ix
-gradNLLArrROXY Gaussian xss ys tree j2ix theta =
-  (M.sum yhat, delay grad)
-  where
-    (yhat, grad) = reverseModeUniqueArrROXY xss ys theta tree j2ix
-gradNLLArrROXY ROXY xss ys tree j2ix theta =
-  ((*0.5) $ M.sum yhat, M.map (*(0.5)) $ delay grad)
-  where
-    (yhat, grad) = reverseModeUniqueArrROXY xss ys theta tree j2ix
-
--- | Gradient of the negative log-likelihood
-gradNLLNonUnique :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (Double, SRVector)
-gradNLLNonUnique Gaussian mXerr mYerr xss ys tree theta =
-  (nll Gaussian mXerr mYerr xss ys tree theta, delay grad)
-  where
-    (Sz m)       = M.size ys
-    (Sz p)       = M.size theta
-    ys'          = delay ys
-    (yhat, grad) = forwardMode xss theta err tree
-    err          = (predict Gaussian tree theta xss - ys') / (delay yErr)
-    yErr         = case mYerr of
-                     Nothing -> M.replicate (getComp xss) (Sz m) est
-                     Just e  -> e
-    est          = fromIntegral (m - p)
-
-gradNLLNonUnique Bernoulli mXerr mYerr xss ys tree theta
-  | M.any (\x -> x /= 0 && x /= 1) ys = error "For Bernoulli distribution the output must be either 0 or 1."
-  | otherwise                         = (nll Bernoulli mXerr mYerr xss ys tree theta, delay grad)
-  where
-    (yhat, grad) = forwardMode xss theta err tree
+    (yhat, grad) = reverseModeArr xss ys mYerr theta tree j2ix
     grad'        = M.map nanTo0 grad
-    err          = predict Bernoulli tree theta xss - delay ys
-    nanTo0 x     = if isNaN x then 0 else x
-
-gradNLLNonUnique Poisson mXerr mYerr xss ys tree theta
+gradNLLArr Bernoulli xss ys mYerr tree j2ix theta
+  | M.any (\x -> x /= 0 && x /= 1) ys = error "For Bernoulli distribution the output must be either 0 or 1."
+  | otherwise                         = (M.sum yhat, delay grad')
+  where
+    (yhat, grad) = reverseModeArr xss ys mYerr theta tree j2ix
+    grad'        = M.map nanTo0 grad
+gradNLLArr Poisson xss ys mYerr tree j2ix theta
   | M.any (<0) ys    = error "For Poisson distribution the output must be non-negative."
-  -- | M.any isNaN grad = error $ "NaN gradient " <> show grad
-  | otherwise        = (nll Poisson mXerr mYerr xss ys tree theta, delay grad)
+  | otherwise        = (M.sum yhat, delay grad')
   where
-    (yhat, grad) = forwardMode xss theta err tree
-    err          = predict Poisson tree theta xss - delay ys
-
-gradNLLNonUnique ROXY mXerr mYerr xss ys tree theta =
-   (f, delay grad)
+    (yhat, grad) = reverseModeArr xss ys mYerr theta tree j2ix
+    grad'        = M.map nanTo0 grad
+gradNLLArr ROXY xss ys mYerr tree j2ix theta =
+  ((*0.5) $ M.sum yhat, M.map (*(0.5)) $ delay grad')
   where
-    (Sz p) = M.size theta
-    yhat   = predict Gaussian tree theta xss
-    f      = nll ROXY mXerr mYerr xss ys tree theta
-    grad   = makeArray @S (getComp xss) (Sz p) finiteDiff
-    eps    = 1e-6
-
-    finiteDiff ix = unsafePerformIO $ do
-                      theta' <- Mut.thaw theta
-                      v <- Mut.readM theta' ix
-                      Mut.writeM theta' ix (v + eps)
-                      theta'' <- Mut.freezeS theta'
-                      let f' = nll ROXY mXerr mYerr xss ys tree theta''
-                      pure $ (f - f')/eps
+    (yhat, grad) = reverseModeArr xss ys mYerr theta tree j2ix
+    grad'        = M.map nanTo0 grad
 
 -- | Fisher information of negative log-likelihood
-fisherNLL :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> SRVector
-fisherNLL ROXY mXerr mYerr xss ys tree theta = makeArray cmp (Sz p) finiteDiff
+fisherNLL :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> SRVector
+fisherNLL ROXY mYerr xss ys tree theta = makeArray cmp (Sz p) finiteDiff
   where
     cmp    = getComp xss
     (Sz m) = M.size ys
     (Sz p) = M.size theta
-    f      = nll ROXY mXerr mYerr xss ys tree theta
+    f      = nll ROXY mYerr xss ys tree theta
     eps = 1e-6
     finiteDiff ix = unsafePerformIO $ do
                       theta' <- Mut.thaw theta
@@ -426,11 +336,11 @@ fisherNLL ROXY mXerr mYerr xss ys tree theta = makeArray cmp (Sz p) finiteDiff
                       thetaPlus <- Mut.freezeS theta'
                       Mut.writeM theta' ix (v - eps)
                       thetaMinus <- Mut.freezeS theta'
-                      let fPlus     = nll ROXY mXerr mYerr xss ys tree thetaPlus
-                          fMinus    = nll ROXY mXerr mYerr xss ys tree thetaMinus
+                      let fPlus     = nll ROXY mYerr xss ys tree thetaPlus
+                          fMinus    = nll ROXY mYerr xss ys tree thetaMinus
                       pure $ (fPlus + fMinus - 2*f)/(eps*eps)
 
-fisherNLL dist mXerr mYerr xss ys tree theta = makeArray cmp (Sz p) build
+fisherNLL dist mYerr xss ys tree theta = makeArray cmp (Sz p) build
   where
     build ix = let dtdix   = deriveByParam ix t'
                    d2tdix2 = deriveByParam ix dtdix 
@@ -452,6 +362,7 @@ fisherNLL dist mXerr mYerr xss ys tree theta = makeArray cmp (Sz p) build
     est    = fromIntegral (m - p)
 
     (phi, phi') = case dist of
+                    MSE       -> (yhat, M.replicate compMode (Sz m) 1)
                     Gaussian  -> (yhat, M.replicate compMode (Sz m) 1)
                     Bernoulli -> (logistic yhat, phi*(M.replicate compMode (Sz m) 1 - phi))
                     Poisson   -> (exp yhat, phi)
@@ -460,9 +371,9 @@ fisherNLL dist mXerr mYerr xss ys tree theta = makeArray cmp (Sz p) build
 --
 -- Note, though the Fisher is just the diagonal of the return of this function
 -- it is better to keep them as different functions for efficiency
-hessianNLL :: Distribution -> Maybe SRMatrix -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> SRMatrix
-hessianNLL ROXY mXerr mYerr xss ys tree theta = undefined
-hessianNLL dist mXerr mYerr xss ys tree theta = makeArray cmp (Sz (p :. p)) build
+hessianNLL :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> SRMatrix
+hessianNLL ROXY mYerr xss ys tree theta = undefined
+hessianNLL dist mYerr xss ys tree theta = makeArray cmp (Sz (p :. p)) build
   where
     build (ix :. iy) = let dtdix   = deriveByParam ix t' 
                            dtdiy   = deriveByParam iy t' 
@@ -491,3 +402,27 @@ hessianNLL dist mXerr mYerr xss ys tree theta = makeArray cmp (Sz (p :. p)) buil
                     Bernoulli -> (logistic yhat, phi*(M.replicate cmp (Sz m) 1 - phi))
                     Poisson   -> (exp yhat, phi)
 
+tree2arr :: Fix SRTree -> IntMap.IntMap (Int, Int, Int, Double)
+tree2arr tree = IntMap.fromList listTree
+  where
+    height = cata alg
+      where
+        alg (Var ix) = 1
+        alg (Const x) = 1
+        alg (Param ix) = 1
+        alg (Uni _ t) = 1 + t
+        alg (Bin _ l r) = 1 + max l r
+    listTree = accu indexer convert tree 0
+
+    indexer (Var ix) iy   = Var ix
+    indexer (Const x) iy  = Const x
+    indexer (Param ix) iy = Param ix
+    indexer (Bin op l r) iy = Bin op (l, 2*iy+1) (r, 2*iy+2)
+    indexer (Uni f t) iy = Uni f (t, 2*iy+1)
+
+    convert (Var ix) iy = [(iy, (0, 0, ix, -1))]
+    convert (Const x) iy = [(iy, (0, 2, -1, x))]
+    convert (Param ix) iy = [(iy, (0, 1, ix, -1))]
+    convert (Uni f t) iy = (iy, (1, fromEnum f, -1, -1)) : t
+    convert (Bin op l r) iy = (iy, (2, fromEnum op, -1, -1)) : (l <> r)
+{-# INLINE tree2arr #-}

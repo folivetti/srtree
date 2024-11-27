@@ -26,53 +26,24 @@ import Data.SRTree.Recursion
 
 import Debug.Trace
 
-tree2arr :: Fix SRTree -> IntMap.IntMap (Int, Int, Int, Double)
-tree2arr tree = IntMap.fromList listTree
-  where
-    height = cata alg
-      where
-        alg (Var ix) = 1
-        alg (Const x) = 1
-        alg (Param ix) = 1
-        alg (Uni _ t) = 1 + t
-        alg (Bin _ l r) = 1 + max l r
-    listTree = accu indexer convert tree 0
 
-    indexer (Var ix) iy   = Var ix
-    indexer (Const x) iy  = Const x
-    indexer (Param ix) iy = Param ix
-    indexer (Bin op l r) iy = Bin op (l, 2*iy+1) (r, 2*iy+2)
-    indexer (Uni f t) iy = Uni f (t, 2*iy+1)
-
-    convert (Var ix) iy = [(iy, (0, 0, ix, -1))]
-    convert (Const x) iy = [(iy, (0, 2, -1, x))]
-    convert (Param ix) iy = [(iy, (0, 1, ix, -1))]
-    convert (Uni f t) iy = (iy, (1, fromEnum f, -1, -1)) : t
-    convert (Bin op l r) iy = (iy, (2, fromEnum op, -1, -1)) : (l <> r)
 
 -- | minimizes the negative log-likelihood of the expression
-minimizeNLL' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> Distribution -> Maybe SRMatrix -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
-minimizeNLL' alg dist mXerr mYerr niter xss ys tree t0
+minimizeNLL' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> Distribution -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
+minimizeNLL' alg dist mYerr niter xss ys tree t0
   | niter == 0 = (t0, f, 0)
   | n == 0     = (t0, f, 0)
-  | otherwise  = (t_opt', nll dist mXerr mYerr xss ys tree t_opt', nEvs)
+  | otherwise  = (t_opt', nll dist mYerr xss ys tree t_opt', nEvs)
   where
-    tree'      = if dist == ROXY
-                    then nllROXY $ relabelParams tree -- $ fst $ floatConstsToParam tree
-                    else if dist == Gaussian
-                          then nllGAUSS (fromIntegral m) $ relabelParams tree
-                          else relabelParams tree
+    tree'      = buildNLL dist (fromIntegral m) $ relabelParams tree
     t0'        = toStorableVector t0
     treeArr    = IntMap.toAscList $ tree2arr tree'
     j2ix       = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]
     (Sz n)     = size t0
     (Sz m)     = size ys
-    funAndGrad = if dist == ROXY
-                    then second (toStorableVector . computeAs S) . gradNLLArrROXY dist xss ys treeArr j2ix
-                    else if dist == Gaussian
-                          then second (toStorableVector . computeAs S) . gradNLLArrROXY dist xss ys treeArr j2ix
-                          else second (toStorableVector . computeAs S) . gradNLLArr dist mXerr mYerr xss ys treeArr j2ix
-    (f, _)     = gradNLL dist mXerr mYerr xss ys tree t0 -- if there's no parameter or no iterations
+    funAndGrad = second (toStorableVector . computeAs S) . gradNLLArr dist xss ys mYerr treeArr j2ix
+
+    (f, _)     = gradNLL dist mYerr xss ys tree t0 -- if there's no parameter or no iterations
     --debug1     = gradNLLArr dist msErr xss ys treeArr j2ix t0
     --debug2     = gradNLL dist msErr xss ys tree t0
 
@@ -83,77 +54,49 @@ minimizeNLL' alg dist mXerr mYerr niter xss ys tree t0
                       Right sol -> (solutionParams sol, nEvals sol) -- traceShow (">>>>>>>", nEvals sol) $
                       Left e    -> (t0', 0)
     t_opt'      = fromStorableVector compMode t_opt
-    debugGrad t = let g1 = gradNLL dist mXerr mYerr xss ys tree . fromStorableVector compMode $ t
-                      g2 = gradNLLArr dist mXerr mYerr xss ys treeArr j2ix t
+    debugGrad t = let g1 = gradNLL dist mYerr xss ys tree . fromStorableVector compMode $ t
+                      g2 = gradNLLArr dist xss ys mYerr treeArr j2ix t
                   in traceShow (t, g1, g2) $ second (toStorableVector . computeAs S) g2
 
-minimizeNLL :: Distribution -> Maybe SRMatrix -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
+minimizeNLL :: Distribution -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
 minimizeNLL = minimizeNLL' TNEWTON
 
--- | minimizes the likelihood assuming repeating parameters in the expression 
-minimizeNLLNonUnique :: Distribution -> Maybe SRMatrix -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double)
-minimizeNLLNonUnique dist mXerr mYerr niter xss ys tree t0
-  | niter == 0 = (t0, f)
-  | n == 0     = (t0, f)
-  | otherwise  = (fromStorableVector compMode t_opt, nll dist mXerr mYerr xss ys tree (fromStorableVector compMode t_opt))
-  where
-    t0'        = toStorableVector t0
-    (Sz n)     = size t0
-    (Sz m)     = size ys
-    funAndGrad = second (toStorableVector . computeAs S) . gradNLLNonUnique dist mXerr mYerr xss ys tree . fromStorableVector compMode
-    (f, _)     = gradNLLNonUnique dist mXerr mYerr xss ys tree t0 -- if there's no parameter or no iterations
-
-    algorithm  = TNEWTON funAndGrad Nothing
-    stop       = ObjectiveRelativeTolerance 1e-8 :| [ObjectiveAbsoluteTolerance 1e-8, MaximumEvaluations (fromIntegral niter)]
-    problem    = LocalProblem (fromIntegral n) stop algorithm
-    t_opt      = case minimizeLocal problem t0' of
-                  Right sol -> solutionParams sol
-                  Left e    -> t0'
-
 -- | minimizes the function while keeping the parameter ix fixed (used to calculate the profile)
-minimizeNLLWithFixedParam :: Distribution -> Maybe SRMatrix -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> Int -> PVector -> PVector
-minimizeNLLWithFixedParam dist mXerr mYerr niter xss ys tree ix t0
+minimizeNLLWithFixedParam' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> Distribution -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> Int -> PVector -> PVector
+minimizeNLLWithFixedParam' alg dist mYerr niter xss ys tree ix t0
   | niter == 0 = t0
   | n == 0     = t0
-  | n > m      = t0
-  | otherwise  = fromStorableVector compMode t_opt
+  | otherwise  = t_opt'
   where
+    tree'      = buildNLL dist (fromIntegral m) $ relabelParams tree
     t0'        = toStorableVector t0
+    treeArr    = IntMap.toAscList $ tree2arr tree'
+    j2ix       = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]
     (Sz n)     = size t0
     (Sz m)     = size ys
     setTo0     = (VS.// [(ix, 0.0)])
-    funAndGrad = second (setTo0 . toStorableVector . computeAs S). gradNLLNonUnique dist mXerr mYerr xss ys tree . fromStorableVector compMode
-    (f, _)     = gradNLLNonUnique dist mXerr mYerr xss ys tree t0 -- if there's no parameter or no iterations
+    funAndGrad = second (setTo0 . toStorableVector . computeAs S) . gradNLLArr dist xss ys mYerr treeArr j2ix
 
-    algorithm  = TNEWTON funAndGrad Nothing
+    (f, _)     = gradNLL dist mYerr xss ys tree t0 -- if there's no parameter or no iterations
+
+    algorithm  = alg funAndGrad Nothing -- PRAXIS (fst . funAndGrad) [] Nothing -- TNEWTON funAndGrad Nothing
     stop       = ObjectiveRelativeTolerance 1e-8 :| [ObjectiveAbsoluteTolerance 1e-8, MaximumEvaluations (fromIntegral niter)]
     problem    = LocalProblem (fromIntegral n) stop algorithm
-    t_opt      = case minimizeLocal problem t0' of
-                  Right sol -> solutionParams sol
-                  Left e    -> t0'
+    (t_opt, nEvs) = case minimizeLocal problem t0' of
+                      Right sol -> (solutionParams sol, nEvals sol) -- traceShow (">>>>>>>", nEvals sol) $
+                      Left e    -> (t0', 0)
+    t_opt'      = fromStorableVector compMode t_opt
+
+minimizeNLLWithFixedParam = minimizeNLLWithFixedParam' TNEWTON
 
 -- | minimizes using Gaussian likelihood 
 minimizeGaussian :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
-minimizeGaussian = minimizeNLL Gaussian Nothing Nothing
+minimizeGaussian = minimizeNLL Gaussian Nothing
 
 -- | minimizes using Binomial likelihood 
 minimizeBinomial :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
-minimizeBinomial = minimizeNLL Bernoulli Nothing Nothing
+minimizeBinomial = minimizeNLL Bernoulli Nothing
 
 -- | minimizes using Poisson likelihood 
 minimizePoisson :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
-minimizePoisson = minimizeNLL Poisson Nothing Nothing
-
-{-
--- estimates the standard error if not provided 
-estimateSErr :: Distribution -> Maybe Double -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Int -> Maybe Double
-estimateSErr Gaussian Nothing  xss ys theta0 t nIter = Just err
-  where
-    (theta , _, _) = minimizeNLL Gaussian (Just 1) nIter xss ys t theta0
-    (Sz m) = size ys
-    (Sz p) = size theta
-    ssr    = sse xss ys t theta
-    err    = sqrt $ ssr / fromIntegral (m - p)
-estimateSErr _        (Just s) _   _  _ _ _   = Just s
-estimateSErr _        _        _   _  _ _ _   = Nothing
--}
+minimizePoisson = minimizeNLL Poisson Nothing
