@@ -12,7 +12,7 @@
 -- Module containing the algebraic rules and simplification function.
 --
 -----------------------------------------------------------------------------
-module Algorithm.EqSat.Simplify ( Rule(..), simplifyEqSatDefault, applyMergeOnlyDftl, rewrites, rewriteBasic, rewritesFun ) where
+module Algorithm.EqSat.Simplify ( Rule(..), simplifyEqSatDefault, applyMergeOnlyDftl, rewrites, rewritesParams, rewriteBasic, rewritesFun ) where
 
 import Algorithm.EqSat (eqSat, applySingleMergeOnlyEqSat)
 import Algorithm.EqSat.Egraph
@@ -98,12 +98,8 @@ isValid = constrainOnVal $
 rewriteBasic :: [Rule]
 rewriteBasic =
     [
-      "x" * "x" :=> "x" ** 2
-    , "x" * "y" :=> "y" * "x"
+      "x" * "y" :=> "y" * "x"
     , "x" + "y" :=> "y" + "x"
-    , "x" - "x" :=> 0
-    , "x" / "x" :=> 1 :| isNotZero "x"
-    , ("x" ** "y") * "x" :=> "x" ** ("y" + 1) :| isConstPt "y"
     , ("x" ** "y") * ("x" ** "z") :=> "x" ** ("y" + "z") -- :| isPositive "x"
     , ("x" + "y") + "z" :=> "x" + ("y" + "z")
     --, ("x" + "y") - "z" :=> "x" + ("y" - "z") -- TODO: check that I don't need that
@@ -130,12 +126,9 @@ rewriteBasic =
 rewritesFun :: [Rule]
 rewritesFun =
     [
-      log (sqrt "x") :=> 0.5 * log "x" :| isNotParam "x"
-    , log (exp "x") :==: exp (log "x")
+      log (exp "x") :==: exp (log "x")
     , log (exp "x")  :=> "x"
     -- , exp (log "x")  :=> "x" -- :| isPositive "x" ??? exp(log(x)), x, log(exp(0))
-    , "x" ** (1/2)   :==: sqrt "x" -- <==>
-    , "x" ** (1/3) :==: Fixed (Uni Cbrt "x")
     , log ("x" * "y") :=> log "x" + log "y" :| isConstPos "x" :| isConstPos "y"
     -- , log ("x" / "y") :=> log "x" - log "y" :| isConstPos "x" :| isConstPos "y"
     , log ("x" ** "y") :=> "y" * log "x"
@@ -162,27 +155,51 @@ constReduction =
       0 + "x" :=> "x"
     -- , "x" - 0 :=> "x"
     , 1 * "x" :=> "x"
-    , 0 * "x" :=> 0 :| isValid "x" -- :| isNotParam "x"
     -- , 0 / "x" :=> 0 :| isNotZero "x"
     --, "x" - "x" :=> 0 :| isNotParam "x"
     --, "x" / "x" :=> 1 :| isNotZero "x" :| isNotParam "x"
     , "x" ** 1 :=> "x"
-    , 0 ** "x" :=> 0 :| isPositive "x"
-    , 1 ** "x" :=> 1
+
     -- , "x" * (1 / "x") :=> 1 :| isNotParam "x" :| isNotZero "x"
-    , 0 - "x" :=> negate "x"
-    , "x" + negate "y" :==: "x" - "y"
     -- , negate ("x" * "y") :=> (negate "x") * "y" :| isConstPt "x"
-    , "x" ** "y" * "x" :=> "x" ** ("y" + 1) :| isPositive "x"
+
     , "x" ** "y" * "x" ** "z" :==: "x" ** ("y" + "z") :| isPositive "x"
     , ("x" ** "y") ** "z" :==: "x" ** ("y" * "z") :| isPositive "x"
     , ("x" * "y") ** "z" :==: "x" ** "z" * "y" ** "z" :| isPositive "x" :| isPositive "y"
 
-    , "x" ** "y" * "x" :=> "x" ** ("y" + 1) :| isInteger "y" :| isNotZero "x"
     , "x" ** "y" * "x" ** "z" :==: "x" ** ("y" + "z") :| isInteger "y" :| isInteger "z"  :| isNotZero "x"
     , ("x" ** "y") ** "z" :==: "x" ** ("y" * "z") :| isInteger "y" :| isInteger "z" :| isNotZero "x"
     , ("x" * "y") ** "z" :==: "x" ** "z" * "y" ** "z" :| isInteger "z" :| isNotZero "x" :| isNotZero "y"
 
+    ]
+
+rewritesWithConstant :: [Rule]
+rewritesWithConstant =
+    [
+      "x" * "x" :=> "x" ** 2
+    , "x" - "x" :=> 0
+    , "x" / "x" :=> 1 :| isNotZero "x"
+    , "x" ** "y" * "x" :=> "x" ** ("y" + 1) :| isPositive "x"
+    , 1 ** "x" :=> 1
+    , log (sqrt "x") :=> 0.5 * log "x" :| isNotParam "x"
+    , "x" ** (1/2)   :==: sqrt "x" -- <==>
+    , "x" ** (1/3) :==: Fixed (Uni Cbrt "x")
+    , 0 * "x" :=> 0 :| isValid "x" -- :| isNotParam "x"
+    , 0 ** "x" :=> 0 :| isPositive "x"
+    , 0 - "x" :=> negate "x"
+    , "x" + negate "y" :==: "x" - "y"
+    ]
+rewritesWithParam :: [Rule]
+rewritesWithParam =
+    [
+      "x" * "x" :=> "x" ** Fixed (Param 0)
+    , "x" - "x" :=> Fixed (Param 0)
+    , "x" / "x" :=> Fixed (Param 0) :| isNotZero "x"
+    , "x" ** "y" * "x" :=> "x" ** ("y" + Fixed (Param 0)) :| isPositive "x"
+    , 1 ** "x" :=> Fixed (Param 0)
+    , log (sqrt "x") :=> Fixed (Param 0) * log "x" :| isNotParam "x"
+    , "x" ** Fixed (Param 0)   :==: sqrt "x" -- <==>
+    , "x" ** Fixed (Param 0) :==: Fixed (Uni Cbrt "x")
     ]
 
 -- | default cost function for simplification
@@ -202,7 +219,9 @@ myCost (Uni _ t)    = 3 + t
 
 -- all rewrite rules
 rewrites :: [Rule]
-rewrites = rewriteBasic <> constReduction <> rewritesFun
+rewrites = rewriteBasic <> constReduction <> rewritesFun <> rewritesWithConstant
+rewritesParams :: [Rule]
+rewritesParams = rewriteBasic <> constReduction <> rewritesFun <> rewritesWithParam
 
 -- | simplify using the default parameters 
 simplifyEqSatDefault :: Fix SRTree -> Fix SRTree

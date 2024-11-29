@@ -19,6 +19,7 @@ import Control.Lens (element, makeLenses, over, (&), (+~), (-~), (.~), (^.))
 import Control.Monad (foldM, forM_, forM, when, unless, filterM, (>=>), replicateM, replicateM_)
 import Control.Monad.State.Strict
 import qualified Data.IntMap.Strict as IM
+import qualified Data.Map.Strict as Map
 import Data.Massiv.Array as MA hiding (forM_, forM)
 import Data.Maybe (fromJust, isNothing, isJust)
 import Data.SRTree
@@ -153,7 +154,7 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
   updateIfNothing ec
   insertTerms
   evaluateUnevaluated
-  runEqSat myCost rewrites 1
+  runEqSat myCost rewritesParams 1
 
   while ((<nEvals) . snd) (1,1) $
     \(radius, nEvs) ->
@@ -189,7 +190,7 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
                                                           pure (ec, True)
                                             Just c  -> pure (c, False)
        when (nEvs `mod` 100 == 0) $ do
-          runEqSat myCost rewrites 1 -- run eqsat to try to find already evaluated equivalent form
+          runEqSat myCost rewritesParams 1 -- run eqsat to try to find already evaluated equivalent form
           cleanDB
 
        ecN' <- canonical ecN
@@ -271,7 +272,7 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
                               then add myCost (Bin op e1 e2) >>= canonical
                               else add myCost (Bin op e2 e1) >>= canonical
 
-    getParetoEcsUpTo n = concat <$> (forM [1..maxSize] $ \i -> getTopECLassWithSize  i n)
+    getParetoEcsUpTo n = concat <$> forM [1..maxSize] (\i -> getTopECLassWithSize  i n)
 
     randomChildFrom ec' maxL = do
       p <- rnd toss -- whether to go deeper or return this level
@@ -287,6 +288,7 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
                                           if coin
                                             then randomChildFrom ecl maxL
                                             else randomChildFrom ecr maxL
+                      -- Const x -> gets ((Map.! (Param 0)) . _eNodeToEClass)
                       _ -> pure ec
           else pure ec
 
@@ -379,7 +381,8 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
               if not (null ecList)
                  then do let (((best, ec), mf), mtheta) = head ecList
                              improved = fromJust mf > f 
-                         when improved $ printExpr ix (head ec)
+                         ec' <- traverse canonical ec
+                         when improved $ printExpr ix (head ec')
                          go (n+1) (ix + if improved then 1 else 0) (max f (fromJust mf))
                  else go (n+1) ix f
 
@@ -458,7 +461,6 @@ opt = Args
        <> help "print all evaluated expressions.")
   <*> option auto
        ( long "distribution"
-       <> short 'd'
        <> value Gaussian
        <> showDefault
        <> help "distribution of the data.")
