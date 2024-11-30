@@ -190,7 +190,7 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
                                                           pure (ec, True)
                                             Just c  -> pure (c, False)
        when (nEvs `mod` 100 == 0) $ do
-          runEqSat myCost rewritesParams 1 -- run eqsat to try to find already evaluated equivalent form
+          runEqSat myCost rewritesParams 5 -- run eqsat to try to find already evaluated equivalent form
           cleanDB
 
        ecN' <- canonical ecN
@@ -206,7 +206,7 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
             io . putStrLn $ showExpr _tree <> "," <> thetaStr <> "," <> show fi
             pure ()
        --cleanDB
-       let radius' = if b then (max 1 $ min (200 `div` maxSize) (radius+1)) else (max 1 $ radius-1)
+       let radius' = if b then (max 3 $ min (50 `div` maxSize) (radius+1)) else (max 3 $ radius-1)
            nEvs'    = nEvs + if upd then 1 else 0
        pure (radius', nEvs')
   eclasses <- gets (IntMap.toList . _eClass)
@@ -219,7 +219,7 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
   --io . print $ Foldable.toList ft
 
   where
-    slowIter = 10 -- 30
+    slowIter = 30
     slowRep = 1
     longIter = 100 -- 1000
     longRep = 5
