@@ -219,9 +219,9 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
   --io . print $ Foldable.toList ft
 
   where
-    slowIter = 30
+    slowIter = 10 -- 30
     slowRep = 1
-    longIter = 1000
+    longIter = 100 -- 1000
     longRep = 5
 
     numberOfEvalClasses :: Monad m => Int -> EGraphST m Bool
@@ -320,7 +320,7 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
         where powabs l r  = Fix (Bin PowerAbs l r)
 
     getBestExprWithSize n =
-        do ec <- getTopECLassWithSize n 1
+        do ec <- getTopECLassWithSize n 1 >>= traverse canonical
            if (not (null ec))
             then do
               bestFit <- getFitness $ head ec
@@ -329,7 +329,7 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
             else pure []
 
     getBestExprThat p  =
-        do ec <- getTopECLassThat 1 p
+        do ec <- getTopECLassThat 1 p >>= traverse canonical
            if (not (null ec))
             then do
               bestFit <- getFitness $ head ec
@@ -381,6 +381,7 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
               if not (null ecList)
                  then do let (((best, ec), mf), mtheta) = head ecList
                              improved = fromJust mf > f 
+                         cm <- gets _canonicalMap
                          ec' <- traverse canonical ec
                          when improved $ printExpr ix (head ec')
                          go (n+1) (ix + if improved then 1 else 0) (max f (fromJust mf))
