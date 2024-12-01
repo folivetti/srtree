@@ -300,7 +300,7 @@ gradNLL ROXY mXerr mYerr xss ys tree theta =
                       pure $ if isNaN g then (1/0) else g
                       -}
 
-nanTo0 x = if isNaN x || isInfinite x then 0 else x
+nanTo0 x = x -- if isNaN x || isInfinite x then 0 else x
 {-# INLINE nanTo0 #-}
 
 -- | Gradient of the negative log-likelihood

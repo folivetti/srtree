@@ -68,14 +68,14 @@ myCost (Uni _ t)    = 3 + t
 data Alg = OnlyRandom | BestFirst deriving (Show, Read, Eq)
 
 -- experiment 1 80/30
-fitnessFun :: Int -> Distribution -> SRMatrix -> PVector -> Maybe PVector -> SRMatrix -> PVector -> Maybe PVector -> Fix SRTree -> Bool -> RndEGraph (Double, PVector)
-fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree useNewton = do
+fitnessFun :: Int -> Distribution -> SRMatrix -> PVector -> Maybe PVector -> SRMatrix -> PVector -> Maybe PVector -> Fix SRTree -> RndEGraph (Double, PVector)
+fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree = do
     let tree         = relabelParams _tree
         nParams      = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
         (Sz2 m' _)    = MA.size x
     -- io . print $ showExpr tree
     thetaOrig <- (rnd $ randomVec nParams) --   = MA.replicate Seq nParams 1.0 -- TNEWTON_PRECOND
-    let (theta, fit, nEvs) = minimizeNLL' (if useNewton then TNEWTON_PRECOND else VAR1) distribution mYErr nIter x y tree thetaOrig
+    let (theta, fit, nEvs) = minimizeNLL' VAR1 distribution mYErr nIter x y tree thetaOrig
         evalF a b c  = negate $ nll distribution c a b tree $ if nParams == 0 then thetaOrig else theta
         tr           = evalF x y mYErr
         val          = evalF x_val y_val mYErr_val
@@ -86,9 +86,7 @@ fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree useNewton = 
 
 fitnessFunRep :: Int -> Int -> Distribution -> SRMatrix -> PVector -> Maybe PVector -> SRMatrix -> PVector -> Maybe PVector -> Fix SRTree -> RndEGraph (Double, PVector)
 fitnessFunRep nRep nIter distribution x y mYErr x_val y_val mYErr_val _tree = do
-    let useNewton = cycle [True, True]
-    fits <- Prelude.mapM (fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree)
-            $ Prelude.take nRep useNewton
+    fits <- replicateM nRep (fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree)
     pure (maximumBy (compare `on` fst) fits)
 {-# INLINE fitnessFunRep #-}
 
@@ -149,12 +147,12 @@ rewriteBasic2 =
     ]
 
 egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te terms nEvals maxSize printPareto printTrace = do
-  ec <- insertRndExpr maxSize
-  --ec <- insertBestExpr -- use only to debug
+  --ec <- insertRndExpr maxSize
+  ec <- insertBestExpr -- use only to debug
   updateIfNothing ec
   insertTerms
-  evaluateUnevaluated
-  runEqSat myCost rewritesParams 1
+  --evaluateUnevaluated
+  --runEqSat myCost rewritesParams 1
 
   while ((<nEvals) . snd) (1,1) $
     \(radius, nEvs) ->
@@ -219,9 +217,9 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
   --io . print $ Foldable.toList ft
 
   where
-    slowIter = 100
-    slowRep = 2
-    longIter = 100 -- 1000
+    slowIter = 50
+    slowRep = 1
+    longIter = 100
     longRep = 5
 
     numberOfEvalClasses :: Monad m => Int -> EGraphST m Bool

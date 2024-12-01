@@ -49,7 +49,7 @@ dependencies:
 
 library:
   source-dirs: src
-  extra-include-dirs: /usr/local/include
+  #extra-include-dirs: /usr/local/include
   extra-lib-dirs: /usr/local/lib
   extra-libraries:     nlopt
   ghc-options:

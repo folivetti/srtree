@@ -47,8 +47,8 @@ minimizeNLL' alg dist mYerr niter xss ys tree t0
     --debug1     = gradNLLArr dist msErr xss ys treeArr j2ix t0
     --debug2     = gradNLL dist msErr xss ys tree t0
 
-    algorithm  = alg funAndGrad Nothing -- PRAXIS (fst . funAndGrad) [] Nothing -- TNEWTON funAndGrad Nothing
-    stop       = ObjectiveRelativeTolerance 1e-8 :| [ObjectiveAbsoluteTolerance 1e-8, MaximumEvaluations (fromIntegral niter)]
+    algorithm  = alg funAndGrad (Just $ VectorStorage $ fromIntegral n) -- alg funAndGrad Nothing -- PRAXIS (fst . funAndGrad) [] Nothing -- TNEWTON funAndGrad Nothing
+    stop       = ObjectiveRelativeTolerance 1e-6 :| [ObjectiveAbsoluteTolerance 1e-6, MaximumEvaluations (fromIntegral niter)]
     problem    = LocalProblem (fromIntegral n) stop algorithm
     (t_opt, nEvs) = case minimizeLocal problem t0' of
                       Right sol -> (solutionParams sol, nEvals sol) -- traceShow (">>>>>>>", nEvals sol) $

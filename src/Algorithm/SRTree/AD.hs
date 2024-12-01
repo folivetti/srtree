@@ -83,7 +83,7 @@ reverseModeArr xss ys mYErr theta t j2ix =
       n         = length t
       toLin i j = i*m + j
       yErr      = fromJust mYErr
-      eps       = 1e-10
+      eps       = 1e-8
 
       myForM_ [] _ = pure ()
       myForM_ (!x:xs) f = do f x
@@ -167,25 +167,38 @@ reverseModeArr xss ys mYErr theta t j2ix =
       -- f(x) ^ g(x) = g(x) * f(x) ^ (g(x) - 1), f(x) ^ g(x) * log f(x)
       -- |f(x)| ^ g(x) = g(x) * |f(x)| ^ (g(x) - 2) * f(x), |f(x)| ^ g(x) * log |f(x)|
 
+      -- |f(x)| ^ g(x) = exp (log |f(x)| * g(x))
+      --       => |f(x)| ^ (g(x) - 1) * g(x)
+      --       => |f(x)| ^ g(x) * log |f(x)| * 1
+
+      fixNaN x | isNaN x = 0
+               | otherwise = x
+
       diff :: Op -> Double -> Double -> Double -> (Double, Double)
       diff Add dx fx gy   = (dx, dx)
       diff Sub dx fx gy   = (dx, negate dx)
       diff Mul dx fx gy   = (dx * gy, dx * fx)
       diff Div dx fx gy   = (dx / gy, dx * (negate fx / (gy * gy)))
+      --diff Power dx fx gy = (fixNaN $ dx * ((fx+eps)**gy - fx**gy)/eps, fixNaN $ dx * (fx**(gy+eps) - fx**gy)/eps)
+      --diff PowerAbs dx fx gy = (fixNaN $ dx * (abs (fx+eps)**gy - abs fx**gy)/eps, fixNaN $ dx * (abs fx**(gy+eps) - abs fx**gy)/eps)
+      {--}
       diff Power 0 _ _    = (0, 0)
-      diff Power dx fx 0  = (0, dx * log fx)
-      diff Power dx 0 gy  = (dx * gy * if gy < 1 then eps ** (gy - 1) else 0
+      diff Power dx 0  0  = (0, 0)
+      diff Power dx fx 0  = (0, fixNaN $ dx * log fx)
+      diff Power dx 0 gy  = (fixNaN $ dx * gy * if gy < 1 then eps ** (gy - 1) else 0
                             , 0) --dx * fx ** gy * log fx)
-      diff Power dx fx gy = (dx * gy * fx ** (gy - 1), dx * fx ** gy * log fx)
+      diff Power dx fx gy = (fixNaN $ dx * gy * fx ** (gy - 1), fixNaN $ dx * fx ** gy * log fx)
 
       diff PowerAbs 0 fx gy  = (0, 0)
-      diff PowerAbs dx fx 0  = (0, dx * log (abs fx))
-      diff PowerAbs dx 0 gy  = (0, dx * if gy < 0 then eps ** gy else 0)
-      diff PowerAbs dx fx gy = (dx * gy * fx * abs fx ** (gy - 2), dx * abs fx ** gy * log (abs fx))
-
+      diff PowerAbs 0  0  0  = (0, 0)
+      diff PowerAbs dx fx 0  = (0, fixNaN $ dx * log (abs fx))
+      diff PowerAbs dx 0 gy  = (0, fixNaN $ dx * if gy < 0 then eps ** gy else 0)
+      diff PowerAbs dx fx gy = (fixNaN $ dx * gy * fx * abs fx ** (gy - 2), fixNaN $ dx * abs fx ** gy * log (abs fx))
+      {--}
       diff AQ dx fx gy = let dxl = recip ((sqrt . (+1)) (gy * gy))
                              dxy = fx * gy * (dxl^3) -- / (sqrt (gy*gy + 1))
                          in (dxl * dx, dxy * dx)
+
       {-# INLINE diff #-}
 
       combine ::  (Int, Int) -> MArray (PrimState IO) S Ix2 Double -> MArray (PrimState IO) S Ix1 Double -> IO ()
