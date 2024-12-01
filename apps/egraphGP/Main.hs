@@ -147,12 +147,12 @@ rewriteBasic2 =
     ]
 
 egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te terms nEvals maxSize printPareto printTrace = do
-  --ec <- insertRndExpr maxSize
-  ec <- insertBestExpr -- use only to debug
+  ec <- insertRndExpr maxSize
+  --ec <- insertBestExpr -- use only to debug
   updateIfNothing ec
   insertTerms
-  --evaluateUnevaluated
-  --runEqSat myCost rewritesParams 1
+  evaluateUnevaluated
+  runEqSat myCost rewritesParams 1
 
   while ((<nEvals) . snd) (1,1) $
     \(radius, nEvs) ->
