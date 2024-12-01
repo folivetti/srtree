@@ -5,6 +5,7 @@
 {-# language FlexibleContexts #-}
 {-# language BangPatterns #-}
 {-# language TypeApplications #-}
+{-# language MultiWayIf #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -82,6 +83,7 @@ reverseModeArr xss ys mYErr theta t j2ix =
       n         = length t
       toLin i j = i*m + j
       yErr      = fromJust mYErr
+      eps       = 1e-10
 
       myForM_ [] _ = pure ()
       myForM_ (!x:xs) f = do f x
@@ -156,17 +158,31 @@ reverseModeArr xss ys mYErr theta t j2ix =
           {-# INLINE makeRev  #-}
       {-# INLINE reverseMode #-}
 
+      --f(x)^g(x)
+      --d f(x)^g(x) / d f(x) = f(x)^(g(x)-1)
+      -- f(x) + g(x) = 1, 1
+      -- f(x) - g(x) = 1, -1
+      -- f(x) * g(x) = g(x), f(x)
+      -- f(x) / g(x) = 1/g(x), -f(x)/g(x)^2
+      -- f(x) ^ g(x) = g(x) * f(x) ^ (g(x) - 1), f(x) ^ g(x) * log f(x)
+      -- |f(x)| ^ g(x) = g(x) * |f(x)| ^ (g(x) - 2) * f(x), |f(x)| ^ g(x) * log |f(x)|
+
       diff :: Op -> Double -> Double -> Double -> (Double, Double)
-      diff Add dx fx gy = (dx, dx)
-      diff Sub dx fx gy = (dx, negate dx)
-      diff Mul dx fx gy = (dx * gy, dx * fx)
-      diff Div dx fx gy = (dx / gy, dx * (negate fx / (gy * gy)))
-      diff Power dx fx gy = let dxl = dx * (fx ** (gy-1))
-                                dv2 = fx * log fx
-                            in (dxl * gy, dxl * dv2)
-      diff PowerAbs dx fx gy = let dxl = (gy * fx) * (abs fx ** (gy - 2))
-                                   dxr = (log (abs fx)) * (abs fx ** gy)
-                               in (dxl * dx, dxr * dx)
+      diff Add dx fx gy   = (dx, dx)
+      diff Sub dx fx gy   = (dx, negate dx)
+      diff Mul dx fx gy   = (dx * gy, dx * fx)
+      diff Div dx fx gy   = (dx / gy, dx * (negate fx / (gy * gy)))
+      diff Power 0 _ _    = (0, 0)
+      diff Power dx fx 0  = (0, dx * log fx)
+      diff Power dx 0 gy  = (dx * gy * if gy < 1 then eps ** (gy - 1) else 0
+                            , 0) --dx * fx ** gy * log fx)
+      diff Power dx fx gy = (dx * gy * fx ** (gy - 1), dx * fx ** gy * log fx)
+
+      diff PowerAbs 0 fx gy  = (0, 0)
+      diff PowerAbs dx fx 0  = (0, dx * log (abs fx))
+      diff PowerAbs dx 0 gy  = (0, dx * if gy < 0 then eps ** gy else 0)
+      diff PowerAbs dx fx gy = (dx * gy * fx * abs fx ** (gy - 2), dx * abs fx ** gy * log (abs fx))
+
       diff AQ dx fx gy = let dxl = recip ((sqrt . (+1)) (gy * gy))
                              dxy = fx * gy * (dxl^3) -- / (sqrt (gy*gy + 1))
                          in (dxl * dx, dxy * dx)

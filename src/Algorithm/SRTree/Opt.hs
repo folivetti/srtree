@@ -18,7 +18,7 @@ import Algorithm.SRTree.Likelihoods
 import Algorithm.SRTree.NonlinearOpt
 import Data.Bifunctor (bimap, second)
 import Data.Massiv.Array
-import Data.SRTree (Fix (..), SRTree (..), floatConstsToParam, relabelParams, countNodes)
+import Data.SRTree (Fix (..), SRTree (..), floatConstsToParam, relabelParams, countNodes, convertProtectedOps)
 import Data.SRTree.Eval (evalTree, compMode)
 import qualified Data.Vector.Storable as VS
 import qualified Data.IntMap.Strict as IntMap
@@ -35,7 +35,7 @@ minimizeNLL' alg dist mYerr niter xss ys tree t0
   | n == 0     = (t0, f, 0)
   | otherwise  = (t_opt', nll dist mYerr xss ys tree t_opt', nEvs)
   where
-    tree'      = buildNLL dist (fromIntegral m) $ relabelParams tree
+    tree'      = buildNLL dist (fromIntegral m) $ relabelParams $ tree -- convertProtectedOps
     t0'        = toStorableVector t0
     treeArr    = IntMap.toAscList $ tree2arr tree'
     j2ix       = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]

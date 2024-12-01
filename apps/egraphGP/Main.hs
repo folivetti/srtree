@@ -74,7 +74,7 @@ fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree useNewton = 
         nParams      = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
         (Sz2 m' _)    = MA.size x
     -- io . print $ showExpr tree
-    thetaOrig <- (rnd $ randomVec nParams) --   = MA.replicate Seq nParams 1.0
+    thetaOrig <- (rnd $ randomVec nParams) --   = MA.replicate Seq nParams 1.0 -- TNEWTON_PRECOND
     let (theta, fit, nEvs) = minimizeNLL' (if useNewton then TNEWTON_PRECOND else VAR1) distribution mYErr nIter x y tree thetaOrig
         evalF a b c  = negate $ nll distribution c a b tree $ if nParams == 0 then thetaOrig else theta
         tr           = evalF x y mYErr
@@ -86,7 +86,7 @@ fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree useNewton = 
 
 fitnessFunRep :: Int -> Int -> Distribution -> SRMatrix -> PVector -> Maybe PVector -> SRMatrix -> PVector -> Maybe PVector -> Fix SRTree -> RndEGraph (Double, PVector)
 fitnessFunRep nRep nIter distribution x y mYErr x_val y_val mYErr_val _tree = do
-    let useNewton = cycle [True, False]
+    let useNewton = cycle [True, True]
     fits <- Prelude.mapM (fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree)
             $ Prelude.take nRep useNewton
     pure (maximumBy (compare `on` fst) fits)
@@ -190,7 +190,7 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
                                                           pure (ec, True)
                                             Just c  -> pure (c, False)
        when (nEvs `mod` 100 == 0) $ do
-          runEqSat myCost rewritesParams 5 -- run eqsat to try to find already evaluated equivalent form
+          runEqSat myCost rewritesParams 1 -- run eqsat to try to find already evaluated equivalent form
           cleanDB
 
        ecN' <- canonical ecN
@@ -219,8 +219,8 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
   --io . print $ Foldable.toList ft
 
   where
-    slowIter = 30
-    slowRep = 1
+    slowIter = 100
+    slowRep = 2
     longIter = 100 -- 1000
     longRep = 5
 
@@ -311,7 +311,9 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
     insertBestExpr :: RndEGraph EClassId
     insertBestExpr = do --let t =  "t0" / (recip ("t1" - "x0") + powabs "t2" "x0")
                         --let t = ((("t0" + (powabs "t0" "x0")) / "t0") * "x0")
-                        let t = "t0" / (recip ("t0" + "x0") - powabs "t0" "x0")
+                        let --t = "t0" / (recip ("t0" + "x0") - powabs "t0" "x0")
+                            t = powabs "t0" (powabs ("t0" * "x0") (powabs "x0" "t0"))
+
                         ecId <- fromTree myCost t >>= canonical
                         (f, p) <- fitnessFunRep slowRep slowIter distribution x y mYErr x_val y_val mYErr_val t
                         insertFitness ecId f p
@@ -361,9 +363,9 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
             nll_train  = nll distribution mYErr x y best' theta
             nll_val    = nll distribution mYErr_val x_val y_val best' theta
             nll_te     = nll distribution mYErr_te x_te y_te best' theta
-            mdl_train  = mdl distribution mYErr x y theta unprotect
-            mdl_val    = mdl distribution mYErr_val x_val y_val theta unprotect
-            mdl_te     = mdl distribution mYErr_te x_te y_te theta unprotect
+            mdl_train  = mdl distribution mYErr x y theta best' --unprotect
+            mdl_val    = mdl distribution mYErr_val x_val y_val theta best' --unprotect
+            mdl_te     = mdl distribution mYErr_te x_te y_te theta best' --unprotect
             vals       = intercalate "," $ Prelude.map show [mse_train, mse_val, mse_te, r2_train, r2_val, r2_te, nll_train, nll_val, nll_te, mdl_train, mdl_val, mdl_te]
             thetaStr   = intercalate ";" $ Prelude.map show (MA.toList theta)
         io . putStrLn $ show ix <> "," <> showExpr expr <> "," <> thetaStr <> "," <> show (countNodes $ convertProtectedOps expr) <> "," <> vals

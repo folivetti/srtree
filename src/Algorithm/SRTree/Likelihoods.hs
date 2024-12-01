@@ -219,7 +219,7 @@ nll ROXY mYerr xss ys tree theta
 
 -- WARNING: pass tree with parameters
 -- TODO: handle error similar to ROXY
-buildNLL MSE m tree = (tree - var (-1)) ** 2 / constv m
+buildNLL MSE m tree = ((tree - var (-1)) ** 2) / constv m
 buildNLL Gaussian m tree = (tree - var (-1)) ** 2 / param p + constv m * log (2*pi* param p)
   where
     p = countParams tree
@@ -258,8 +258,20 @@ predict ROXY      tree theta xss = evalTree xss theta tree
 
 -- | Gradient of the negative log-likelihood
 gradNLL :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (Double, SRVector)
-gradNLL dist mYerr xss ys tree theta = gradNLLArr dist xss ys mYerr treeArr j2ix (toStorableVector theta)
+gradNLL dist mYerr xss ys tree theta = (f, delay grad) -- gradNLLArr dist xss ys mYerr treeArr j2ix (toStorableVector theta)
   where
+    grad :: PVector
+    grad = M.fromList M.Seq [finitediff ix | ix <- [0..p-1]]
+    (Sz p) = M.size theta
+
+    disturb :: Int -> PVector
+    disturb ix = M.fromList M.Seq $ Prelude.zipWith (\iy v -> if iy==ix  then (v+eps) else v) [0..] (M.toList theta)
+    eps :: Double
+    eps = 1e-8
+    f = (/ fromIntegral m) . M.sum . M.map (^2) $ (predict MSE tree theta xss) - delay ys
+    finitediff ix = let t1 = disturb ix
+                        f' = (/ fromIntegral m) . M.sum . M.map (^2) $ (predict MSE tree t1 xss) - delay ys
+                     in (f' - f)/eps
     (Sz2 m _) = M.size xss
     tree'     = buildNLL dist (fromIntegral m) tree
     treeArr   = IntMap.toAscList $ tree2arr tree'

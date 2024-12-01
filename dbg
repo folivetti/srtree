@@ -1,8 +1,1 @@
 /home/olivetti/Projects/srtools/srtree/package.yaml: Ignoring unrecognized field $.library.extra-include-dirs
-[0]
-[5]
-[14]
-[78]
-egraphGP: IntMap.!: key 78 is not an element of the map
-CallStack (from HasCallStack):
-  error, called at libraries/containers/containers/src/Data/IntMap/Internal.hs:601:17 in containers-0.6.7:Data.IntMap.Internal
