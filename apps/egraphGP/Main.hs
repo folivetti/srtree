@@ -3,6 +3,7 @@
 {-# LANGUAGE  MultiWayIf #-}
 {-# LANGUAGE  OverloadedStrings #-}
 {-# LANGUAGE  BangPatterns #-}
+{-# LANGUAGE  TypeSynonymInstances, FlexibleInstances #-}
 
 module Main where 
 
@@ -44,6 +45,7 @@ import Algorithm.SRTree.NonlinearOpt
 import Debug.Trace
 import Algorithm.EqSat (runEqSat)
 
+import GHC.IO (unsafePerformIO)
 import Control.Scheduler 
 import Control.Monad.IO.Unlift
 import Data.SRTree (convertProtectedOps)
@@ -67,14 +69,15 @@ myCost (Uni _ t)    = 3 + t
 
 data Alg = OnlyRandom | BestFirst deriving (Show, Read, Eq)
 
+
 -- experiment 1 80/30
-fitnessFun :: Int -> Distribution -> SRMatrix -> PVector -> Maybe PVector -> SRMatrix -> PVector -> Maybe PVector -> Fix SRTree -> RndEGraph (Double, PVector)
-fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree = do
+fitnessFun :: Int -> Distribution -> SRMatrix -> PVector -> Maybe PVector -> SRMatrix -> PVector -> Maybe PVector -> Fix SRTree -> PVector -> IO (Double, PVector)
+fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree thetaOrig = do
     let tree         = relabelParams _tree
         nParams      = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
         (Sz2 m' _)    = MA.size x
     -- io . print $ showExpr tree
-    thetaOrig <- (rnd $ randomVec nParams) --   = MA.replicate Seq nParams 1.0 -- TNEWTON_PRECOND
+    --thetaOrig <- (rnd $ randomVec nParams) --   = MA.replicate Seq nParams 1.0 -- TNEWTON_PRECOND
     let (theta, fit, nEvs) = minimizeNLL' VAR1 distribution mYErr nIter x y tree thetaOrig
         evalF a b c  = negate $ nll distribution c a b tree $ if nParams == 0 then thetaOrig else theta
         tr           = evalF x y mYErr
@@ -86,7 +89,11 @@ fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree = do
 
 fitnessFunRep :: Int -> Int -> Distribution -> SRMatrix -> PVector -> Maybe PVector -> SRMatrix -> PVector -> Maybe PVector -> Fix SRTree -> RndEGraph (Double, PVector)
 fitnessFunRep nRep nIter distribution x y mYErr x_val y_val mYErr_val _tree = do
-    fits <- replicateM nRep (fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree)
+    let tree = relabelParams _tree
+        nParams = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
+    thetaOrigs <- replicateM nRep (rnd $ randomVec nParams)
+    fits <- io $ traverseConcurrently Par (fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree) thetaOrigs
+    --replicateM nRep (fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree)
     pure (maximumBy (compare `on` fst) fits)
 {-# INLINE fitnessFunRep #-}
 
@@ -146,7 +153,7 @@ rewriteBasic2 =
     --, "x" / "x" :=> 1 -- :| isNotZero "x"
     ]
 
-egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te terms nEvals maxSize printPareto printTrace = do
+egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te terms nEvals maxSize printPareto printTrace slowIter slowRep = do
   ec <- insertRndExpr maxSize
   --ec <- insertBestExpr -- use only to debug
   updateIfNothing ec
@@ -217,8 +224,8 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
   --io . print $ Foldable.toList ft
 
   where
-    slowIter = 50
-    slowRep = 1
+    --slowIter = 30
+    --slowRep = 1
     longIter = 100
     longRep = 5
 
@@ -408,13 +415,15 @@ while p arg prog = do when (p arg) do arg' <- prog arg
 data Args = Args
   { _dataset      :: String,
     _testData     :: String,
-    gens          :: Int,
+    _gens         :: Int,
     _alg          :: Alg,
     _maxSize      :: Int,
     _split        :: Int,
     _printPareto  :: Bool,
     _trace        :: Bool,
-    _distribution :: Distribution
+    _distribution :: Distribution,
+    _optIter      :: Int,
+    _optRepeat    :: Int
   }
   deriving (Show)
 
@@ -465,6 +474,16 @@ opt = Args
        <> value Gaussian
        <> showDefault
        <> help "distribution of the data.")
+  <*> option auto
+       ( long "opt-iter"
+       <> value 30
+       <> showDefault
+       <> help "number of iterations in parameter optimization.")
+  <*> option auto
+       ( long "opt-retries"
+       <> value 1
+       <> showDefault
+       <> help "number of retries of parameter fitting.")
 
 chunksOf :: Int -> [e] -> [[e]]
 chunksOf i ls = Prelude.map (Prelude.take i) (build (splitter ls))
@@ -521,7 +540,7 @@ main = do
       terms          = if _distribution args == ROXY
                           then [var 0, param 0]
                           else [var ix | ix <- [0 .. nFeats-1]] <> [param 0] -- [param ix | ix <- [0 .. 5]]
-      alg            = evalStateT (egraphSearch (_alg args) (_distribution args) x_tr y_tr mYErr_tr x_val y_val mYErr_val x_te y_te mYErr_te terms (gens args) (_maxSize args) (_printPareto args) (_trace args)) emptyGraph
+      alg            = evalStateT (egraphSearch (_alg args) (_distribution args) x_tr y_tr mYErr_tr x_val y_val mYErr_val x_te y_te mYErr_te terms (_gens args) (_maxSize args) (_printPareto args) (_trace args) (_optIter args) (_optRepeat args)) emptyGraph
   evalStateT alg g'
 
   where

@@ -64,9 +64,9 @@ reverseModeArr xss ys mYErr theta t j2ix =
             jacob   <- M.newMArray (Sz p) 0
             val     <- M.newMArray (Sz m) 0
             let
-                stps = 4
-                delta = m `div` stps
-                rngs  = [(i*delta, min m $ (i+1)*delta) | i <- [0..stps] ]
+                stps = 2
+                --delta = m `div` stps
+                --rngs  = [(i*delta, min m $ (i+1)*delta) | i <- [0..stps] ]
                 (a, b) = (0, m)
 
             forward (a, b) fwd
