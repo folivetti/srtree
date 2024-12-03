@@ -54,8 +54,8 @@ library:
   extra-libraries:     nlopt
   ghc-options:
     - -fwarn-incomplete-patterns
-    - -fdistinct-constructor-tables
-    - -finfo-table-map
+    #- -fdistinct-constructor-tables
+    #- -finfo-table-map
     - -threaded
 
 executables:
@@ -114,11 +114,10 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    - -O2
-    - -fdistinct-constructor-tables
-    - -finfo-table-map
-    - -optc-O3
-    - -eventlog
+    - -O1
+    #- -fdistinct-constructor-tables
+    #- -finfo-table-map
+    #- -optc-O3
     dependencies:
     - srtree
     - optparse-applicative >= 0.17 && < 0.19

@@ -96,6 +96,7 @@ rebuild costFun =
              . over (eDB . analysis) (const Set.empty)
      forM_ wl (uncurry (repair costFun))
      forM_ al (uncurry (repairAnalysis costFun))
+{-# INLINE rebuild #-}
 
 -- | repairs e-node by canonizing its children
 -- if the canonized e-node already exists in
@@ -110,7 +111,7 @@ repair costFun ecId enode =
         Just ecIdCanon -> do mergedId <- merge costFun ecIdCanon ecId'
                              modify' $ over eNodeToEClass (Map.insert enode' mergedId)
         Nothing        -> modify' $ over eNodeToEClass (Map.insert enode' ecId')
-
+{-# INLINE repair #-}
 
 -- | repair the analysis of the e-class
 -- considering the new added e-node
@@ -127,6 +128,7 @@ repairAnalysis costFun ecId enode =
                   . over eClass (IntMap.insert ecId' eclass')
           _ <- modifyEClass costFun ecId'
           pure ()
+{-# INLINE repairAnalysis #-}
 
 -- | merge to equivalent e-classes
 merge :: Monad m => CostFun -> EClassId -> EClassId -> EGraphST m EClassId
@@ -255,6 +257,7 @@ createDB = do modify' $ over (eDB . patDB) (const Map.empty)
               ecls <- gets (Map.toList . _eNodeToEClass)
               mapM_ (uncurry addToDB) ecls
               gets (_patDB . _eDB)
+{-# INLINE createDB #-}
 
 -- | `addToDB` adds an e-node and e-class id to the database
 addToDB :: Monad m => ENode -> EClassId -> EGraphST m () -- State DB ()
@@ -265,6 +268,7 @@ addToDB enode eid = do
   case populate trie ids of      -- populates the trie
     Nothing -> pure ()
     Just t  -> modify' $ over (eDB . patDB) (Map.insert op t) -- if something was created, insert back into the DB
+{-# INLINE addToDB #-}
 
 -- | Populates an IntTrie with a sequence of e-class ids
 populate :: Maybe IntTrie -> [EClassId] -> Maybe IntTrie
@@ -281,6 +285,7 @@ populate (Just tId) (eid:eids) = let keys     = Set.insert eid (_keys tId)
                                      nextTrie = _trie tId IntMap.!? eid
                                      val      = fromMaybe (trie eid IntMap.empty) $ populate nextTrie eids
                                   in Just $ IntTrie keys (IntMap.insert eid val (_trie tId))
+{-# INLINE populate #-}
 
 canonizeMap :: Monad m => (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m (Map ClassOrVar ClassOrVar, ClassOrVar)
 canonizeMap (subst, cv) = (,cv) <$> traverse g subst -- Map.fromList <$> traverse f (Map.toList subst)
@@ -293,6 +298,7 @@ canonizeMap (subst, cv) = (,cv) <$> traverse g subst -- Map.fromList <$> travers
     f (e1, Left e2) = do e2' <- canonical e2
                          pure (e1, Left e2')
     f (e1, e2)      = pure (e1, e2)
+{-# INLINE canonizeMap #-}
 
 applyMatch :: Monad m => CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m ()
 applyMatch costFun rule match' =
@@ -304,6 +310,7 @@ applyMatch costFun rule match' =
        do new_eclass <- reprPrat costFun (fst match) (target rule)
           merge costFun (getInt (snd match)) new_eclass
           pure ()
+{-# INLINE applyMatch #-}
 
 applyMergeOnlyMatch :: Monad m => CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m ()
 applyMergeOnlyMatch costFun rule match' =
@@ -317,6 +324,7 @@ applyMergeOnlyMatch costFun rule match' =
             Nothing  -> pure ()
             Just eid -> do merge costFun (getInt (snd match)) eid
                            pure ()
+{-# INLINE applyMergeOnlyMatch #-}
 
 -- | gets the e-node of the target of the rule
 -- TODO: add consts and modify
@@ -337,12 +345,14 @@ classOfENode costFun subst (Fixed target) = do newChildren <- mapM (classOfENode
                                                                          rebuild costFun -- eid new_enode
                                                                          pure (Just eid)
                                                                  else gets ((Map.!? new_enode) . _eNodeToEClass)
+{-# INLINE classOfENode #-}
 
 -- | adds the target of the rule into the e-graph
 reprPrat :: Monad m => CostFun -> Map ClassOrVar ClassOrVar -> Pattern -> EGraphST m EClassId
 reprPrat costFun subst (VarPat c)     = canonical $ getInt $ subst Map.! Right (fromEnum c)
 reprPrat costFun subst (Fixed target) = do newChildren <- mapM (reprPrat costFun subst) (getElems target)
                                            add costFun (replaceChildren newChildren target)
+{-# INLINE reprPrat #-}
 
 isValidHeight :: Monad m => (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m Bool
 isValidHeight match = do
@@ -351,20 +361,24 @@ isValidHeight match = do
                          gets (_height . (IntMap.! ec') . _eClass)
            Right _ -> pure 0
     pure $ h < 15
+{-# INLINE isValidHeight #-}
 
 -- | returns `True` if the condition of a rule is valid for that match
 isValidConditions :: Monad m => Condition -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m Bool
 isValidConditions cond match = gets $ cond (fst match)
+{-# INLINE isValidConditions #-}
 
 -- * Tree to e-graph conversion and utility functions
 
 -- | Creates an e-graph from an expression tree
 fromTree :: Monad m => CostFun -> Fix SRTree -> EGraphST m EClassId
 fromTree costFun = cataM sequence (add costFun)
+{-# INLINE fromTree #-}
 
 -- | Builds an e-graph from multiple independent trees
 fromTrees :: Monad m => CostFun -> [Fix SRTree] -> EGraphST m [EClassId]
 fromTrees costFun = foldM (\rs t -> do eid <- fromTree costFun t; pure (eid:rs)) []
+{-# INLINE fromTrees #-}
 
 
 -- | gets the best expression given the default cost function
@@ -373,6 +387,7 @@ getBest eid = do eid' <- canonical eid
                  best <- gets (_best . _info . (IntMap.! eid') . _eClass)
                  childs <- mapM getBest $ childrenOf best
                  pure . Fix $ replaceChildren childs best
+{-# INLINE getBest #-}
 
 -- | returns one expression rooted at e-class `eId`
 -- TODO: avoid loopings
@@ -394,6 +409,7 @@ getExpressionFrom eId' = do
     isTerm (Const _) = True
     isTerm (Param _) = True
     isTerm _ = False
+{-# INLINE getExpressionFrom #-}
 
 -- | returns all expressions rooted at e-class `eId`
 -- TODO: check for infinite list
@@ -428,6 +444,7 @@ getAllExpressionsFrom eId' = do
                 Param ix   -> pure [Param ix]
         ts <- go ns
         pure (t:ts)
+{-# INLINE getAllExpressionsFrom #-}
 
 -- | returns a random expression rooted at e-class `eId`
 getRndExpressionFrom :: EClassId -> EGraphST (State StdGen) (Fix SRTree)
@@ -445,6 +462,7 @@ getRndExpressionFrom eId' = do
     randomRange rng = state (randomR rng)
     randomFrom xs   = do n <- randomRange (0, length xs - 1)
                          pure $ xs !! n
+{-# INLINE getRndExpressionFrom #-}
 
 cleanMaps :: Monad m => EGraphST m ()
 cleanMaps = do
@@ -466,6 +484,8 @@ cleanMaps = do
   eDB' <- gets _eDB
   put $ EGraph canon enode2eclass' eclassMap' eDB'
   forceState
+{-# INLINE cleanMaps #-}
 
 forceState :: Monad m => StateT s m ()
 forceState = get >>= \ !_ -> return ()
+{-# INLINE forceState #-}

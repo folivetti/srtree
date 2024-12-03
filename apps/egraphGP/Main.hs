@@ -71,20 +71,20 @@ data Alg = OnlyRandom | BestFirst deriving (Show, Read, Eq)
 
 
 -- experiment 1 80/30
-fitnessFun :: Int -> Distribution -> SRMatrix -> PVector -> Maybe PVector -> SRMatrix -> PVector -> Maybe PVector -> Fix SRTree -> PVector -> IO (Double, PVector)
-fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree thetaOrig = do
-    let tree         = relabelParams _tree
-        nParams      = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
-        (Sz2 m' _)    = MA.size x
-    -- io . print $ showExpr tree
-    --thetaOrig <- (rnd $ randomVec nParams) --   = MA.replicate Seq nParams 1.0 -- TNEWTON_PRECOND
-    let (theta, fit, nEvs) = minimizeNLL' VAR1 distribution mYErr nIter x y tree thetaOrig
-        evalF a b c  = negate $ nll distribution c a b tree $ if nParams == 0 then thetaOrig else theta
-        tr           = evalF x y mYErr
-        val          = evalF x_val y_val mYErr_val
-    pure $ if isNaN val || isNaN tr
-            then (-(1/0), theta) -- infinity
-            else (min tr val, theta)
+fitnessFun :: Int -> Distribution -> SRMatrix -> PVector -> Maybe PVector -> SRMatrix -> PVector -> Maybe PVector -> Fix SRTree -> PVector -> (Double, PVector)
+fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree thetaOrig =
+  if isNaN val || isNaN tr
+    then (-(1/0), theta) -- infinity
+    else (min tr val, theta)
+  where
+    tree         = relabelParams _tree
+    nParams      = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
+    (Sz2 m' _)    = MA.size x
+    (theta, fit, nEvs) = minimizeNLL' VAR1 distribution mYErr nIter x y tree thetaOrig
+    evalF a b c  = negate $ nll distribution c a b tree $ if nParams == 0 then thetaOrig else theta
+    tr           = evalF x y mYErr
+    val          = evalF x_val y_val mYErr_val
+
 {-# INLINE fitnessFun #-}
 
 fitnessFunRep :: Int -> Int -> Distribution -> SRMatrix -> PVector -> Maybe PVector -> SRMatrix -> PVector -> Maybe PVector -> Fix SRTree -> RndEGraph (Double, PVector)
@@ -92,7 +92,7 @@ fitnessFunRep nRep nIter distribution x y mYErr x_val y_val mYErr_val _tree = do
     let tree = relabelParams _tree
         nParams = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
     thetaOrigs <- replicateM nRep (rnd $ randomVec nParams)
-    fits <- io $ traverseConcurrently Par (fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree) thetaOrigs
+    let fits = Prelude.map (fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree) thetaOrigs
     --replicateM nRep (fitnessFun nIter distribution x y mYErr x_val y_val mYErr_val _tree)
     pure (maximumBy (compare `on` fst) fits)
 {-# INLINE fitnessFunRep #-}
@@ -160,16 +160,16 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
   insertTerms
   evaluateUnevaluated
   runEqSat myCost rewritesParams 1
+  cleanDB
 
   while ((<nEvals) . snd) (1,1) $
     \(radius, nEvs) ->
       do
-       --nEvs  <- gets (FingerTree.size . _fitRangeDB . _eDB)
        nCls  <- gets (IM.size . _eClass)
        nUnev <- gets (IntSet.size . _unevaluated . _eDB)
        let nEvs = nCls - nUnev
-       --io . print $ (nCls, nEvs)
        bestF <- getBestFitness
+       cleanDB
 
        (ecN, b) <- case alg of
                     OnlyRandom -> do let ratio = fromIntegral nEvs / fromIntegral nCls
@@ -194,14 +194,10 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
                                             Nothing -> do ec <- insertRndExpr maxSize >>= canonical
                                                           pure (ec, True)
                                             Just c  -> pure (c, False)
-       when (nEvs `mod` 100 == 0) $ do
-          runEqSat myCost rewritesParams 1 -- run eqsat to try to find already evaluated equivalent form
-          cleanDB
-
        ecN' <- canonical ecN
        upd <- updateIfNothing ecN'
        when (upd && printTrace)
-         do --runEqSat myCost rewriteBasic2 1
+         do runEqSat myCost rewriteBasic2 1
 
             --ecN' <- canonical ecN
             _tree <- getBest ecN'
@@ -241,6 +237,7 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
           t <- getBest ec
           (f, p) <- fitnessFunRep slowRep slowIter distribution x y mYErr x_val y_val mYErr_val t
           insertFitness ec f p
+          --io $ print f
           pure True
         Just _ -> pure False
 

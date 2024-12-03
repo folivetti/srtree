@@ -26,6 +26,7 @@ module Algorithm.SRTree.Likelihoods
   , buildNLL
   , gradNLL
   , gradNLLArr
+  , gradNLLGraph
   , fisherNLL
   , getSErr
   , hessianNLL
@@ -33,7 +34,7 @@ module Algorithm.SRTree.Likelihoods
   )
     where
 
-import Algorithm.SRTree.AD ( reverseModeArr )
+import Algorithm.SRTree.AD ( reverseModeArr, reverseModeGraph )
 import Data.Massiv.Array hiding (all, map, read, replicate, tail, take, zip)
 import qualified Data.Massiv.Array as M
 import qualified Data.Massiv.Array.Mutable as Mut
@@ -331,6 +332,35 @@ gradNLLArr ROXY xss ys mYerr tree j2ix theta =
   where
     (yhat, grad) = reverseModeArr xss ys mYerr theta tree j2ix
     grad'        = M.map nanTo0 grad
+
+-- | Gradient of the negative log-likelihood
+gradNLLGraph MSE xss ys mYerr tree theta =
+  (M.sum yhat, grad')
+  where
+    (yhat, grad) = reverseModeGraph xss ys mYerr theta tree
+    grad'        = VS.map nanTo0 grad
+gradNLLGraph Gaussian xss ys mYerr tree theta =
+  (M.sum yhat, grad')
+  where
+    (yhat, grad) = reverseModeGraph xss ys mYerr theta tree
+    grad'        = VS.map nanTo0 grad
+gradNLLGraph Bernoulli xss ys mYerr tree theta
+  | M.any (\x -> x /= 0 && x /= 1) ys = error "For Bernoulli distribution the output must be either 0 or 1."
+  | otherwise                         = (M.sum yhat, grad')
+  where
+    (yhat, grad) = reverseModeGraph xss ys mYerr theta tree
+    grad'        = VS.map nanTo0 grad
+gradNLLGraph Poisson xss ys mYerr tree theta
+  | M.any (<0) ys    = error "For Poisson distribution the output must be non-negative."
+  | otherwise        = (M.sum yhat, grad')
+  where
+    (yhat, grad) = reverseModeGraph xss ys mYerr theta tree
+    grad'        = VS.map nanTo0 grad
+gradNLLGraph ROXY xss ys mYerr tree theta =
+  ((*0.5) $ M.sum yhat, VS.map (*(0.5)) $ grad')
+  where
+    (yhat, grad) = reverseModeGraph xss ys mYerr theta tree
+    grad'        = VS.map nanTo0 grad
 
 -- | Fisher information of negative log-likelihood
 fisherNLL :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> SRVector

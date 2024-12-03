@@ -149,19 +149,22 @@ target :: Rule -> Pattern
 target (r :| _)   = target r
 target (_ :=> t)  = t
 target (_ :==: t) = t
+{-# INLINE target #-}
 
 source :: Rule -> Pattern
 source (r :| _) = source r
 source (s :=> _)  = s
 source (s :==: _) = s
+{-# INLINE source #-}
 
 getConditions :: Rule -> [Condition]
 getConditions (r :| c) = c : getConditions r
 getConditions _ = []
-
+{-# INLINE getConditions #-}
 
 cleanDB :: Monad m => EGraphST m ()
 cleanDB = modify' $ over (eDB. patDB) (const Map.empty)
+{-# INLINE cleanDB #-}
 
 -- | Returns the substitution rules
 -- for every match of the pattern `source` inside the e-graph.
@@ -170,6 +173,7 @@ match src = do
   let (q, root) = compileToQuery src     -- compile the source of the pattern into a query
   substs <- genericJoin q root               -- find the substituion rules for this pattern
   pure [(s, s Map.! root) | s <- substs, Map.size s > 0]
+{-# INLINE match #-}
 
 -- | Returns a Query (list of atoms) of a pattern
 compileToQuery :: Pattern -> (Query, ClassOrVar)
@@ -195,17 +199,20 @@ compileToQuery pat = evalState (processPat pat) 256 -- returns (atoms, root)
               atom  = Atom root (replaceChildren roots pat)
               atoms' = atom:atoms
           pure (atoms', root)
+{-# INLINE compileToQuery #-}
 
 -- get the value from the Either Int Int
 getInt :: ClassOrVar -> Int
 getInt (Left a)  = a
 getInt (Right a) = a
+{-# INLINE getInt #-}
 
 -- | returns the list of the children values
 getElems :: SRTree a -> [a]
 getElems (Bin _ l r) = [l,r]
 getElems (Uni _ t)   = [t]
 getElems _           = []
+{-# INLINE getElems #-}
 
 -- | Creates the substituion map for
 -- the pattern variables for each one of the
@@ -225,7 +232,7 @@ genericJoin atoms root = do
                            maps <- forM cIds1 $ \classId -> do
                              map (Map.insert x classId) <$> go (updateVar x classId atoms) vars
                            pure (concat maps)
-
+{-# INLINE genericJoin #-}
 
      -- [Map.insert x classId y | classId <- domainX db x atoms
      --                                           , y <- go (updateVar x classId atoms) vars]
@@ -237,7 +244,7 @@ domainX :: Monad m => ClassOrVar -> Query -> ClassOrVar -> EGraphST m [ClassOrVa
 domainX var atoms root = do
   let atoms' = filter (elemOfAtom var) atoms -- :: [ClassOrVar]  -- look only in the atoms with this var
   map Left <$> intersectAtoms var atoms' root -- find the intersection of possible keys by each atom
-
+{-# INLINE domainX #-}
   --let ss = (map Left
   --                                $ intersectAtoms var db
   --                                $
@@ -267,6 +274,7 @@ intersectAtoms var (a:atoms) root = do
                                -- try to find an intersection of the tries that matches each atom of the pattern
         --  then
         --  else pure Set.empty
+{-# INLINE intersectAtoms #-}
 
 -- | searches for the intersection of e-class ids that
 -- matches each part of the query.
@@ -314,6 +322,7 @@ intersectTries var xs trie (i:ids) =
                                                   Nothing -> acc
                                                   Just s  -> Set.union acc s
                                                      ) Set.empty (_trie trie)
+{-# INLINE intersectTries #-}
 
 -- | updates all occurrence of var with the new id x
 updateVar :: ClassOrVar -> ClassOrVar -> Query -> Query
@@ -322,6 +331,7 @@ updateVar var x = map replace
       replace (Atom r t) = let children = [if c == var then x else c | c <- getElems t]
                                t'       =  replaceChildren children t
                             in Atom (if r == var then x else r) t'
+{-# INLINE updateVar #-}
 
 -- | checks whether two ClassOrVar are different
 -- only check if it is a pattern variable, else returns true
@@ -329,6 +339,7 @@ isDiffFrom :: Int -> ClassOrVar -> Bool
 isDiffFrom x y = case y of
                    Left _ -> False
                    Right z -> x /= z
+{-# INLINE isDiffFrom #-}
 
 -- | checks if v is an element of an atom
 elemOfAtom :: ClassOrVar -> Atom -> Bool
@@ -336,6 +347,7 @@ elemOfAtom v (Atom root tree) =
     case root of
       Left _  -> v `elem` getElems tree
       Right x -> Right x == v || v `elem` getElems tree
+{-# INLINE elemOfAtom #-}
 
 -- | sorts the variables in a query by the most frequently occurring
 orderedVars :: Query -> [ClassOrVar]
@@ -349,3 +361,4 @@ orderedVars atoms = sortBy (comparing varCost) $ nub [a | atom <- atoms, a <- ge
     varCost var = foldr (\a acc -> if elemOfAtom var a then acc - 100 + atomLen a else acc) 0 atoms
 
     atomLen (Atom _ t) = 1 + length (getElems t)
+{-# INLINE orderedVars #-}

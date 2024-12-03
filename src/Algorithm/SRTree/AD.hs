@@ -22,6 +22,7 @@
 
 module Algorithm.SRTree.AD
          ( reverseModeArr
+         , reverseModeGraph
          , forwardModeUniqueJac
          ) where
 
@@ -47,7 +48,105 @@ import Data.List ( foldl' )
 import qualified Data.Vector.Storable as VS
 import Control.Scheduler 
 import Data.Maybe ( fromJust )
+
+import Control.Monad.State.Strict
+
 --import UnliftIO.Async
+
+import qualified Data.Map.Strict as Map
+
+reverseModeGraph :: SRMatrix -> PVector -> Maybe PVector -> VS.Vector Double -> Fix SRTree -> (Array D Ix1 Double, VS.Vector Double)
+reverseModeGraph xss ys mYErr theta tree = (delay $ cachedVal IntMap.! root
+                                            , VS.fromList [M.sum $ cachedGrad Map.! (Param ix) | ix <- [0..p-1]])
+    where
+        yErr = fromJust mYErr
+        --ys   = delay ys'
+        m    = M.size ys
+        p    = VS.length theta
+        comp = M.getComp xss
+        one :: Array S Ix1 Double
+        one  = M.replicate comp m 1
+        (key2int, int2key, cachedVal, (subtract 1) -> root) = cataM leftToRight alg tree `execState` (Map.empty, IntMap.empty, IntMap.empty, 0)
+        (key2int', int2key', cachedVal', cachedGrad) = calcGrad root one `execState` (key2int, int2key, cachedVal, Map.empty)
+
+        calcGrad :: Int -> Array S Ix1 Double -> State (Map.Map (SRTree Int) Int, IntMap.IntMap (SRTree Int), IntMap.IntMap (Array S Ix1 Double), Map.Map (SRTree Int) (Array S Ix1 Double)) ()
+        calcGrad key v = do node <- gets ((IntMap.! key) . _int2key)
+                            case node of
+                              Bin op l r -> do xl <- gets (getVal l)
+                                               xr <- gets (getVal r)
+                                               (dl, dr) <- diff op v xl xr l r
+                                               calcGrad l dl
+                                               calcGrad r dr
+                              Uni f  t   -> do x <- gets (getVal t)
+                                               calcGrad t (M.computeAs S $ M.zipWith (*) v (M.map (derivative f) x))
+                              Param ix   -> modify' (insertGrad v (Param ix))
+                              _          -> pure ()
+          where
+            _int2key (_, b, _, _) = b
+            insertGrad v k (a, b, c, g) = (a, b, c, Map.insertWith (\v1 v2 -> M.computeAs S $ M.zipWith (+) v1 v2) k v g)
+
+        graph (a, _, _, _) = a
+        insKey key ev (a, b, c, d) = (Map.insert key d a, IntMap.insert d key b, IntMap.insert d ev c, d+1)
+        getVal key (a, b, c, d)    = c IntMap.! key
+        getKey key (a, b, c, d)    = a Map.! key
+
+        leftToRight (Uni f mt)    = Uni f <$> mt;
+        leftToRight (Bin f ml mr) = Bin f <$> ml <*> mr
+        leftToRight (Var ix)      = pure (Var ix)
+        leftToRight (Param ix)    = pure (Param ix)
+        leftToRight (Const c)     = pure (Const c)
+
+        evalKey (Var ix) = pure $ if ix == -1
+                                    then ys
+                                    else if ix == -2
+                                            then yErr
+                                            else M.computeAs S $ xss <! ix
+        evalKey (Const v)  = pure $ M.replicate comp m v
+        evalKey (Param ix) = pure $ M.replicate comp m (theta VS.! ix)
+        evalKey (Uni f t)  = M.computeAs S . M.map (evalFun f) <$> gets (getVal t)
+        evalKey (Bin op l r) = M.computeAs S <$> (M.zipWith (evalOp op) <$> gets (getVal l) <*> gets (getVal r))
+
+        alg (Var ix) = insertKey (Var ix)
+        alg (Param ix) = insertKey (Param ix)
+        alg (Const v) = insertKey (Const v)
+        alg (Uni f t) = insertKey (Uni f t)
+        alg (Bin op l r) = insertKey (Bin op l r)
+
+        --diff :: Op -> Array S Ix1 Double -> Array S Ix1 Double -> Array S Ix1 Double -> (Array S Ix1 Double, Array S Ix1 Double)
+        diff Add dx fx gy l r   = pure (dx, dx)
+        diff Sub dx fx gy l r   = pure (dx, M.computeAs S $ M.map negate dx)
+        diff Mul dx fx gy l r   = pure (M.computeAs S $ M.zipWith (*) dx gy, M.computeAs S $ M.zipWith (*) dx fx)
+        diff Div dx fx gy l r   = do
+            k <- gets (getKey (Bin Div l r))
+            v <- gets (getVal k)
+            pure (M.computeAs S $ M.zipWith (/) dx gy
+                 , M.computeAs S $ M.zipWith (*) dx (M.zipWith (\l r -> negate l/r) v gy))
+        diff Power dx fx gy l r = do
+            k <- gets (getKey (Bin Power l r))
+            v <- gets (getVal k)
+            pure ( M.computeAs S $ M.zipWith4 (\d f g vi -> fixNaN $ d * g * vi / f) dx fx gy v
+                 , M.computeAs S $ M.zipWith3 (\d f vi -> fixNaN $ d * vi * log f) dx fx v)
+
+        diff PowerAbs dx fx gy l r = do
+            k <- gets (getKey (Bin PowerAbs l r))
+            v <- gets (getVal k)
+            let v2 = M.map abs fx
+                v3 = M.computeAs S $ M.zipWith (*) fx gy
+            pure ( M.computeAs S $ M.zipWith4 (\d v3i vi v2i -> fixNaN $ d * v3i * vi / (v2i^2)) dx v3 v v2
+                 , M.computeAs S $ M.zipWith3 (\d f vi -> fixNaN $ d * vi * log f) dx v2 v)
+
+        diff AQ dx fx gy l r = let dxl = M.zipWith (\g d -> d * (recip . sqrt . (+1) . (^2)) g) gy dx
+                                   dxy = M.zipWith3 (\f g dl -> f * g * dl^3) fx gy dxl
+                           in pure (M.computeAs S $ dxl, M.computeAs S $ dxy)
+
+        fixNaN x = if isNaN x then 0 else x
+
+        insertKey key = do
+            isCached <- gets ((key `Map.member`) . graph)
+            when (not isCached) $ do
+                ev <- evalKey key
+                modify' (insKey key ev)
+            gets (getKey key)
 
 -- | Same as above, but using reverse mode with the tree encoded as an array, that is even faster.
 reverseModeArr :: SRMatrix

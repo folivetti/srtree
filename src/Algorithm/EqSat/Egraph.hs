@@ -150,11 +150,13 @@ getSmallest :: Ord a => RangeTree a -> (a, EClassId)
 getSmallest rt = case rt of
                      Empty -> error "empty finger"
                      x :<| t -> x
+{-# INLINE getSmallest #-}
+
 getGreatest :: Ord a => RangeTree a -> (a, EClassId)
 getGreatest rt = case rt of
                      Empty -> error "empty finger"
                      t :|> x -> x
-
+{-# INLINE getGreatest #-}
 
 data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId   -- maps an e-class id to its canonical form
                      , _eNodeToEClass :: Map ENode EClassId    -- maps an e-node to its e-class id
@@ -220,10 +222,12 @@ makeLenses ''EGraphDB
 -- | returns an empty e-graph
 emptyGraph :: EGraph
 emptyGraph = EGraph IntMap.empty Map.empty IntMap.empty emptyDB
+{-# INLINE emptyGraph #-}
 
 -- | returns an empty e-graph DB
 emptyDB :: EGraphDB
 emptyDB = EDB Set.empty Set.empty Map.empty FingerTree.empty IntMap.empty IntMap.empty IntSet.empty 0
+{-# INLINE emptyDB #-}
 
 -- | Creates a new e-class from an e-class id, a new e-node,
 -- and the info of this e-class 
@@ -260,6 +264,7 @@ getEClass c = gets ((IntMap.! c) . _eClass)
 -- | Creates a singleton trie from an e-class id
 trie :: EClassId -> IntMap IntTrie -> IntTrie
 trie eid = IntTrie (Set.singleton eid)
+{-# INLINE trie #-}
 
 -- | Check whether an e-class is a constant value
 isConst :: Monad m => EClassId -> EGraphST m Bool

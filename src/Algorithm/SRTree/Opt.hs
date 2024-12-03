@@ -41,9 +41,10 @@ minimizeNLL' alg dist mYerr niter xss ys tree t0
     j2ix       = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]
     (Sz n)     = size t0
     (Sz m)     = size ys
-    funAndGrad = second (toStorableVector . computeAs S) . gradNLLArr dist xss ys mYerr treeArr j2ix
+    funAndGrad = gradNLLGraph dist xss ys mYerr tree' -- second (toStorableVector . computeAs S) . gradNLLArr dist xss ys mYerr treeArr j2ix
 
-    (f, _)     = gradNLL dist mYerr xss ys tree t0 -- if there's no parameter or no iterations
+    (f, _)     = gradNLLGraph dist xss ys mYerr tree' t0' -- if there's no parameter or no iterations
+    -- gradNLL dist mYerr xss ys tree t0
     --debug1     = gradNLLArr dist msErr xss ys treeArr j2ix t0
     --debug2     = gradNLL dist msErr xss ys tree t0
 
@@ -56,7 +57,8 @@ minimizeNLL' alg dist mYerr niter xss ys tree t0
     t_opt'      = fromStorableVector compMode t_opt
     debugGrad t = let g1 = gradNLL dist mYerr xss ys tree . fromStorableVector compMode $ t
                       g2 = gradNLLArr dist xss ys mYerr treeArr j2ix t
-                  in traceShow (t, g1, g2) $ second (toStorableVector . computeAs S) g2
+                      g3 = gradNLLGraph dist xss ys mYerr tree' t
+                  in traceShow (t, g1, g2, g3) $ g3 -- second (toStorableVector . computeAs S) g2
 
 minimizeNLL :: Distribution -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
 minimizeNLL = minimizeNLL' TNEWTON
