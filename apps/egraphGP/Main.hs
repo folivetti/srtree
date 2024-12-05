@@ -261,6 +261,7 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
                           else pure Nothing
 
 
+    combineFrom [] = pure 0 -- this is the first terminal and it will always be already evaluated
     combineFrom ecs = do
         nt  <- rnd rndNonTerm
         p1  <- rnd (randomFrom ecs)
