@@ -49,7 +49,7 @@ randomTree minDepth maxDepth maxSize genTerm genNonTerm grow
         node <- genNonTerm
         case node of 
           Uni f _    -> Fix . Uni f <$> randomTree (minDepth - 1) (maxDepth - 1) (maxSize - 1) genTerm genNonTerm grow 
-          Bin op _ _ -> do l <- randomTree (minDepth - 1) (maxDepth - 1) (maxSize - 2) genTerm genNonTerm grow
+          Bin op _ _ -> do l <- randomTree (minDepth - 1) (maxDepth - 1) (if grow then maxSize - 2 else maxSize `div` 2) genTerm genNonTerm grow
                            r <- randomTree (minDepth - 1) (maxDepth - 1) (maxSize - 1 - countNodes l) genTerm genNonTerm grow 
                            pure . Fix  $ Bin op l r
 {-# INLINE randomTree #-}

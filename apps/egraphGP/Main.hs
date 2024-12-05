@@ -169,23 +169,23 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
        nUnev <- gets (IntSet.size . _unevaluated . _eDB)
        let nEvs = nCls - nUnev
        bestF <- getBestFitness
-       cleanDB
 
        (ecN, b) <- case alg of
                     OnlyRandom -> do let ratio = fromIntegral nEvs / fromIntegral nCls
                                      b <- rnd (tossBiased ratio)
-                                     ec <- if b && ratio > 0.99 then insertRndExpr maxSize >>= canonical else evaluateRndUnevaluated >>= canonical
+                                     ec <- if b && ratio > 0.99
+                                              then insertRndExpr maxSize >>= canonical
+                                              else evaluateRndUnevaluated >>= canonical
                                      pure (ec, False)
                     BestFirst  -> do
                       ecsPareto <- getParetoEcsUpTo radius
-                      ecsBest   <- getTopECLassThat radius (isSizeOf (<=maxSize))
-
-                      ecPareto     <- combineFrom ecsPareto
+                      ecPareto     <- combineFrom ecsPareto >>= canonical
                       curFitPareto <- getFitness ecPareto
 
                       if isNothing curFitPareto
                         then pure (ecPareto, False)
-                        else do ecBest     <- combineFrom ecsBest
+                        else do ecsBest    <- getTopECLassThat radius (isSizeOf (<maxSize))
+                                ecBest     <- combineFrom ecsBest >>= canonical
                                 curFitBest <- getFitness ecBest
                                 if isNothing curFitBest
                                   then pure (ecBest, False)
@@ -196,18 +196,22 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
                                             Just c  -> pure (c, False)
        ecN' <- canonical ecN
        upd <- updateIfNothing ecN'
-       when (upd && printTrace)
-         do runEqSat myCost rewriteBasic2 1
+       test <- getFitness ecN
+       fitDB <- gets (FingerTree.length . _fitRangeDB . _eDB)
 
-            --ecN' <- canonical ecN
-            _tree <- getBest ecN'
-            fi <- negate . fromJust <$> getFitness ecN'
-            theta <- fromJust <$> getTheta ecN'
+       when (nEvs `mod` 1 == 0) $ runEqSat myCost rewritesParams 1 >>= \_ -> cleanDB
+       when (not upd) $ io . print $ ("ops", b, test, ecN', fromIntegral nEvs / fromIntegral nCls, fitDB)
+       when printTrace
+         do
+            ecN'' <- canonical ecN'
+            _tree <- getBest ecN''
+            fi <- negate . fromJust <$> getFitness ecN''
+            theta <- fromJust <$> getTheta ecN''
             let thetaStr   = intercalate ";" $ Prelude.map show (MA.toList theta)
             io . putStrLn $ showExpr _tree <> "," <> thetaStr <> "," <> show fi
             pure ()
        --cleanDB
-       let radius' = if b then (max 3 $ min (50 `div` maxSize) (radius+1)) else (max 3 $ radius-1)
+       let radius' = if (not upd) then (max 3 $ min (500 `div` maxSize) (radius+1)) else (max 3 $ radius-1)
            nEvs'    = nEvs + if upd then 1 else 0
        pure (radius', nEvs')
   eclasses <- gets (IntMap.toList . _eClass)
@@ -261,10 +265,11 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
         nt  <- rnd rndNonTerm
         p1  <- rnd (randomFrom ecs)
         p2  <- rnd (randomFrom ecs)
-        l1  <- rnd (randomFrom [2..maxSize-2])
-        l2  <- rnd (randomFrom [1..(maxSize - l1 - 1)]) -- maxSize - maxSize + 2 - 2= 0
+        l1  <- rnd (randomFrom [2..maxSize-2]) -- sz 10: [2..8]
+
         e1  <- randomChildFrom p1 l1 >>= canonical
         ml  <- gets (_size . _info . (IM.! e1) . _eClass)
+        l2  <- rnd (randomFrom [1..(maxSize - ml - 1)]) -- maxSize - maxSize + 2 - 2= 0 -- sz 10: [1..7] (2) / [1..1] (8)
         e2  <- randomChildFrom p2 l2 >>= canonical
         case nt of
           Uni Id ()    -> canonical e1
@@ -281,17 +286,16 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
       ec <- canonical ec'
       l <- gets (_size . _info . (IM.! ec) . _eClass )
 
-      if p || l >= maxL
-          then do enodes <- gets (_eNodes . (IM.! ec) . _eClass)
-                  enode  <- gets (_best . _info . (IM.! ec) . _eClass) -- we should return the best otherwise we may build larger
+      if p || l > maxL
+          then do --enodes <- gets (_eNodes . (IM.! ec) . _eClass)
+                  enode  <- gets (_best . _info . (IM.! ec) . _eClass) -- we should return the best otherwise we may build larger exprs
                   case enode of
                       Uni _ eci     -> randomChildFrom eci maxL
                       Bin _ ecl ecr -> do coin <- rnd toss
                                           if coin
                                             then randomChildFrom ecl maxL
                                             else randomChildFrom ecr maxL
-                      -- Const x -> gets ((Map.! (Param 0)) . _eNodeToEClass)
-                      _ -> pure ec
+                      _ -> pure ec -- this shouldn't happen unless maxL==0
           else pure ec
 
     nonTerms   = [ Bin Add () (), Bin Sub () (), Bin Mul () (), Bin Div () ()
@@ -306,7 +310,8 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
     insertRndExpr :: Int -> RndEGraph EClassId
     insertRndExpr maxSize =
       do grow <- rnd toss
-         n <- rnd (randomFrom [3 .. maxSize])
+         n <- rnd (randomFrom [if maxSize > 3 then 3 else 1 .. maxSize])
+
          t <- rnd $ Random.randomTree 2 8 n rndTerm rndNonTerm2 grow
          fromTree myCost t >>= canonical
 
@@ -349,10 +354,10 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
 
     printExpr ix ec = do 
         fit <- fromJust <$> getFitness ec 
-        --theta <- gets (fromJust . _theta . _info . (IM.! ec) . _eClass)
+        theta <- gets (fromJust . _theta . _info . (IM.! ec) . _eClass)
         --((best, mf), mtheta) <- (,theta) . (,fit) <$> getBest ec
         best <- getBest ec
-        (_, theta) <- fitnessFunRep longRep longIter distribution x y mYErr x_val y_val mYErr_val best
+        --(_, theta) <- fitnessFunRep longRep longIter distribution x y mYErr x_val y_val mYErr_val best
         let best'     = relabelParams best
             expr      = paramsToConst (MA.toList theta) best'
             unprotect = convertProtectedOps expr 
