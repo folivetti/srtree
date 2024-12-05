@@ -310,9 +310,8 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
     insertRndExpr :: Int -> RndEGraph EClassId
     insertRndExpr maxSize =
       do grow <- rnd toss
-         n <- rnd (randomFrom [if maxSize > 3 then 3 else 1 .. maxSize])
-
-         t <- rnd $ Random.randomTree 2 8 n rndTerm rndNonTerm2 grow
+         n <- rnd (randomFrom [if maxSize > 4 then 4 else 1 .. maxSize])
+         t <- rnd $ Random.randomTree 3 8 n rndTerm rndNonTerm2 grow
          fromTree myCost t >>= canonical
 
     insertBestExpr :: RndEGraph EClassId
