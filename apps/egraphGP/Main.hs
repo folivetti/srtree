@@ -196,11 +196,11 @@ egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te
                                             Just c  -> pure (c, False)
        ecN' <- canonical ecN
        upd <- updateIfNothing ecN'
-       test <- getFitness ecN
-       fitDB <- gets (FingerTree.length . _fitRangeDB . _eDB)
+       --test <- getFitness ecN
+       --fitDB <- gets (FingerTree.length . _fitRangeDB . _eDB)
 
-       when (nEvs `mod` 1 == 0) $ runEqSat myCost rewritesParams 1 >>= \_ -> cleanDB
-       when (not upd) $ io . print $ ("ops", b, test, ecN', fromIntegral nEvs / fromIntegral nCls, fitDB)
+       when upd $ runEqSat myCost rewritesParams 1 >>= \_ -> cleanDB
+       --when (not upd) $ io . print $ ("ops", b, test, ecN', fromIntegral nEvs / fromIntegral nCls, fitDB)
        when printTrace
          do
             ecN'' <- canonical ecN'
