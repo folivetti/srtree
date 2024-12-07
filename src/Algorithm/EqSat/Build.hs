@@ -382,12 +382,16 @@ fromTrees costFun = foldM (\rs t -> do eid <- fromTree costFun t; pure (eid:rs))
 
 
 -- | gets the best expression given the default cost function
-getBest :: Monad m => EClassId -> EGraphST m (Fix SRTree)
-getBest eid = do eid' <- canonical eid
-                 best <- gets (_best . _info . (IntMap.! eid') . _eClass)
-                 childs <- mapM getBest $ childrenOf best
-                 pure . Fix $ replaceChildren childs best
-{-# INLINE getBest #-}
+getBestExpr :: Monad m => EClassId -> EGraphST m (Fix SRTree)
+getBestExpr eid = do eid' <- canonical eid
+                     best <- gets (_best . _info . (IntMap.! eid') . _eClass)
+                     childs <- mapM getBestExpr $ childrenOf best
+                     pure . Fix $ replaceChildren childs best
+{-# INLINE getBestExpr #-}
+
+getBestENode eid = do eid' <- canonical eid
+                      gets (_best . _info . (IntMap.! eid') . _eClass)
+{-# INLINE getBestENode #-}
 
 -- | returns one expression rooted at e-class `eId`
 -- TODO: avoid loopings

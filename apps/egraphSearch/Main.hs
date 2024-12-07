@@ -49,7 +49,9 @@ import GHC.IO (unsafePerformIO)
 import Control.Scheduler 
 import Control.Monad.IO.Unlift
 import Data.SRTree (convertProtectedOps)
-
+-- Insert random expression 
+-- Evaluate random subtree 
+-- Insert new random parent eNode 
 
 type RndEGraph a = EGraphST (StateT StdGen IO) a
 
@@ -64,6 +66,9 @@ myCost (Const _)    = 1
 myCost (Param _)    = 1
 myCost (Bin op l r) = 2 + l + r
 myCost (Uni _ t)    = 3 + t
+
+data Alg = OnlyRandom | BestFirst deriving (Show, Read, Eq)
+
 
 -- experiment 1 80/30
 fitnessFun :: Int -> Distribution -> SRMatrix -> PVector -> Maybe PVector -> SRMatrix -> PVector -> Maybe PVector -> Fix SRTree -> PVector -> (Double, PVector)
@@ -103,181 +108,74 @@ getTheta c = gets (_theta . _info . (IM.! c) . _eClass)
 getSize :: EClassId -> RndEGraph Int
 getSize c = gets (_size . _info . (IM.! c) . _eClass)
 {-# INLINE getSize #-}
+isSizeOf p = p . _size . _info
+{-# INLINE isSizeOf #-}
 
-egraphGP distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te terms nPop nIters tournamentSize pc pm maxSize printPareto printTrace optIter optRep = do
 
-  pop <- replicateM nPop $ do ec <- insertRndExpr maxSize >>= canonical
-                              updateIfNothing ec
-                              pure ec
+rewriteBasic2 :: [Rule]
+rewriteBasic2 =
+    [
+      "x" * "y" :=> "y" * "x"
+    , "x" + "y" :=> "y" + "x"
+    , ("x" ** "y") * ("x" ** "z") :=> "x" ** ("y" + "z") -- :| isPositive "x"
+    , ("x" + "y") + "z" :=> "x" + ("y" + "z")
+    , ("x" * "y") * "z" :=> "x" * ("y" * "z")
+    , ("x" * "y") + ("x" * "z") :=> "x" * ("y" + "z")
+    , ("w" * "x") + ("z" * "x") :=> ("w" + "z") * "x" -- :| isConstPt "w" :| isConstPt "z"
+    --, "x" - "x" :=> 0
+    --, "x" / "x" :=> 1 -- :| isNotZero "x"
+    ]
+
+egraphSearch alg distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te terms nEvals maxSize printPareto printTrace slowIter slowRep = do
+  ec <- insertRndExpr maxSize
+  --ec <- insertBestExpr -- use only to debug
+  updateIfNothing ec
   insertTerms
+  evaluateUnevaluated
   runEqSat myCost rewritesParams 1
   cleanDB
-  pop' <- Prelude.mapM canonical pop
-  when printTrace $ printPop pop'
 
-  finalPop <- iterateFor nIters pop' $ \ps' -> do
-    ps <- Prelude.mapM canonical ps'
-    parents <- replicateM nPop (tournament ps)
-    newPop' <- Prelude.mapM (combine >=> canonical) parents
-    runEqSat myCost rewritesParams 1
-    cleanDB
-    newPop <- Prelude.mapM canonical newPop'
-    when printTrace $ printPop newPop
-    pure newPop
+  while ((<nEvals) . snd) (1,1) $
+    \(radius, nEvs) ->
+      do
+       nCls  <- gets (IM.size . _eClass)
+       nUnev <- gets (IntSet.size . _unevaluated . _eDB)
+       let nEvs = nCls - nUnev
+       bestF <- getBestFitness
 
-  io $ putStrLn "id,Expression,theta,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test"
-  if printPareto
-    then paretoFront
-    else printBest
+       (ecN, b) <- case alg of
+                    OnlyRandom -> do let ratio = fromIntegral nEvs / fromIntegral nCls
+                                     b <- rnd (tossBiased ratio)
+                                     ec <- if b && ratio > 0.99
+                                              then insertRndExpr maxSize >>= canonical
+                                              else evaluateRndUnevaluated >>= canonical
+                                     pure (ec, False)
+                    BestFirst  -> do
+                      ecsPareto <- getParetoEcsUpTo radius
+                      ecPareto     <- combineFrom ecsPareto >>= canonical
+                      curFitPareto <- getFitness ecPareto
 
-  where
-    iterateFor 0 xs f = pure xs
-    iterateFor n xs f = do xs' <- f xs
-                           iterateFor (n-1) xs' f
+                      if isNothing curFitPareto
+                        then pure (ecPareto, False)
+                        else do ecsBest    <- getTopECLassThat radius (isSizeOf (<maxSize))
+                                ecBest     <- combineFrom ecsBest >>= canonical
+                                curFitBest <- getFitness ecBest
+                                if isNothing curFitBest
+                                  then pure (ecBest, False)
+                                  else do ee <- evalRndSubTree
+                                          case ee of
+                                            Nothing -> do ec <- insertRndExpr maxSize >>= canonical
+                                                          pure (ec, True)
+                                            Just c  -> pure (c, False)
+       ecN' <- canonical ecN
+       upd <- updateIfNothing ecN'
+       --test <- getFitness ecN
+       --fitDB <- gets (FingerTree.length . _fitRangeDB . _eDB)
 
-    tournament xs = do p1 <- applyTournament xs >>= canonical
-                       p2 <- applyTournament xs >>= canonical
-                       pure (p1, p2)
-
-    applyTournament :: [EClassId] -> RndEGraph EClassId
-    applyTournament xs = do challengers <- replicateM tournamentSize (rnd $ randomFrom xs)
-                            fits <- Prelude.map fromJust <$> Prelude.mapM getFitness challengers
-                            pure . snd . maximumBy (compare `on` fst) $ Prelude.zip fits challengers
-
-    combine (p1, p2) = do child <- (crossover p1 p2 >>= mutate) >>= canonical
-                          updateIfNothing child
-                          pure child
-
-    crossover p1 p2 = do sz <- getSize p1
-                         coin <- rnd $ tossBiased pc
-                         if sz == 1 || not coin
-                            then pure p2
-                            else do pos <- rnd $ randomRange (1, sz-1)
-                                    cands <- getAllSubClasses p2
-                                    tree <- getSubtree pos 0 Nothing Nothing cands p1
-                                    fromTree myCost tree >>= canonical
-
-    -- TODO: add grandparent
-    getSubtree :: Int -> Int -> Maybe (EClassId -> ENode) -> Maybe (EClassId -> ENode) -> [EClassId] -> EClassId -> RndEGraph (Fix SRTree)
-    getSubtree 0 sz (Just parent) mGrandParent cands p' = do
-      p <- canonical p'
-      candidates' <- filterM (\c -> (<maxSize-sz) <$> getSize c) cands
-      candidates  <- filterM (\c -> doesNotExist2gen mGrandParent (parent c)) candidates'
-      if null candidates
-         then getBestExpr p
-         else do subtree <- rnd (randomFrom candidates)
-                 getBestExpr subtree
-    getSubtree pos sz parent mGrandParent cands p' = do
-      p <- canonical p'
-      root <- getBestENode p >>= canonize
-      case root of
-        Param ix -> pure . Fix $ Param ix
-        Const x  -> pure . Fix $ Const x
-        Var   ix -> pure . Fix $ Var ix
-        Uni f t  -> (Fix . Uni f) <$> getSubtree (pos-1) (sz+1) (Just $ Uni f) parent cands t
-        Bin op l r -> do szLft <- getSize l
-                         szRgt <- getSize r
-                         if szLft < pos
-                           then do l' <- getBestExpr l
-                                   r' <- getSubtree (pos-szLft-1) (sz+szLft+1) (Just $ Bin op l) parent cands r
-                                   pure . Fix $ Bin op l' r'
-                           else do l' <- getSubtree (pos-1) (sz+szRgt+1) (Just (\t -> Bin op t r)) parent cands l
-                                   r' <- getBestExpr r
-                                   pure . Fix $ Bin op l' r'
-
-    getAllSubClasses p' = do
-      p  <- canonical p'
-      en <- getBestENode p
-      case en of
-        Bin _ l r -> do ls <- getAllSubClasses l
-                        rs <- getAllSubClasses r
-                        pure (p : (ls <> rs))
-        Uni _ t   -> (p:) <$> getAllSubClasses t
-        _         -> pure [p]
-
-    mutate p = do sz <- getSize p
-                  coin <- rnd $ tossBiased pm
-                  if coin
-                     then do pos <- rnd $ randomRange (0, sz-1)
-                             tree <- mutAt pos maxSize Nothing p
-                             fromTree myCost tree >>= canonical
-                     else pure p
-
-    peel :: Fix SRTree -> SRTree ()
-    peel (Fix (Bin op l r)) = Bin op () ()
-    peel (Fix (Uni f t)) = Uni f ()
-    peel (Fix (Param ix)) = Param ix
-    peel (Fix (Var ix)) = Var ix
-    peel (Fix (Const x)) = Const x
-
-    mutAt :: Int -> Int -> Maybe (EClassId -> ENode) -> EClassId -> RndEGraph (Fix SRTree)
-    mutAt 0 sizeLeft Nothing       _ = (insertRndExpr sizeLeft >>= canonical) >>= getBestExpr -- we chose to mutate the root
-    mutAt 0 1        _             _ = rnd $ randomFrom terms -- we don't have size left
-    mutAt 0 sizeLeft (Just parent) _ = do -- we reached the mutation place
-      ec    <- insertRndExpr sizeLeft >>= canonical -- create a random expression with the size limit
-      (Fix tree) <- getBestExpr ec           --
-      root  <- getBestENode ec
-      exist <- canonize (parent ec) >>= doesExist
-      if exist
-         -- the expression `parent ec` already exists, try to fix
-         then do let children = childrenOf root
-                 candidates <- case length children of
-                                0  -> filterM (checkToken parent . (replaceChildren children)) (Prelude.map peel terms)
-                                1 -> filterM (checkToken parent . (replaceChildren children)) uniNonTerms
-                                2 -> filterM (checkToken parent . (replaceChildren children)) binNonTerms
-                 if null candidates
-                     then pure $ Fix tree -- there's no candidate, so we failed and admit defeat
-                     else do newToken <- rnd (randomFrom candidates)
-                             pure . Fix $ replaceChildren (childrenOf tree) newToken
-
-         else pure . Fix $ tree
-
-    mutAt pos sizeLeft parent p' = do
-        p <- canonical p'
-        root <- getBestENode p >>= canonize
-        case root of
-          Param ix -> pure . Fix $ Param ix
-          Const x  -> pure . Fix $ Const x
-          Var   ix -> pure . Fix $ Var ix
-          Uni f t  -> (Fix . Uni f) <$> mutAt (pos-1) (sizeLeft-1) (Just $ Uni f) t
-          Bin op l r -> do szLft <- getSize l
-                           szRgt <- getSize r
-                           if szLft < pos
-                              then do l' <- getBestExpr l
-                                      r' <- mutAt (pos-szLft-1) (sizeLeft-szLft-1) (Just $ Bin op l) r
-                                      pure . Fix $ Bin op l' r'
-                              else do l' <- mutAt (pos-1) (sizeLeft-szRgt-1) (Just (\t -> Bin op t r)) l
-                                      r' <- getBestExpr r
-                                      pure . Fix $ Bin op l' r'
-
-    checkToken parent en' = do en <- canonize en'
-                               mEc <- gets ((Map.!? en) . _eNodeToEClass)
-                               case mEc of
-                                    Nothing -> pure True
-                                    Just ec -> do ec' <- canonical ec
-                                                  ec'' <- canonize (parent ec')
-                                                  not <$> doesExist ec''
-    doesExist, doesNotExist :: ENode -> RndEGraph Bool
-    doesExist en = gets ((Map.member en) . _eNodeToEClass)
-    doesNotExist en = gets ((Map.notMember en) . _eNodeToEClass)
-
-    doesNotExist2gen :: Maybe (EClassId -> ENode) -> ENode -> RndEGraph Bool
-    doesNotExist2gen mGrandParent en = do b <- gets ((Map.notMember en) . _eNodeToEClass)
-                                          if b
-                                             then pure True
-                                             else case mGrandParent of
-                                                    Nothing -> pure b
-                                                    Just gf -> do ec  <- gets ((Map.! en) . _eNodeToEClass)
-                                                                  en' <- canonize (gf ec)
-                                                                  gets ((Map.notMember en') . _eNodeToEClass)
-
-
-
-
-      -- choose point of mutation
-      -- replace with something unseen node
-
-    printPop pop = forM_ pop $ \ecN'-> do
+       when upd $ runEqSat myCost rewritesParams 1 >>= \_ -> cleanDB
+       --when (not upd) $ io . print $ ("ops", b, test, ecN', fromIntegral nEvs / fromIntegral nCls, fitDB)
+       when printTrace
+         do
             ecN'' <- canonical ecN'
             _tree <- getBestExpr ecN''
             fi <- negate . fromJust <$> getFitness ecN''
@@ -285,6 +183,25 @@ egraphGP distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te terms n
             let thetaStr   = intercalate ";" $ Prelude.map show (MA.toList theta)
             io . putStrLn $ showExpr _tree <> "," <> thetaStr <> "," <> show fi
             pure ()
+       --cleanDB
+       let radius' = if (not upd) then (max 3 $ min (500 `div` maxSize) (radius+1)) else (max 3 $ radius-1)
+           nEvs'    = nEvs + if upd then 1 else 0
+       pure (radius', nEvs')
+  eclasses <- gets (IntMap.toList . _eClass)
+  -- forM_ eclasses $ \(_, v) -> (io.print) (Set.size (_eNodes v), Set.size (_parents v))
+  io $ putStrLn "id,Expression,theta,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test"
+  if printPareto
+    then paretoFront
+    else printBest
+  --ft <- gets (_fitRangeDB . _eDB)
+  --io . print $ Foldable.toList ft
+
+  where
+    --slowIter = 30
+    --slowRep = 1
+    longIter = 100
+    longRep = 5
+
 
 
     updateIfNothing ec = do
@@ -292,21 +209,71 @@ egraphGP distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te terms n
       case mf of
         Nothing -> do
           t <- getBestExpr ec
-          (f, p) <- fitnessFunRep optRep optIter distribution x y mYErr x_val y_val mYErr_val t
+          (f, p) <- fitnessFunRep slowRep slowIter distribution x y mYErr x_val y_val mYErr_val t
           insertFitness ec f p
           --io $ print f
           pure True
         Just _ -> pure False
 
+    getBestFitness = do
+      bec <- (gets (snd . getGreatest . _fitRangeDB . _eDB) >>= canonical)
+      gets (_fitness . _info . (IM.! bec) . _eClass)
+
+    evalRndSubTree :: RndEGraph (Maybe EClassId)
+    evalRndSubTree = do ecIds <- gets (IntSet.toList . _unevaluated . _eDB)
+                        if not (null ecIds)
+                          then do rndId' <- rnd $ randomFrom ecIds
+                                  rndId  <- canonical rndId'
+                                  constType <- gets (_consts . _info . (IM.! rndId) . _eClass)
+                                  case constType of
+                                    NotConst -> pure $ Just rndId
+                                    _        -> pure Nothing
+                          else pure Nothing
+
+
+    combineFrom [] = pure 0 -- this is the first terminal and it will always be already evaluated
+    combineFrom ecs = do
+        nt  <- rnd rndNonTerm
+        p1  <- rnd (randomFrom ecs)
+        p2  <- rnd (randomFrom ecs)
+        l1  <- rnd (randomFrom [2..maxSize-2]) -- sz 10: [2..8]
+
+        e1  <- randomChildFrom p1 l1 >>= canonical
+        ml  <- gets (_size . _info . (IM.! e1) . _eClass)
+        l2  <- rnd (randomFrom [1..(maxSize - ml - 1)]) -- maxSize - maxSize + 2 - 2= 0 -- sz 10: [1..7] (2) / [1..1] (8)
+        e2  <- randomChildFrom p2 l2 >>= canonical
+        case nt of
+          Uni Id ()    -> canonical e1
+          Uni f ()     -> add myCost (Uni f e1) >>= canonical
+          Bin op () () -> do b <- rnd toss
+                             if b
+                              then add myCost (Bin op e1 e2) >>= canonical
+                              else add myCost (Bin op e2 e1) >>= canonical
 
     getParetoEcsUpTo n = concat <$> forM [1..maxSize] (\i -> getTopECLassWithSize  i n)
 
+    randomChildFrom ec' maxL = do
+      p <- rnd toss -- whether to go deeper or return this level
+      ec <- canonical ec'
+      l <- gets (_size . _info . (IM.! ec) . _eClass )
 
-    uniNonTerms = [Uni Recip ()]
-    binNonTerms = [Bin Add () (), Bin Sub () (), Bin Mul () (), Bin Div () (), Bin PowerAbs () ()]
-    nonTerms   = uniNonTerms <> binNonTerms
+      if p || l > maxL
+          then do --enodes <- gets (_eNodes . (IM.! ec) . _eClass)
+                  enode  <- gets (_best . _info . (IM.! ec) . _eClass) -- we should return the best otherwise we may build larger exprs
+                  case enode of
+                      Uni _ eci     -> randomChildFrom eci maxL
+                      Bin _ ecl ecr -> do coin <- rnd toss
+                                          if coin
+                                            then randomChildFrom ecl maxL
+                                            else randomChildFrom ecr maxL
+                      _ -> pure ec -- this shouldn't happen unless maxL==0
+          else pure ec
+
+    nonTerms   = [ Bin Add () (), Bin Sub () (), Bin Mul () (), Bin Div () ()
+                 , Bin PowerAbs () (),  Uni Recip ()] -- , Uni LogAbs (), Uni Exp (), Uni Sin (), Uni SqrtAbs ()]
     rndTerm    = Random.randomFrom terms
-    rndNonTerm = Random.randomFrom nonTerms
+    rndNonTerm = Random.randomFrom $ (Uni Id ()) : nonTerms
+    rndNonTerm2 = Random.randomFrom nonTerms
 
     insertTerms =
         forM terms $ \t -> do fromTree myCost t >>= canonical
@@ -315,9 +282,21 @@ egraphGP distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te terms n
     insertRndExpr maxSize =
       do grow <- rnd toss
          n <- rnd (randomFrom [if maxSize > 4 then 4 else 1 .. maxSize])
-         t <- rnd $ Random.randomTree 3 8 n rndTerm rndNonTerm grow
+         t <- rnd $ Random.randomTree 3 8 n rndTerm rndNonTerm2 grow
          fromTree myCost t >>= canonical
 
+    insertBestExpr :: RndEGraph EClassId
+    insertBestExpr = do --let t =  "t0" / (recip ("t1" - "x0") + powabs "t2" "x0")
+                        --let t = ((("t0" + (powabs "t0" "x0")) / "t0") * "x0")
+                        let --t = "t0" / (recip ("t0" + "x0") - powabs "t0" "x0")
+                            t = powabs "t0" (powabs ("t0" * "x0") (powabs "x0" "t0"))
+
+                        ecId <- fromTree myCost t >>= canonical
+                        (f, p) <- fitnessFunRep slowRep slowIter distribution x y mYErr x_val y_val mYErr_val t
+                        insertFitness ecId f p
+                        io . putStrLn $ "Best fit global: " <> show f
+                        pure ecId
+        where powabs l r  = Fix (Bin PowerAbs l r)
 
     getBestExprWithSize n =
         do ec <- getTopECLassWithSize n 1 >>= traverse canonical
@@ -331,7 +310,7 @@ egraphGP distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te terms n
 
 
 
-    printExpr ix ec = do
+    printExpr ix ec = do 
         fit <- fromJust <$> getFitness ec 
         theta <- gets (fromJust . _theta . _info . (IM.! ec) . _eClass)
         --((best, mf), mtheta) <- (,theta) . (,fit) <$> getBest ec
@@ -375,21 +354,36 @@ egraphGP distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te terms n
                          go (n+1) (ix + if improved then 1 else 0) (max f (fromJust mf))
                  else go (n+1) ix f
 
+    evaluateUnevaluated = do
+          ec <- gets (IntSet.toList . _unevaluated . _eDB)
+          forM_ ec $ \c -> do
+              t <- getBestExpr c
+              (f, p) <- fitnessFunRep slowRep slowIter distribution x y mYErr x_val y_val mYErr_val t
+              insertFitness c f p
+
+    evaluateRndUnevaluated = do
+          ec <- gets (IntSet.toList . _unevaluated . _eDB)
+          c <- rnd . randomFrom $ ec 
+          t <- getBestExpr c
+          (f, p) <- fitnessFunRep slowRep slowIter distribution x y mYErr x_val y_val mYErr_val t
+          insertFitness c f p
+          pure c
+
+while p arg prog = do when (p arg) do arg' <- prog arg
+                                      while p arg' prog
+
 data Args = Args
   { _dataset      :: String,
     _testData     :: String,
     _gens         :: Int,
+    _alg          :: Alg,
     _maxSize      :: Int,
     _split        :: Int,
     _printPareto  :: Bool,
     _trace        :: Bool,
     _distribution :: Distribution,
     _optIter      :: Int,
-    _optRepeat    :: Int,
-    _nPop         :: Int,
-    _nTournament  :: Int,
-    _pc           :: Double,
-    _pm           :: Double
+    _optRepeat    :: Int
   }
   deriving (Show)
 
@@ -414,6 +408,11 @@ opt = Args
       <> showDefault
       <> value 100
       <> help "Number of generations." )
+   <*> option auto
+       ( long "algorithm"
+       <> short 'a'
+       <> metavar "ALG"
+       <> help "Algorithm." )
   <*> option auto
        ( long "maxSize"
        <> short 's'
@@ -445,26 +444,6 @@ opt = Args
        <> value 1
        <> showDefault
        <> help "number of retries of parameter fitting.")
-  <*> option auto
-       ( long "nPop"
-       <> value 100
-       <> showDefault
-       <> help "population size (Default: 100).")
-  <*> option auto
-       ( long "tournament-size"
-       <> value 2
-       <> showDefault
-       <> help "tournament size.")
-  <*> option auto
-       ( long "pc"
-       <> value 1.0
-       <> showDefault
-       <> help "probability of crossover.")
-  <*> option auto
-       ( long "pm"
-       <> value 0.3
-       <> showDefault
-       <> help "probability of mutation.")
 
 chunksOf :: Int -> [e] -> [[e]]
 chunksOf i ls = Prelude.map (Prelude.take i) (build (splitter ls))
@@ -521,7 +500,7 @@ main = do
       terms          = if _distribution args == ROXY
                           then [var 0, param 0]
                           else [var ix | ix <- [0 .. nFeats-1]] <> [param 0] -- [param ix | ix <- [0 .. 5]]
-      alg            = evalStateT (egraphGP (_distribution args) x_tr y_tr mYErr_tr x_val y_val mYErr_val x_te y_te mYErr_te terms (_nPop args) (_gens args) (_nTournament args) (_pc args) (_pm args) (_maxSize args) (_printPareto args) (_trace args) (_optIter args) (_optRepeat args)) emptyGraph
+      alg            = evalStateT (egraphSearch (_alg args) (_distribution args) x_tr y_tr mYErr_tr x_val y_val mYErr_val x_te y_te mYErr_te terms (_gens args) (_maxSize args) (_printPareto args) (_trace args) (_optIter args) (_optRepeat args)) emptyGraph
   evalStateT alg g'
 
   where

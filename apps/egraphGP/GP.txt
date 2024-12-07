@@ -1,3 +1,40 @@
+fitnessIs p = p . _fitness . _info
+{-# INLINE fitnessIs #-}
+getSizeOf :: (Int -> Bool) -> [EClassId] -> RndEGraph [EClassId]
+getSizeOf p = filterM (getSize >=> (pure . p))
+{-# INLINE getSizeOf #-}
+
+
+(&&&) p1 p2 x = p1 x && p2 x
+{-# INLINE (&&&) #-}
+
+isValidFitness = fitnessIs (isJust &&& (not . isNaN . fromJust) &&& (not . isInfinite . fromJust))
+{-# INLINE isValidFitness #-}
+
+evaluated = fitnessIs isJust
+{-# INLINE evaluated #-}
+unevaluated' = fitnessIs isNothing
+{-# INLINE unevaluated' #-}
+
+isSizeOf p = p . _size . _info
+{-# INLINE isSizeOf #-}
+
+funDoesNotExistWith node = Prelude.any (not . (`sameFunAs` node) . snd) . _parents
+  where sameFunAs (Uni f _) (Uni g _) = f == g
+        sameFunAs _ _ = False
+{-# INLINE funDoesNotExistWith #-}
+
+opDoesNotExistWith :: (SRTree ()) -> EClassId -> EClass -> Bool
+opDoesNotExistWith node ecId = Prelude.any (not . (`sameOpAs` node) . snd) . _parents
+  where sameOpAs (Bin op1 l _) (Bin op2 _ _) = op1 == op2 && ecId == l
+        sameOpAs _ _ = False
+{-# INLINE opDoesNotExistWith #-}
+
+numberOfEvalClasses :: Monad m => Int -> EGraphST m Bool
+    numberOfEvalClasses nEvs =
+      (subtract <$> gets (IntSet.size . _unevaluated . _eDB) <*> gets (IM.size . _eClass))
+        >>= \n -> pure (n<nEvs)
+
 
                                 {-
 egraphGP :: SRMatrix -> PVector -> [Fix SRTree] -> Int -> RndEGraph (Fix SRTree, Double)

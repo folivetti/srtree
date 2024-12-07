@@ -107,6 +107,21 @@ executables:
     dependencies:
     - optparse-applicative >= 0.17 && < 0.19
     - srtree
+  egraphSearch:
+    main:                Main.hs
+    source-dirs:         apps/egraphSearch
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -O1
+    #- -fdistinct-constructor-tables
+    #- -finfo-table-map
+    #- -optc-O3
+    dependencies:
+    - srtree
+    - optparse-applicative >= 0.17 && < 0.19
+    - normaldistribution >= 1.1.0.3 && < 1.2 
   egraphGP:
     main:                Main.hs
     source-dirs:         apps/egraphGP
@@ -121,7 +136,7 @@ executables:
     dependencies:
     - srtree
     - optparse-applicative >= 0.17 && < 0.19
-    - normaldistribution >= 1.1.0.3 && < 1.2 
+    - normaldistribution >= 1.1.0.3 && < 1.2
   ieeexplore:
     main:                Main.hs
     source-dirs:         apps/ieeexplore

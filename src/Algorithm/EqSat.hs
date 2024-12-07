@@ -52,7 +52,7 @@ eqSat :: Monad m => Fix SRTree -> [Rule] -> CostFun -> Int -> EGraphST m (Fix SR
 eqSat expr rules costFun maxIt =
     do root <- fromTree costFun expr
        (end, it) <- runEqSat costFun rules maxIt
-       best      <- getBest root
+       best      <- getBestExpr root
        --info      <- gets ((IntMap.! root) . _eClass)
        --info2     <- gets ((IntMap.! 9) . _eClass)
        --traceShow (info, info2) $
