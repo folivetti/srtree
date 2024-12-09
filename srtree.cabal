@@ -92,6 +92,7 @@ executable egraphGP
   main-is: Main.hs
   other-modules:
       Random
+      Util
       Paths_srtree
   hs-source-dirs:
       apps/egraphGP
