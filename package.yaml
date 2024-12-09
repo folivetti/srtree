@@ -115,12 +115,14 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     - -O1
+    - -Wall
     #- -fdistinct-constructor-tables
     #- -finfo-table-map
     #- -optc-O3
     dependencies:
     - srtree
     - optparse-applicative >= 0.17 && < 0.19
+    - split >= 0.2.5
     - normaldistribution >= 1.1.0.3 && < 1.2 
   egraphGP:
     main:                Main.hs

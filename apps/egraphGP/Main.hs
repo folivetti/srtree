@@ -154,34 +154,34 @@ egraphGP distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te terms n
                             then pure p2
                             else do pos <- rnd $ randomRange (1, sz-1)
                                     cands <- getAllSubClasses p2
-                                    tree <- getSubtree pos 0 Nothing Nothing cands p1
+                                    tree <- getSubtree pos 0 Nothing [] cands p1
                                     fromTree myCost tree >>= canonical
 
     -- TODO: add grandparent
-    getSubtree :: Int -> Int -> Maybe (EClassId -> ENode) -> Maybe (EClassId -> ENode) -> [EClassId] -> EClassId -> RndEGraph (Fix SRTree)
-    getSubtree 0 sz (Just parent) mGrandParent cands p' = do
+    getSubtree :: Int -> Int -> Maybe (EClassId -> ENode) -> [Maybe (EClassId -> ENode)] -> [EClassId] -> EClassId -> RndEGraph (Fix SRTree)
+    getSubtree 0 sz (Just parent) mGrandParents cands p' = do
       p <- canonical p'
       candidates' <- filterM (\c -> (<maxSize-sz) <$> getSize c) cands
-      candidates  <- filterM (\c -> doesNotExist2gen mGrandParent (parent c)) candidates'
+      candidates  <- filterM (\c -> doesNotExistGens mGrandParents (parent c)) candidates'
       if null candidates
          then getBestExpr p
          else do subtree <- rnd (randomFrom candidates)
                  getBestExpr subtree
-    getSubtree pos sz parent mGrandParent cands p' = do
+    getSubtree pos sz parent mGrandParents cands p' = do
       p <- canonical p'
       root <- getBestENode p >>= canonize
       case root of
         Param ix -> pure . Fix $ Param ix
         Const x  -> pure . Fix $ Const x
         Var   ix -> pure . Fix $ Var ix
-        Uni f t  -> (Fix . Uni f) <$> getSubtree (pos-1) (sz+1) (Just $ Uni f) parent cands t
+        Uni f t  -> (Fix . Uni f) <$> getSubtree (pos-1) (sz+1) (Just $ Uni f) (parent:mGrandParents) cands t
         Bin op l r -> do szLft <- getSize l
                          szRgt <- getSize r
                          if szLft < pos
                            then do l' <- getBestExpr l
-                                   r' <- getSubtree (pos-szLft-1) (sz+szLft+1) (Just $ Bin op l) parent cands r
+                                   r' <- getSubtree (pos-szLft-1) (sz+szLft+1) (Just $ Bin op l) (parent:mGrandParents) cands r
                                    pure . Fix $ Bin op l' r'
-                           else do l' <- getSubtree (pos-1) (sz+szRgt+1) (Just (\t -> Bin op t r)) parent cands l
+                           else do l' <- getSubtree (pos-1) (sz+szRgt+1) (Just (\t -> Bin op t r)) (parent:mGrandParents) cands l
                                    r' <- getBestExpr r
                                    pure . Fix $ Bin op l' r'
 
@@ -261,15 +261,16 @@ egraphGP distribution x y mYErr x_val y_val mYErr_val x_te y_te mYErr_te terms n
     doesExist en = gets ((Map.member en) . _eNodeToEClass)
     doesNotExist en = gets ((Map.notMember en) . _eNodeToEClass)
 
-    doesNotExist2gen :: Maybe (EClassId -> ENode) -> ENode -> RndEGraph Bool
-    doesNotExist2gen mGrandParent en = do b <- gets ((Map.notMember en) . _eNodeToEClass)
-                                          if b
-                                             then pure True
-                                             else case mGrandParent of
-                                                    Nothing -> pure b
+    doesNotExistGens :: [Maybe (EClassId -> ENode)] -> ENode -> RndEGraph Bool
+    doesNotExistGens []              en = gets ((Map.notMember en) . _eNodeToEClass)
+    doesNotExistGens (mGrand:grands) en = do b <- gets ((Map.notMember en) . _eNodeToEClass)
+                                             if b
+                                               then pure True
+                                               else case mGrand of
+                                                    Nothing -> pure False
                                                     Just gf -> do ec  <- gets ((Map.! en) . _eNodeToEClass)
                                                                   en' <- canonize (gf ec)
-                                                                  gets ((Map.notMember en') . _eNodeToEClass)
+                                                                  doesNotExistGens grands en'
 
 
 
