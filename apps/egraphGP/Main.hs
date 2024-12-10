@@ -41,6 +41,8 @@ import qualified Data.Foldable as Foldable
 import qualified Data.IntMap as IntMap
 import List.Shuffle ( shuffle )
 import Algorithm.SRTree.NonlinearOpt
+import Data.Binary ( encode, decode )
+import qualified Data.ByteString.Lazy as BS
 
 import Debug.Trace
 import Algorithm.EqSat (runEqSat)
@@ -54,6 +56,8 @@ import Util
 
 egraphGP :: DataSet -> DataSet -> DataSet -> Args -> StateT EGraph (StateT StdGen IO) ()
 egraphGP dataTrain dataVal dataTest args = do
+  when ((not.null) (_loadFrom args)) $ (io $ BS.readFile (_loadFrom args)) >>= \eg -> put (decode eg)
+
   pop <- replicateM (_nPop args) $ do ec <- insertRndExpr (_maxSize args) rndTerm rndNonTerm >>= canonical
                                       updateIfNothing fitFun ec
                                       pure ec
@@ -77,7 +81,7 @@ egraphGP dataTrain dataVal dataTest args = do
   if (_printPareto args)
     then paretoFront (_maxSize args) printExpr
     else printBest printExpr
-
+  when ((not.null) (_dumpTo args)) $ get >>= (io . BS.writeFile (_dumpTo args) . encode )
   where
     maxSize = (_maxSize args)
     fitFun = fitnessFunRep (_optRepeat args) (_optIter args) (_distribution args) dataTrain dataVal
@@ -299,7 +303,9 @@ data Args = Args
     _nTournament  :: Int,
     _pc           :: Double,
     _pm           :: Double,
-    _nonterminals :: String
+    _nonterminals :: String,
+    _dumpTo       :: String,
+    _loadFrom     :: String
   }
   deriving (Show)
 
@@ -380,6 +386,18 @@ opt = Args
        <> value "Add,Sub,Mul,Div,PowerAbs,Recip"
        <> showDefault
        <> help "set of non-terminals to use in the search."
+       )
+  <*> strOption
+       ( long "dump-to"
+       <> value ""
+       <> showDefault
+       <> help "dump final e-graph to a file."
+       )
+  <*> strOption
+       ( long "load-from"
+       <> value ""
+       <> showDefault
+       <> help "load initial e-graph from a file."
        )
 
 main :: IO ()

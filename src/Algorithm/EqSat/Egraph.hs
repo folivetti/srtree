@@ -1,6 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE StrictData #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 -----------------------------------------------------------------------------
@@ -22,7 +23,7 @@ module Algorithm.EqSat.Egraph where
 import Control.Lens (element, makeLenses, view, over, (&), (+~), (-~), (.~), (^.))
 --import Control.Monad (forM, forM_, when, foldM, void)
 import Data.List ( intercalate )
-import Control.Monad.State.Strict
+import Control.Monad.State.Strict hiding ( get, put )
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import Data.Map.Strict (Map)
@@ -37,6 +38,11 @@ import Data.Foldable ( toList )
 import Data.SRTree
 import Data.SRTree.Eval
 import Data.Hashable
+import Data.Binary
+import qualified Data.Binary as Bin
+import qualified Data.Massiv.Array as MA
+
+import GHC.Generics
 
 import Debug.Trace
 
@@ -162,7 +168,7 @@ data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId   -- maps an e-clas
                      , _eNodeToEClass :: Map ENode EClassId    -- maps an e-node to its e-class id
                      , _eClass        :: ClassIdMap EClass     -- maps an e-class id to its e-class data
                      , _eDB           :: EGraphDB
-                     } deriving Show
+                     } deriving (Show, Generic)
 
 data EGraphDB = EDB { _worklist      :: HashSet (EClassId, ENode)      -- e-nodes and e-class schedule for analysis
                     , _analysis      :: HashSet (EClassId, ENode)      -- e-nodes and e-class that changed data
@@ -172,17 +178,17 @@ data EGraphDB = EDB { _worklist      :: HashSet (EClassId, ENode)      -- e-node
                     , _sizeFitDB     :: IntMap (RangeTree Double)  -- hacky! Size x Fitness DB
                     , _unevaluated   :: IntSet                     -- set of not-evaluated e-classes
                     , _nextId        :: Int                        -- next available id
-                    } deriving Show
+                    } deriving (Show, Generic)
 
 data EClass = EClass { _eClassId :: Int                   -- e-class id (maybe we don't need that here)
                      , _eNodes   :: HashSet ENodeEnc          -- set of e-nodes inside this e-class
                      , _parents  :: HashSet (EClassId, ENode) -- parents (e-class, e-node)'s
                      , _height   :: Int                   -- height
                      , _info     :: EClassData            -- data
-                     } deriving (Show, Eq)
+                     } deriving (Show, Eq, Generic)
 
-data Consts   = NotConst | ParamIx Int | ConstVal Double deriving (Show, Eq)
-data Property = Positive | Negative | NonZero | Real deriving (Show, Eq) -- TODO: incorporate properties
+data Consts   = NotConst | ParamIx Int | ConstVal Double deriving (Show, Eq, Generic)
+data Property = Positive | Negative | NonZero | Real deriving (Show, Eq, Generic) -- TODO: incorporate properties
 
 data EClassData = EData { _cost    :: Cost
                         , _best    :: ENode
@@ -192,7 +198,56 @@ data EClassData = EData { _cost    :: Cost
                         , _size    :: Int
                         -- , _properties :: Property
                         -- TODO: include evaluation of expression from this e-class
-                        } deriving (Show)
+                        } deriving (Show, Generic)
+
+-- * Serialization
+instance Generic (EClassId, ENode)
+
+instance Binary (SRTree EClassId) where
+  put (Var ix)     = put (0 :: Word8) >> put ix
+  put (Param ix)   = put (1 :: Word8) >> put ix
+  put (Const x)    = put (2 :: Word8) >> put x
+  put (Uni f t)    = put (3 :: Word8) >> put (fromEnum f) >> put t
+  put (Bin op l r) = put (4 :: Word8) >> put (fromEnum op) >> put l >> put r
+
+  get = do t <- get :: Get Word8
+           case t of
+                0 -> Var   <$> get
+                1 -> Param <$> get
+                2 -> Const <$> get
+                3 -> Uni   <$> (toEnum <$> get) <*> get
+                4 -> Bin   <$> (toEnum <$> get) <*> get <*> get
+
+instance Binary (SRTree ()) where
+  put (Var ix)     = put (0 :: Word8) >> put ix
+  put (Param ix)   = put (1 :: Word8) >> put ix
+  put (Const x)    = put (2 :: Word8) >> put x
+  put (Uni f t)    = put (3 :: Word8) >> put (fromEnum f)
+  put (Bin op l r) = put (4 :: Word8) >> put (fromEnum op)
+
+  get = do t <- get :: Get Word8
+           case t of
+                0 -> Var   <$> get
+                1 -> Param <$> get
+                2 -> Const <$> get
+                3 -> Uni   <$> (toEnum <$> get) <*> pure ()
+                4 -> Bin   <$> (toEnum <$> get) <*> pure () <*> pure ()
+
+instance (Binary a, Hashable a) => Binary (HashSet a) where
+  put hs = put (Set.toList hs)
+  get    = Set.fromList <$> get
+
+instance Binary PVector where
+  put xs = put (MA.toList xs)
+  get    = MA.fromList compMode <$> get
+
+instance Binary IntTrie
+instance Binary EClass
+instance Binary Consts
+instance Binary Property
+instance Binary EClassData
+instance Binary EGraphDB
+instance Binary EGraph
 
 instance Eq EClassData where
   EData c1 b1 cs1 ft1 _ s1 == EData c2 b2 cs2 ft2 _ s2 = c1==c2 && b1==b2 && cs1==cs2 && ft1==ft2 && s1==s2
@@ -204,7 +259,7 @@ type DB = Map (SRTree ()) IntTrie
 -- The IntTrie is composed of the set of available keys (for convenience)
 -- and an IntMap that maps one e-class id to the first child IntTrie,
 -- the first child IntTrie will point to the next child and so on
-data IntTrie = IntTrie { _keys :: HashSet EClassId, _trie :: IntMap IntTrie } -- deriving Show
+data IntTrie = IntTrie { _keys :: HashSet EClassId, _trie :: IntMap IntTrie } deriving (Generic)
 
 -- Shows the IntTrie as {keys} -> {show IntTries}
 instance Show IntTrie where

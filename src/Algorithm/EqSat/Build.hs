@@ -35,7 +35,7 @@ import Algorithm.EqSat.Info
 import qualified Data.IntSet as IntSet
 import Data.Maybe
 import Data.Sequence (Seq(..), (><))
-
+import Data.List ( nub )
 import Debug.Trace (trace, traceShow)
 
 -- | adds a new or existing e-node (merging if necessary)
@@ -449,6 +449,20 @@ getAllExpressionsFrom eId' = do
         ts <- go ns
         pure (t:ts)
 {-# INLINE getAllExpressionsFrom #-}
+
+getAllChildEClasses :: Monad m => EClassId -> EGraphST m [EClassId]
+getAllChildEClasses eId' = do
+  eId <- canonical eId'
+  nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! eId) . _eClass)
+  nub <$> go eId
+
+  where
+    go :: Monad m => Int -> EGraphST m [Int]
+    go n = do nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! n) . _eClass)
+              let eids = concatMap childrenOf nodes
+              eids' <- mapM go eids
+              pure ((n : eids) <> concat eids')
+{-# INLINE getAllChildEClasses #-}
 
 -- | returns a random expression rooted at e-class `eId`
 getRndExpressionFrom :: EClassId -> EGraphST (State StdGen) (Fix SRTree)

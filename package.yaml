@@ -46,6 +46,7 @@ dependencies:
 - scheduler >= 2.0.0.1 && < 3
 - unliftio >= 0.2.10 && < 1
 - unliftio-core 
+- binary >= 0.8.9.1 && < 0.9
 
 library:
   source-dirs: src
@@ -151,6 +152,8 @@ executables:
     dependencies:
     - srtree
     - optparse-applicative >= 0.17 && < 0.19
+    - repline >= 0.4.2.0 && < 0.5
+    - normaldistribution >= 1.1.0.3 && < 1.2
 
 tests:
   srtree-test:

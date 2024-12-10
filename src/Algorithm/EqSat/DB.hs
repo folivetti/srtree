@@ -31,6 +31,7 @@ import Data.SRTree
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as Set
 import Data.String (IsString (..))
+import Data.SRTree.Recursion (cata)
 
 import Debug.Trace
 
@@ -47,6 +48,14 @@ instance IsString Pattern where
   fromString [c] | n >= 65 && n <= 122 = VarPat c where n = fromEnum c
   fromString s      = error $ "invalid string in VarPat: " <> s
 
+tree2pat :: Fix SRTree -> Pattern
+tree2pat = cata alg
+  where
+    alg (Param ix) = if ix >= 100 then VarPat (toEnum $ ix - 100 + 65) else Fixed $ Param ix
+    alg (Var ix) = Fixed $ Var ix
+    alg (Const x) = Fixed $ Const x
+    alg (Bin op l r) = Fixed $ Bin op l r
+    alg (Uni f t) = Fixed $ Uni f t
 -- A rule is either a directional rule where pat1 can be replaced by pat2, a bidirectional rule 
 -- where pat1 can be replaced or replace pat2, or a pattern with a conditional function 
 -- describing when to apply the rule 

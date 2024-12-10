@@ -28,7 +28,8 @@ import System.Random
 import Data.List ( intercalate )
 import qualified Data.IntSet as IntSet
 import Algorithm.EqSat (runEqSat)
-
+import Data.Binary ( encode, decode )
+import qualified Data.ByteString.Lazy as BS
 import Debug.Trace
 
 import Util
@@ -38,13 +39,16 @@ data Alg = OnlyRandom | BestFirst deriving (Show, Read, Eq)
 egraphSearch :: DataSet -> DataSet -> DataSet -> Args -> StateT EGraph (StateT StdGen IO) ()
 -- terms nEvals maxSize printPareto printTrace slowIter slowRep =
 egraphSearch dataTrain dataVal dataTest args = do
-  ecFst <- insertRndExpr (_maxSize args) rndTerm rndNonTerm2
-  --ecFst <- insertBestExpr -- use only to debug
-  updateIfNothing fitFun ecFst
-  insertTerms
-  evaluateUnevaluated fitFun
-  runEqSat myCost rewritesParams 1
-  cleanDB
+  if null (_loadFrom args)
+    then do ecFst <- insertRndExpr (_maxSize args) rndTerm rndNonTerm2
+            --ecFst <- insertBestExpr -- use only to debug
+            updateIfNothing fitFun ecFst
+            insertTerms
+            evaluateUnevaluated fitFun
+            runEqSat myCost rewritesParams 1
+            cleanDB
+            get >>= (io . BS.writeFile (_dumpTo args) . encode )
+    else (io $ BS.readFile (_loadFrom args)) >>= \eg -> put (decode eg)
   nCls <- gets (IM.size . _eClass)
   nUnev <- gets (IntSet.size . _unevaluated . _eDB)
   let nEvs = nCls - nUnev
@@ -105,7 +109,7 @@ egraphSearch dataTrain dataVal dataTest args = do
   if (_printPareto args)
     then paretoFront (_maxSize args) printExpr
     else printBest printExpr
-
+  when ((not.null) (_dumpTo args)) $ get >>= (io . BS.writeFile (_dumpTo args) . encode )
   where
     fitFun = fitnessFunRep (_optRepeat args) (_optIter args) (_distribution args) dataTrain dataVal
 
@@ -205,7 +209,9 @@ data Args = Args
     _distribution :: Distribution,
     _optIter      :: Int,
     _optRepeat    :: Int,
-    _nonterminals :: String
+    _nonterminals :: String,
+    _dumpTo       :: String,
+    _loadFrom     :: String
   }
   deriving (Show)
 
@@ -271,6 +277,18 @@ opt = Args
        <> value "Add,Sub,Mul,Div,PowerAbs,Recip"
        <> showDefault
        <> help "set of non-terminals to use in the search."
+       )
+  <*> strOption
+       ( long "dump-to"
+       <> value ""
+       <> showDefault
+       <> help "dump final e-graph to a file."
+       )
+  <*> strOption
+       ( long "load-from"
+       <> value ""
+       <> showDefault
+       <> help "load initial e-graph from a file."
        )
 
 main :: IO ()

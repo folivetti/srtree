@@ -1,0 +1,100 @@
+top-patterns 5 t0 + x0 * t100
+insert exp(x0) + t0
+subtrees 583
+subtrees 583
+report 583
+optimize 583 100
+optimize 583 100
+optimize 583 100
+report 583
+top 5
+insert logabs(x0)
+insert x0 ** 2 + log(x0)
+insert x0 ** 2
+insert (log t0)
+insert (log x0)
+insert log x0
+insert logabs x0
+insert LogAbs x0
+insert LogAbs x0
+insert logabs x0
+top-patterns 5 t101 |**| t102
+top-patterns 5 t101 ** t102
+top-patterns 5 t101 ** t102
+top-patterns 5 t101 |**| t102
+top-patterns 5 t101 ** t102
+top-patterns 5 t101 ^ t102
+top-patterns 5 t101 * t102
+top-patterns 5 t101 + t102
+top-patterns 5 t101 + t102
+top-patterns 5 t101 + t102
+top-patterns 5 t101 * t102
+top-patterns 5 t101 * t102
+top-patterns 5 t100 + t101
+topPat 5 t100 + t101
+topPat 5 t100 + t101
+insert x0^2 + t0 * x0^3
+insert x0^2 + t0
+insert x0 + t0
+insert (x0 + t0)
+insert x0 + t0
+insert "x0" + "t0"
+report 207
+top 3
+optimize 271
+optimize 271
+optimize 271
+optimize 271
+optimize 271
+subtrees 368
+top 10 10
+subtrees 689
+top 10
+optimize 0
+optimize 0
+optimize 0
+optimize 0
+subtrees 583
+top 5
+top 5
+subtrees 583
+top 5
+top 5 4
+top 5
+top 5
+top 3
+top
+top-patterns 3 2
+top-patterns 
+help top-patterns
+help subtrees
+help optimize
+help report
+help top
+help help
+help
+:exit
+:exit
+:help as
+:help ola
+:puts as
+:fasd fa
+:puts ola
+:help hello haskell
+exit
+:exit
+:help Hello Haskell
+:help a
+holp as
+holp
+help oi tcha
+:puts "oi tchau"
+puts "oi tchau"
+puts oi tchau
+:puts oi tchau
+puts ["oi", "tchau"]
+puts 
+exit
+help 3
+puts 3
+puts 

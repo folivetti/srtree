@@ -74,6 +74,25 @@ getTopECLassThat n p = do
                                        else if p ec
                                               then go (m-1) (x:bests) t
                                               else go m bests t
+
+getTopECLassIn :: Monad m => Int -> [EClassId] -> EGraphST m [EClassId]
+getTopECLassIn n ecs = do
+  gets (_fitRangeDB . _eDB)
+    >>= go n []
+  where
+    go :: Monad m => Int -> [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
+    go 0 bests rt = pure bests
+    go m bests rt = case rt of
+                       Empty   -> pure bests
+                       t :|> y -> do let x = snd y
+                                     ecId <- canonical x
+                                     ec <- gets ((IntMap.! ecId) . _eClass)
+                                     if (isInfinite . fromJust . _fitness . _info $ ec)
+                                       then pure bests
+                                       else if ecId `elem` ecs
+                                              then go (m-1) (x:bests) t
+                                              else go m bests t
+
 getTopECLassWithSize :: Monad m => Int -> Int -> EGraphST m [EClassId]
 getTopECLassWithSize sz n = do
    gets (go n [] . (IntMap.!? sz) . _sizeFitDB . _eDB)
