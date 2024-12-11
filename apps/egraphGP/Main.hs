@@ -66,14 +66,24 @@ egraphGP dataTrain dataVal dataTest args = do
   cleanDB
   pop' <- Prelude.mapM canonical pop
   when (_trace args) $ printPop pop'
+  let m = (_nPop args) `div` (_maxSize args)
 
   finalPop <- iterateFor (_gens args) pop' $ \ps' -> do
     ps <- Prelude.mapM canonical ps'
-    parents <- replicateM (_nPop args) (tournament ps)
+    parents <- replicateM (_nPop args - if (_moo args) then (_maxSize args) else 0) (tournament ps)
     newPop' <- Prelude.mapM (combine >=> canonical) parents
     runEqSat myCost rewritesParams 1
     cleanDB
-    newPop <- Prelude.mapM canonical newPop'
+
+    newPop <- if (_moo args)
+                then do
+                        pareto <- concat <$> (forM [1 .. _maxSize args] $ \n -> getTopECLassWithSize n 1 >>= traverse canonical)
+                        pure (pareto <> newPop')
+                        --let nPareto = length pareto
+                        --if nPareto < (_nPop args)
+                        --  then (pareto <>) <$> (getTopECLassThat (_nPop args - nPareto) (const True) >>= traverse canonical)
+                        --  else pure (Prelude.take (_nPop args) pareto)
+                else Prelude.mapM canonical newPop'
     when (_trace args) $ printPop newPop
     pure newPop
 
@@ -246,8 +256,14 @@ egraphGP dataTrain dataVal dataTest args = do
 
     printExpr :: Int -> EClassId -> RndEGraph ()
     printExpr ix ec = do
-        theta <- gets (fromJust . _theta . _info . (IM.! ec) . _eClass)
+        theta' <- gets (fromJust . _theta . _info . (IM.! ec) . _eClass)
         bestExpr <- getBestExpr ec
+        let nParams = countParams bestExpr
+            (MA.Sz nTheta)  = MA.size theta'
+        (_, theta) <- if (nParams /= nTheta)
+                        then fitFun bestExpr
+                        else pure (1.0, theta')
+
         let (x, y, mYErr) = dataTrain
             (x_val, y_val, mYErr_val) = dataVal
             (x_te, y_te, mYErr_te) = dataTest
@@ -305,7 +321,8 @@ data Args = Args
     _pm           :: Double,
     _nonterminals :: String,
     _dumpTo       :: String,
-    _loadFrom     :: String
+    _loadFrom     :: String,
+    _moo          :: Bool
   }
   deriving (Show)
 
@@ -398,6 +415,10 @@ opt = Args
        <> value ""
        <> showDefault
        <> help "load initial e-graph from a file."
+       )
+  <*> switch
+       ( long "moo"
+       <> help "replace the current population with the pareto front instead of replacing it with the generated children."
        )
 
 main :: IO ()

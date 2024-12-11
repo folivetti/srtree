@@ -45,13 +45,19 @@ joinData :: EClassData -> EClassData -> EClassData
 joinData (EData c1 b1 cn1 fit1 p1 sz1) (EData c2 b2 cn2 fit2 p2 sz2) =
   EData (min c1 c2) b (combineConsts cn1 cn2) (minMaybe fit1 fit2) (bestParam p1 p2 fit1 fit2) (min sz1 sz2)
   where
+    maxIsFst = case (fit1, fit2) of
+                 (Nothing, Nothing) -> True
+                 (Nothing,  Just f) -> False
+                 (Just f , Nothing) -> True
+                 (Just f1, Just f2) -> f1 >= f2
+
     minMaybe Nothing x = x
     minMaybe x Nothing = x
-    minMaybe x y       = min x y
+    minMaybe x y       = max x y
 
     bestParam Nothing x _ _ = x
     bestParam x Nothing _ _ = x
-    bestParam x y (Just f1) (Just f2) = if f1 < f2 then x else y
+    bestParam x y (Just f1) (Just f2) = if f1 >= f2 then x else y
 
     b = if c1 <= c2 then b1 else b2
     combineConsts (ConstVal x) (ConstVal y)

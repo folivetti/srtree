@@ -166,8 +166,14 @@ egraphSearch dataTrain dataVal dataTest args = do
 
     printExpr :: Int -> EClassId -> RndEGraph ()
     printExpr ix ec = do 
-        theta <- gets (fromJust . _theta . _info . (IM.! ec) . _eClass)
+        theta' <- gets (fromJust . _theta . _info . (IM.! ec) . _eClass)
         bestExpr <- getBestExpr ec
+        let nParams = countParams bestExpr
+            (MA.Sz nTheta)  = MA.size theta'
+        (_, theta) <- if (nParams /= nTheta)
+                        then fitFun bestExpr
+                        else pure (1.0, theta')
+
         let (x, y, mYErr) = dataTrain
             (x_val, y_val, mYErr_val) = dataVal
             (x_te, y_te, mYErr_te) = dataTest

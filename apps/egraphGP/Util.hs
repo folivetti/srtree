@@ -204,7 +204,7 @@ getBestExprWithSize n =
             then do
               bestFit <- getFitness $ head ec
               bestP   <- gets (_theta . _info . (IM.! (head ec)) . _eClass)
-              (:[]) . (,bestP) . (,bestFit) . (,ec) <$> getBestExpr (head ec)
+              pure [(head ec, bestFit)]
             else pure []
 
 insertRndExpr maxSize rndTerm rndNonTerm =
@@ -227,10 +227,10 @@ paretoFront maxSize printExprFun = go 1 0 (-(1.0/0.0))
         | otherwise   = do
             ecList <- getBestExprWithSize n
             if not (null ecList)
-                then do let (((_, ec), mf), _) = head ecList
+                then do let (ec, mf) = head ecList
                             improved = fromJust mf > f
-                        ec' <- traverse canonical ec
-                        when improved $ printExprFun ix (head ec')
+                        ec' <- canonical ec
+                        when improved $ printExprFun ix ec'
                         go (n+1) (ix + if improved then 1 else 0) (max f (fromJust mf))
                 else go (n+1) ix f
 
