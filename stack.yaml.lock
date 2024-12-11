@@ -18,9 +18,16 @@ packages:
       size: 638
   original:
     hackage: ieee-0.7@sha256:4f444419a7861f04fb64502d14688c80e8293a86a608f6d14c3010c9bd96b6d1,1327
+- completed:
+    hackage: table-layout-1.0.0.1@sha256:deb84b273141fccd6313be13d76b08cdf32a0b9af969c6432580fec75c28193e,7889
+    pantry-tree:
+      sha256: 8378ad591c1bf566e9444c52ae0e10f11faea7366565b6997d57c43044d4f89e
+      size: 2547
+  original:
+    hackage: table-layout-1.0.0.1
 snapshots:
 - completed:
-    sha256: 098936027eaa1ef14e2b8eb39d9933a973894bb70a68684a1bbf00730249879b
-    size: 720001
-    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/22/33.yaml
-  original: lts-22.33
+    sha256: 9444fadfa30b67a93080254d53872478c087592ad64443e47c546cdcd13149ae
+    size: 678857
+    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/23/0.yaml
+  original: lts-23.0

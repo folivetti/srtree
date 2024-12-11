@@ -215,7 +215,8 @@ executable ieeexplore
       apps/ieeexplore
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2 -optc-O3
   build-depends:
-      attoparsec >=0.14.4 && <0.15
+      ansi-terminal >=1.1.2 && <1.2
+    , attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
     , base >=4.16 && <5
     , binary >=0.8.9.1 && <0.9
@@ -238,6 +239,7 @@ executable ieeexplore
     , split >=0.2.5 && <0.3
     , srtree
     , statistics >=0.16.2.1 && <0.17
+    , table-layout >=1.0.0.1 && <1.1
     , transformers >=0.6.1.0 && <0.7
     , unliftio >=0.2.10 && <1
     , unliftio-core

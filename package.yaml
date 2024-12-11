@@ -154,6 +154,8 @@ executables:
     - optparse-applicative >= 0.17 && < 0.19
     - repline >= 0.4.2.0 && < 0.5
     - normaldistribution >= 1.1.0.3 && < 1.2
+    - ansi-terminal >= 1.1.2 && < 1.2
+    - table-layout >= 1.0.0.1 && < 1.1
 
 tests:
   srtree-test:

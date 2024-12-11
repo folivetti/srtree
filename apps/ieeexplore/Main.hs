@@ -28,7 +28,7 @@ import Data.SRTree.Datasets
 import Data.SRTree.Eval
 import Data.SRTree.Random (randomTree)
 import Data.SRTree.Print hiding ( printExpr )
-import Options.Applicative as Opt hiding (Const)
+import Options.Applicative as Opt hiding (Const, columns)
 import System.Random
 import qualified Data.Set as Set
 import Data.List ( sort )
@@ -41,13 +41,13 @@ import Algorithm.EqSat (runEqSat)
 
 import System.Console.Repline hiding (Repl)
 import Util
-import Data.List ( isPrefixOf )
+import Data.List ( isPrefixOf, intercalate, nub )
 import Text.Read
-import Control.Monad ( forM_ )
+import Control.Monad ( forM )
 import Data.Binary ( encode, decode )
 import qualified Data.ByteString.Lazy as BS
 import Data.Maybe ( fromMaybe )
-import Text.ParseSR (SRAlgs(..), parseSR, parseSR')
+import Text.ParseSR (SRAlgs(..), parseSR, parsePat)
 import qualified Data.ByteString.Char8 as B
 
 data Args = Args
@@ -89,23 +89,17 @@ opt = Args
        <> help "load initial e-graph from a file."
        )
 
-printsimpleExpr eid = do t   <- egraph $ getBestExpr eid
-                         fit <- egraph $ getFitness eid
-                         sz  <- egraph $ getSize eid
-                         p   <- egraph $ getTheta eid
-                         io.putStrLn $ show eid <> "\t" <> showExpr t <> "\t\t" <> show fit <> "\t\t" <> show p <> "\t\t" <> show sz
+
 
 top :: [String] -> Repl ()
 top []    = helpCmd ["top"]
 top [arg] = case readMaybe @Int arg of
               Nothing -> io.putStrLn $ "The first argument should be an integer."
               Just n  -> do ids <- egraph $ getTopECLassThat n (const True)
-                            io.putStrLn $ "Id\tExpr\t\tFitness\t\tParam\t\tSize"
-                            forM_ ids printsimpleExpr
+                            printSimpleMultiExprs ids
 top (arg1:arg2:_) = case (readMaybe @Int arg1, readMaybe @Int arg2) of
                       (Just n, Just sz) -> do ids <- egraph $ getTopECLassWithSize sz n
-                                              io.putStrLn $ "Id\tExpr\t\tFitness\t\tParam\t\tSize"
-                                              forM_ ids printsimpleExpr
+                                              printSimpleMultiExprs ids
                       (Just n, Nothing) -> top [arg1]
                       _                 -> helpCmd ["top"]
 
@@ -127,8 +121,7 @@ optimize dist trainData testData args =
                   t <- egraph $ getBestExpr n
                   (f, theta) <- egraph $ fitnessFunRep nIters dist trainData trainData t
                   egraph $ insertFitness n f theta
-                  io.putStrLn $ "Id\tExpr\t\tFitness\t\tParam\t\tSize"
-                  printsimpleExpr n
+                  printSimpleMultiExprs [n]
 
 subtrees :: [String] -> Repl ()
 subtrees [] = helpCmd ["subtrees"]
@@ -136,9 +129,8 @@ subtrees (arg:_) = case readMaybe @Int arg of
                      Nothing -> io.putStrLn $ "The argument must be an integer."
                      Just n  -> do isValid <- egraph $ gets ((IntMap.member n) . _eClass)
                                    if isValid
-                                      then do ids <- egraph $ getAllChildEClasses n -- TODO: is the id valid?
-                                              io.putStrLn $ "Id\tExpr\t\tFitness\t\tParam\t\tSize"
-                                              forM_ ids printsimpleExpr
+                                      then do ids <- egraph $ getAllChildEClasses n
+                                              printSimpleMultiExprs ids
                                       else io.putStrLn $ "Invalid id."
 
 insert :: Distribution -> DataSet -> DataSet -> [String] -> Repl ()
@@ -155,16 +147,14 @@ topPat []  = helpCmd ["topPat"]
 topPat [x] = helpCmd ["topPat"]
 topPat (sn:spat) = case readMaybe @Int sn of
                        Nothing -> io.putStrLn $ "The first argument must be an integer."
-                       Just n  -> do let etree = parseSR' TIR "" False $ B.pack (unwords spat)
+                       Just n  -> do let etree = parsePat $ B.pack (unwords spat)
                                      case etree of
-                                          Left _ -> io.putStrLn $ "no parse for " <> unwords spat
-                                          Right tree -> do let pat = tree2pat tree
-                                                           mm <- egraph $ match pat
+                                          Left _     -> io.putStrLn $ "no parse for " <> unwords spat
+                                          Right pat  -> do mm <- egraph $ match pat
                                                            ecs' <- egraph $ (Prelude.map fromLeft . Prelude.filter isLeft . Prelude.map snd) <$> match pat
                                                            ecs <- egraph $ Prelude.mapM canonical ecs'
                                                            ids <- egraph $ getTopECLassIn n ecs
-                                                           io.putStrLn $ "Id\tExpr\t\tFitness\t\tParam\t\tSize"
-                                                           forM_ ids printsimpleExpr
+                                                           printSimpleMultiExprs (nub ids)
   where
     isLeft (Left _)   = True
     isLeft _          = False
@@ -187,13 +177,13 @@ hlpMap = Map.fromList $ Prelude.zip commands
 cmd :: Map String ([String] -> Repl ()) -> String -> Repl ()
 cmd cmdMap input = do let (cmd':args) = words input
                       case cmdMap Map.!? cmd' of
-                        Nothing -> io.putStrLn $ "Invalid command."
+                        Nothing -> io.putStrLn $ "Command not found!!!"
                         Just f  -> f args
 
 helpCmd :: [String] -> Repl ()
 helpCmd []    = io . putStrLn $ "Usage: help <command-name>."
 helpCmd (x:_) = case hlpMap Map.!? x of
-                  Nothing -> io.putStrLn $ "Inexistent command."
+                  Nothing -> io.putStrLn $ "Command not found!!!"
                   Just hlp -> io.putStrLn $ hlp
 -- Completion
 comp :: (Monad m, MonadState EGraph m) => WordCompleter m

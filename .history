@@ -1,3 +1,48 @@
+top-patterns 10 v0 * x0
+help top-patterns 
+optimize 711 1000
+insert t0 + x0^2
+optimize 686 100
+subtrees 689
+help subtrees
+help subrees
+report 583
+help report
+top 5
+help top
+help
+report 583
+top 5
+help top
+help
+report 651
+report 651
+report 651
+top-patterns 10 v0 * x0
+report 651
+top-patterns 10 v0 * x0
+top-patterns 1 v0 * x0
+top-patterns 2 v0 * x0
+top-patterns v0 * x0
+insert t0 + x0^2
+subtrees 651
+optimize 651
+report 651
+top 30
+top 30
+top 30
+top 30
+top 3
+top 3
+top 30
+top 30
+top 3
+top-patterns 5 t0 + x0 * v0
+top-patterns 5 t0 + x0 * v0
+top-patterns 5 t0 + x0 * v0
+top-patterns 5 t0 + x0 * v0
+top-patterns 5 t0 + x0 * v0
+top-patterns 5 t0 + x0 * t100
 top-patterns 5 t0 + x0 * t100
 insert exp(x0) + t0
 subtrees 583
@@ -53,48 +98,3 @@ top 10
 optimize 0
 optimize 0
 optimize 0
-optimize 0
-subtrees 583
-top 5
-top 5
-subtrees 583
-top 5
-top 5 4
-top 5
-top 5
-top 3
-top
-top-patterns 3 2
-top-patterns 
-help top-patterns
-help subtrees
-help optimize
-help report
-help top
-help help
-help
-:exit
-:exit
-:help as
-:help ola
-:puts as
-:fasd fa
-:puts ola
-:help hello haskell
-exit
-:exit
-:help Hello Haskell
-:help a
-holp as
-holp
-help oi tcha
-:puts "oi tchau"
-puts "oi tchau"
-puts oi tchau
-:puts oi tchau
-puts ["oi", "tchau"]
-puts 
-exit
-help 3
-puts 3
-puts 

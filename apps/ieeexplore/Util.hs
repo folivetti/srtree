@@ -33,6 +33,12 @@ import qualified Data.IntSet as IntSet
 import Data.SRTree.Datasets
 import Algorithm.EqSat.Queries
 import System.Console.Repline hiding (Repl)
+import Text.Printf
+import Text.Layout.Table hiding (top)
+import Text.Layout.Table.Cell.Formatted
+import Text.Layout.Table.Cell
+import System.Console.ANSI.Codes
+
 
 type RndEGraph = StateT EGraph IO
 type DataSet = (SRMatrix, PVector, Maybe PVector)
@@ -132,15 +138,44 @@ printExpr dataTrain dataTest distribution ec = do
             nll_te     = nll distribution mYErr_te x_te y_te best' theta
             mdl_train  = mdl distribution mYErr x y theta best'
             mdl_te     = mdl distribution mYErr_te x_te y_te theta best'
-            thetaStr   = intercalate ";" $ Prelude.map show (MA.toList theta)
-        lift . putStrLn $ "Evaluation metrics for expression (" <> show ec <> "): " <> showExpr bestExpr
-        lift . putStrLn $ "Metric\tTraining\t\tTest"
-        lift . putStrLn $ "MSE\t" <> show mse_train <> "\t" <> show mse_te
-        lift . putStrLn $ "R^2\t" <> show r2_train <> "\t" <> show r2_te
-        lift . putStrLn $ "NLL\t" <> show nll_train <> "\t" <> show nll_te
-        lift . putStrLn $ "MDL\t" <> show mdl_train <> "\t" <> show mdl_te
+            thetaStr   = intercalate ", " $ Prelude.map show (MA.toList theta)
+        lift . putStr $ "Evaluation metrics for expression (" <> (show ec) <> "): "
+        lift . putStr $ setSGRCode [SetConsoleIntensity BoldIntensity]
+        lift . putStrLn $ showExpr bestExpr
+        lift . putStr $ setSGRCode [Reset]
         lift . putStrLn $ "# of nodes\t" <> show (countNodes $ convertProtectedOps expr)
-        lift . putStrLn $ "params:\t" <> thetaStr
+        lift . putStrLn $ "params:\t[" <> thetaStr <> "]"
+
+        let rows = [ rowG ["MSE", printf "%.4f" mse_train, printf "%.4f" mse_te]
+                   , rowG ["R^2", printf "%.4f" r2_train, printf "%.4f" r2_te]
+                   , rowG ["nll", printf "%.4f" nll_train, printf "%.4f" nll_te]
+                   , rowG ["MDL", printf "%.4f" mdl_train, printf "%.4f" mdl_te]
+                   ]
+            columnsReport = [def, numCol, numCol]
+            headerReport = titlesH $ Prelude.map bold ["Metric", "Training", "Test"]
+        lift . putStrLn $ tableString (columnHeaderTableS columnsReport unicodeS headerReport rows)
+
+printsimpleExpr eid = do t   <- egraph $ getBestExpr eid
+                         fit <- egraph $ getFitness eid
+                         sz  <- egraph $ getSize eid
+                         p   <- egraph $ getTheta eid
+                         let fit' = case fit of
+                                      Nothing -> "--"
+                                      Just f  -> printf "%.4f" f
+                             p' = case p of
+                                    Nothing -> "--"
+                                    Just ps -> "[" <> intercalate ", " (Prelude.map (printf "%.4f") (MA.toList ps)) <> "]"
+
+                         pure $ colsAllG center [[show eid], justifyText 50 $ showExpr t, [fit'], justifyText 50 p', [show sz]]
+
+printSimpleMultiExprs eids = do rows <- forM eids printsimpleExpr
+                                io.putStrLn $ tableString (columnHeaderTableS columns unicodeS headerSimple rows)
+
+bold s = formatted (setSGRCode [SetConsoleIntensity BoldIntensity]) (plain s) (setSGRCode [Reset])
+
+headerSimple :: HeaderSpec LineStyle (Formatted String)
+headerSimple = titlesH $ Prelude.map (bold) ["Id", "Expression", "Fitness", "Parameters", "Size"]
+columns = [numCol, fixedLeftCol 50, numCol, fixedLeftCol 50, numCol]
 
 -- RndEGraph utils
 -- fitFun fitnessFunRep rep iter distribution x y mYErr x_val y_val mYErr_val

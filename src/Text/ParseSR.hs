@@ -11,7 +11,7 @@
 -- Functions to parse a string representing an expression
 --
 -----------------------------------------------------------------------------
-module Text.ParseSR ( parseSR, parseSR', showOutput, SRAlgs(..), Output(..) )
+module Text.ParseSR ( parseSR, parsePat, showOutput, SRAlgs(..), Output(..) )
     where
 
 import Control.Applicative ((<|>))
@@ -21,6 +21,7 @@ import qualified Data.ByteString.Char8 as B
 import Data.Char (toLower)
 import Data.List (sortOn)
 import Data.SRTree
+import Algorithm.EqSat.DB
 import qualified Data.SRTree.Print as P
 import Debug.Trace (trace)
 
@@ -30,6 +31,7 @@ import Debug.Trace (trace)
 -- numerical values represented as `Double`. The numerical values type
 -- can be changed with `fmap`.
 type ParseTree = Parser (Fix SRTree)
+type ParsePat  = Parser Pattern
 
 -- * Data types and caller functions
 
@@ -60,15 +62,8 @@ parseSR SBP    header reparam = eitherResult . (`feed` "") . parse (parseGOMEA T
 parseSR EPLEX  header reparam = eitherResult . (`feed` "") . parse (parseGOMEA True reparam $ splitHeader header) . putEOL . B.strip
 parseSR PYSR   header reparam = eitherResult . (`feed` "") . parse (parsePySR True reparam $ splitHeader header) . putEOL .  B.strip
 
-parseSR' :: SRAlgs -> B.ByteString -> Bool -> B.ByteString -> Either String (Fix SRTree)
-parseSR' HL     header reparam = eitherResult . (`feed` "") . parse (parseHL False reparam $ splitHeader header) . putEOL . B.strip
-parseSR' BINGO  header reparam = eitherResult . (`feed` "") . parse (parseBingo False reparam $ splitHeader header) . putEOL . B.strip
-parseSR' TIR    header reparam = eitherResult . (`feed` "") . parse (parseTIR False reparam $ splitHeader header) . putEOL . B.strip
-parseSR' OPERON header reparam = eitherResult . (`feed` "") . parse (parseOperon False reparam $ splitHeader header) . putEOL . B.strip
-parseSR' GOMEA  header reparam = eitherResult . (`feed` "") . parse (parseGOMEA False reparam $ splitHeader header) . putEOL . B.strip
-parseSR' SBP    header reparam = eitherResult . (`feed` "") . parse (parseGOMEA False reparam $ splitHeader header) . putEOL . B.strip
-parseSR' EPLEX  header reparam = eitherResult . (`feed` "") . parse (parseGOMEA False reparam $ splitHeader header) . putEOL . B.strip
-parseSR' PYSR   header reparam = eitherResult . (`feed` "") . parse (parsePySR False reparam $ splitHeader header) . putEOL .  B.strip
+parsePat :: B.ByteString -> Either String Pattern
+parsePat = eitherResult . (`feed` "") . parse parsePatExpr . putEOL . B.strip
 
 eitherResult' :: Show r => Result r -> Either String r
 eitherResult' res = trace (show res) $ eitherResult res
@@ -327,3 +322,60 @@ parsePySR b = parseExpr b (prefixOps : binOps) binFuns var
              ix <- decimal
              pure $ Fix $ Var ix
           <?> "var"
+
+-- parse a pattern expression
+parsePatExpr ::  ParsePat
+parsePatExpr = parsePattern (prefixOps : binOps) binFuns var
+  where
+    binFuns   = [ ]
+    prefixOps = map (uncurry prefix)
+                [   ("id", id), ("abs", abs)
+                  , ("sinh", sinh), ("cosh", cosh), ("tanh", tanh)
+                  , ("sin", sin), ("cos", cos), ("tan", tan)
+                  , ("asinh", asinh), ("acosh", acosh), ("atanh", atanh)
+                  , ("asin", asin), ("acos", acos), ("atan", atan)
+                  , ("sqrtabs", sqrtabs'), ("sqrt", sqrt), ("cbrt", cbrt'), ("square", (**2))
+                  , ("logabs", logabs'), ("log", log), ("exp", exp), ("cube", cube'), ("recip", recip)
+                  , ("Id", id), ("Abs", abs)
+                  , ("Sinh", sinh), ("Cosh", cosh), ("Tanh", tanh)
+                  , ("Sin", sin), ("Cos", cos), ("Tan", tan)
+                  , ("ASinh", asinh), ("ACosh", acosh), ("ATanh", atanh)
+                  , ("ASin", asin), ("ACos", acos), ("ATan", atan)
+                  , ("SqrtAbs", sqrtabs'), ("Sqrt", sqrt), ("Cbrt", cbrt'), ("Square", (**2))
+                  , ("LogAbs", logabs'), ("Log", log), ("Exp", exp), ("Recip", recip), ("Cube", cube')
+                ]
+    binOps = [[binary "^" (**) AssocLeft], [binary "**" (**) AssocLeft]
+            , [binary "*" (*) AssocLeft, binary "/" (/) AssocLeft]
+            , [binary "+" (+) AssocLeft, binary "-" (-) AssocLeft]
+            , [binary "|**|" powabs AssocLeft], [binary "aq" aq AssocLeft]
+            ]
+    powabs l r = Fixed $ Bin PowerAbs l r
+    aq l r = Fixed $ Bin AQ l r
+    logabs' t = Fixed $ Uni LogAbs t
+    sqrtabs' t = Fixed $ Uni SqrtAbs t
+    cbrt' t = Fixed $ Uni Cbrt t
+    cube' t = Fixed $ Uni Cube t
+
+    var = do char 'x'
+             ix <- decimal
+             pure $ Fixed $ Var ix
+          <|> do char 't'
+                 ix <- decimal
+                 pure $ Fixed $ Param ix
+          <|> do char 'v'
+                 ix <- decimal
+                 pure $ VarPat (toEnum $ ix+65)
+          <?> "var"
+
+parsePattern :: [[Operator B.ByteString Pattern]] -> [ParsePat -> ParsePat] -> ParsePat -> ParsePat
+parsePattern table binFuns var =
+    do e <- expr
+       many1' space
+       pure e
+  where
+    term  = parens expr <|> enclosedAbs expr <|> choice (map ($ expr) binFuns) <|> coef <|> var <?> "term"
+    expr  = buildExpressionParser table term
+    coef  = Fixed . Const <$> signed double <?> "const"
+
+    getParserVar k v = (string k <|> enveloped k) >> pure (Fix $ Var v)
+    enveloped s      = (char ' ' <|> char '(') >> string s >> (char ' ' <|> char ')') >> pure ""
