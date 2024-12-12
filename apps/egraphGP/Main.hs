@@ -72,12 +72,14 @@ egraphGP dataTrain dataVal dataTest args = do
     ps <- Prelude.mapM canonical ps'
     parents <- replicateM (_nPop args - if (_moo args) then (_maxSize args) else 0) (tournament ps)
     newPop' <- Prelude.mapM combine parents
+    runEqSat myCost rewritesSimple 1 --applySingleMergeOnlyEqSat myCost rewritesSimple
+    cleanDB
 
 
     newPop <- if (_moo args)
                 then do
-                        pareto <- concat <$> (forM [1 .. _maxSize args] $ \n -> getTopECLassWithSize n 1 >>= traverse canonical)
-                        pure (pareto <> newPop')
+                        pareto <- concat <$> (forM [1 .. _maxSize args] $ \n -> getTopECLassWithSize n 1)
+                        Prelude.mapM canonical (pareto <> newPop')
                         --let nPareto = length pareto
                         --if nPareto < (_nPop args)
                         --  then (pareto <>) <$> (getTopECLassThat (_nPop args - nPareto) (const True) >>= traverse canonical)
@@ -118,14 +120,13 @@ egraphGP dataTrain dataVal dataTest args = do
                        pure (p1, p2)
 
     applyTournament :: [EClassId] -> RndEGraph EClassId
-    applyTournament xs = do challengers <- replicateM (_nTournament args) (rnd $ randomFrom xs)
+    applyTournament xs = do challengers <- replicateM (_nTournament args) (rnd $ randomFrom xs) >>= traverse canonical
                             fits <- Prelude.map fromJust <$> Prelude.mapM getFitness challengers
                             pure . snd . maximumBy (compare `on` fst) $ Prelude.zip fits challengers
 
     combine (p1, p2) = do child <- (crossover p1 p2 >>= mutate) >>= canonical
                           updateIfNothing fitFun child
-                          applySingleMergeOnlyEqSat myCost rewritesSimple
-                          --cleanDB
+
                           canonical child
 
     crossover p1 p2 = do sz <- getSize p1
@@ -142,6 +143,7 @@ egraphGP dataTrain dataVal dataTest args = do
       p <- canonical p'
       candidates' <- filterM (\c -> (<maxSize-sz) <$> getSize c) cands
       candidates  <- filterM (\c -> doesNotExistGens mGrandParents (parent c)) candidates'
+                       >>= traverse canonical
       if null candidates
          then getBestExpr p
          else do subtree <- rnd (randomFrom candidates)
@@ -153,8 +155,12 @@ egraphGP dataTrain dataVal dataTest args = do
         Param ix -> pure . Fix $ Param ix
         Const x  -> pure . Fix $ Const x
         Var   ix -> pure . Fix $ Var ix
-        Uni f t  -> (Fix . Uni f) <$> getSubtree (pos-1) (sz+1) (Just $ Uni f) (parent:mGrandParents) cands t
-        Bin op l r -> do szLft <- getSize l
+        Uni f t' -> do t <- canonical t'
+                       (Fix . Uni f) <$> getSubtree (pos-1) (sz+1) (Just $ Uni f) (parent:mGrandParents) cands t
+        Bin op l'' r'' ->
+                      do l <- canonical l''
+                         r <- canonical r''
+                         szLft <- getSize l
                          szRgt <- getSize r
                          if szLft < pos
                            then do l' <- getBestExpr l
@@ -218,16 +224,18 @@ egraphGP dataTrain dataVal dataTest args = do
           Param ix -> pure . Fix $ Param ix
           Const x  -> pure . Fix $ Const x
           Var   ix -> pure . Fix $ Var ix
-          Uni f t  -> (Fix . Uni f) <$> mutAt (pos-1) (sizeLeft-1) (Just $ Uni f) t
-          Bin op l r -> do szLft <- getSize l
-                           szRgt <- getSize r
-                           if szLft < pos
-                              then do l' <- getBestExpr l
-                                      r' <- mutAt (pos-szLft-1) (sizeLeft-szLft-1) (Just $ Bin op l) r
-                                      pure . Fix $ Bin op l' r'
-                              else do l' <- mutAt (pos-1) (sizeLeft-szRgt-1) (Just (\t -> Bin op t r)) l
-                                      r' <- getBestExpr r
-                                      pure . Fix $ Bin op l' r'
+          Uni f t'  -> canonical t' >>= \t -> (Fix . Uni f) <$> mutAt (pos-1) (sizeLeft-1) (Just $ Uni f) t
+          Bin op ln rn -> do l <- canonical ln
+                             r <- canonical rn
+                             szLft <- getSize l
+                             szRgt <- getSize r
+                             if szLft < pos
+                                then do l' <- getBestExpr l
+                                        r' <- mutAt (pos-szLft-1) (sizeLeft-szLft-1) (Just $ Bin op l) r
+                                        pure . Fix $ Bin op l' r'
+                                else do l' <- mutAt (pos-1) (sizeLeft-szRgt-1) (Just (\t -> Bin op t r)) l
+                                        r' <- getBestExpr r
+                                        pure . Fix $ Bin op l' r'
 
     checkToken parent en' = do en <- canonize en'
                                mEc <- gets ((Map.!? en) . _eNodeToEClass)

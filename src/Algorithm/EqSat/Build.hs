@@ -158,7 +158,7 @@ merge costFun c1 c2 =
            $ modify' $ over (eDB . analysis) (_parents subC <>)
          updateDBs newC led ledC ledO sub subC subO
          modifyEClass costFun led
-         forM_ (_eNodes newC) $ \en -> addToDB (decodeEnode en) led
+         --forM_ (_eNodes newC) $ \en -> addToDB (decodeEnode en) led
          pure led
 
     getLeaderSub c1 c1O c2 c2O =
@@ -322,7 +322,7 @@ applyMergeOnlyMatch costFun rule match' =
        do maybe_eid <- classOfENode costFun (fst match) (target rule)
           case maybe_eid of
             Nothing  -> pure ()
-            Just eid -> do merge costFun (getInt (fst match)) eid
+            Just eid -> do merge costFun (getInt (snd match)) eid
                            pure ()
 {-# INLINE applyMergeOnlyMatch #-}
 

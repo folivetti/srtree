@@ -47,7 +47,6 @@ egraphSearch dataTrain dataVal dataTest args = do
             evaluateUnevaluated fitFun
             runEqSat myCost rewritesParams 1
             cleanDB
-            get >>= (io . BS.writeFile (_dumpTo args) . encode )
     else (io $ BS.readFile (_loadFrom args)) >>= \eg -> put (decode eg)
   nCls <- gets (IM.size . _eClass)
   nUnev <- gets (IntSet.size . _unevaluated . _eDB)
