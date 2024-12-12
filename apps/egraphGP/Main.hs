@@ -68,12 +68,13 @@ egraphGP dataTrain dataVal dataTest args = do
   when (_trace args) $ printPop pop'
   let m = (_nPop args) `div` (_maxSize args)
 
-  finalPop <- iterateFor (_gens args) pop' $ \ps' -> do
+  finalPop <- iterateFor (_gens args) pop' $ \it ps' -> do
     ps <- Prelude.mapM canonical ps'
     parents <- replicateM (_nPop args - if (_moo args) then (_maxSize args) else 0) (tournament ps)
     newPop' <- Prelude.mapM (combine >=> canonical) parents
-    runEqSat myCost rewritesParams 1
-    cleanDB
+    when ((_gens args - it) `mod` 100 == 0) $
+       do runEqSat myCost rewritesParams 1
+          cleanDB
 
     newPop <- if (_moo args)
                 then do
@@ -111,7 +112,7 @@ egraphGP dataTrain dataVal dataTest args = do
     rndNonTerm = Random.randomFrom nonTerms
 
     iterateFor 0 xs f = pure xs
-    iterateFor n xs f = do xs' <- f xs
+    iterateFor n xs f = do xs' <- f n xs
                            iterateFor (n-1) xs' f
 
     tournament xs = do p1 <- applyTournament xs >>= canonical
