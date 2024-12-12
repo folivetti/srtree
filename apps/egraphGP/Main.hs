@@ -45,7 +45,7 @@ import Data.Binary ( encode, decode )
 import qualified Data.ByteString.Lazy as BS
 
 import Debug.Trace
-import Algorithm.EqSat (runEqSat)
+import Algorithm.EqSat (runEqSat,applySingleMergeOnlyEqSat)
 
 import GHC.IO (unsafePerformIO)
 import Control.Scheduler 
@@ -62,7 +62,7 @@ egraphGP dataTrain dataVal dataTest args = do
                                       updateIfNothing fitFun ec
                                       pure ec
   insertTerms
-  runEqSat myCost rewritesParams 1
+  runEqSat myCost rewritesSimple 1
   cleanDB
   pop' <- Prelude.mapM canonical pop
   when (_trace args) $ printPop pop'
@@ -71,10 +71,8 @@ egraphGP dataTrain dataVal dataTest args = do
   finalPop <- iterateFor (_gens args) pop' $ \it ps' -> do
     ps <- Prelude.mapM canonical ps'
     parents <- replicateM (_nPop args - if (_moo args) then (_maxSize args) else 0) (tournament ps)
-    newPop' <- Prelude.mapM (combine >=> canonical) parents
-    when ((_gens args - it) `mod` 100 == 0) $
-       do runEqSat myCost rewritesParams 1
-          cleanDB
+    newPop' <- Prelude.mapM combine parents
+
 
     newPop <- if (_moo args)
                 then do
@@ -126,7 +124,9 @@ egraphGP dataTrain dataVal dataTest args = do
 
     combine (p1, p2) = do child <- (crossover p1 p2 >>= mutate) >>= canonical
                           updateIfNothing fitFun child
-                          pure child
+                          runEqSat myCost rewritesSimple 1 -- applySingleMergeOnlyEqSat myCost rewritesSimple
+                          cleanDB
+                          canonical child
 
     crossover p1 p2 = do sz <- getSize p1
                          coin <- rnd $ tossBiased (_pc args)

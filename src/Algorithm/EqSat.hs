@@ -147,8 +147,8 @@ applySingleMergeOnlyEqSat costFun rules =
   do db <- gets (_patDB . _eDB) -- createDB
      let matchSch        = matchWithScheduler 10
          matchAll        = zipWithM matchSch [0..]
-         (rules, sch') = runState (matchAll rules') IntMap.empty
-     matches <- mapM (\rule -> map (rule,) <$> match (source rule)) $ concat rules
+         (rls, sch') = runState (matchAll rules') IntMap.empty
+     matches <- mapM (\rule -> map (rule,) <$> match (source rule)) $ concat rls
      mapM_ (uncurry (applyMergeOnlyMatch costFun)) $ concat matches
      rebuild costFun
      -- recalculate heights

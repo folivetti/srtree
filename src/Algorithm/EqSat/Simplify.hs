@@ -12,7 +12,7 @@
 -- Module containing the algebraic rules and simplification function.
 --
 -----------------------------------------------------------------------------
-module Algorithm.EqSat.Simplify ( Rule(..), simplifyEqSatDefault, applyMergeOnlyDftl, rewrites, rewritesParams, rewriteBasic, rewritesFun ) where
+module Algorithm.EqSat.Simplify ( Rule(..), simplifyEqSatDefault, applyMergeOnlyDftl, rewrites, rewritesParams, rewriteBasic, rewritesFun, rewritesSimple ) where
 
 import Algorithm.EqSat (eqSat, applySingleMergeOnlyEqSat)
 import Algorithm.EqSat.Egraph
@@ -195,11 +195,40 @@ rewritesWithParam =
       "x" * "x" :=> "x" ** Fixed (Param 0)
     , "x" - "x" :=> Fixed (Param 0)
     , "x" / "x" :=> Fixed (Param 0) :| isNotZero "x"
-    , "x" ** "y" * "x" :=> "x" ** ("y" + Fixed (Param 0)) :| isPositive "x"
     , 1 ** "x" :=> Fixed (Param 0)
     , log (sqrt "x") :=> Fixed (Param 0) * log "x" :| isNotParam "x"
-    , "x" ** Fixed (Param 0)   :==: sqrt "x" -- <==>
-    , "x" ** Fixed (Param 0) :==: Fixed (Uni Cbrt "x")
+    ]
+
+rewritesSimple :: [Rule]
+rewritesSimple =
+    [
+      "x" * "y" :=> "y" * "x"
+    , "x" + "y" :=> "y" + "x"
+    , ("x" ** "y") * ("x" ** "z") :=> "x" ** ("y" + "z") -- :| isPositive "x"
+    , ("x" + "y") + "z" :=> "x" + ("y" + "z")
+    , ("x" * "y") * "z" :=> "x" * ("y" * "z")
+    , ("x" * "y") + ("x" * "z") :=> "x" * ("y" + "z")
+    , "x" - ("y" + "z") :=> ("x" - "y") - "z" -- TODO: check that I don't this
+    , "x" - ("y" - "z") :=> ("x" - "y") + "z" -- TODO
+    , ("x" * "y") / "z" :=> ("x" / "z") * "y" :| isNotZero "z" -- TODO: inv(x) <=> x^-1 , x/y <=> x*y^-1
+    , "x" * ("y" / "z") :=> ("x" / "z") * "y" :| isNotZero "z" -- ^
+    , "x" / ("y" * "z") :=> ("x" / "z") / "y" :| isNotZero "z" -- ^ TODO: 0 ^-1 check
+    , ("w" * "x") + ("z" * "x") :=> ("w" + "z") * "x" -- :| isConstPt "w" :| isConstPt "z"
+    , ("w" * "x") - ("z" * "x") :=> ("w" - "z") * "x" -- TODO: handle sub :| isConstPt "w" :| isConstPt "z"
+    , ("w" * "x") / ("z" * "y") :=> ("w" / "z") * ("x" / "y")
+    , log (exp "x")  :=> "x"
+    , exp (log "x")  :=> "x"
+    , log ("x" * "y") :=> log "x" + log "y"
+    , log ("x" ** "y") :=> "y" * log "x"
+    , abs ("x" * "y") :=> abs "x" * abs "y"
+    , abs ("x" ** "y") :=> abs "x" ** "y"
+    , abs ("x" - "y") :=> abs ("y" - "x")
+    , recip (recip "x") :=> "x" :| isNotZero "x"
+    , "x" * "x" :=> "x" ** Fixed (Param 0)
+    , "x" - "x" :=> Fixed (Param 0)
+    , "x" / "x" :=> Fixed (Param 0) :| isNotZero "x"
+    , 1 ** "x" :=> Fixed (Param 0)
+    , log (sqrt "x") :=> Fixed (Param 0) * log "x" :| isNotParam "x"
     ]
 
 -- | default cost function for simplification
