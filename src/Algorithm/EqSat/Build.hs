@@ -322,7 +322,7 @@ applyMergeOnlyMatch costFun rule match' =
        do maybe_eid <- classOfENode costFun (fst match) (target rule)
           case maybe_eid of
             Nothing  -> pure ()
-            Just eid -> do merge costFun (getInt (snd match)) eid
+            Just eid -> do merge costFun (getInt (fst match)) eid
                            pure ()
 {-# INLINE applyMergeOnlyMatch #-}
 

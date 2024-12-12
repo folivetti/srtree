@@ -124,8 +124,8 @@ egraphGP dataTrain dataVal dataTest args = do
 
     combine (p1, p2) = do child <- (crossover p1 p2 >>= mutate) >>= canonical
                           updateIfNothing fitFun child
-                          runEqSat myCost rewritesSimple 1 -- applySingleMergeOnlyEqSat myCost rewritesSimple
-                          cleanDB
+                          applySingleMergeOnlyEqSat myCost rewritesSimple
+                          --cleanDB
                           canonical child
 
     crossover p1 p2 = do sz <- getSize p1
