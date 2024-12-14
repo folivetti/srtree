@@ -62,30 +62,44 @@ egraphGP dataTrain dataVal dataTest args = do
                                       updateIfNothing fitFun ec
                                       pure ec
   insertTerms
-  runEqSat myCost rewritesSimple 1
+  runEqSat myCost rewritesParams 1
   cleanDB
   pop' <- Prelude.mapM canonical pop
   when (_trace args) $ printPop pop'
   let m = (_nPop args) `div` (_maxSize args)
 
   finalPop <- iterateFor (_gens args) pop' $ \it ps' -> do
-    ps <- Prelude.mapM canonical ps'
-    parents <- replicateM (_nPop args - if (_moo args) then (_maxSize args) else 0) (tournament ps)
-    newPop' <- Prelude.mapM combine parents
-    runEqSat myCost rewritesSimple 1 --applySingleMergeOnlyEqSat myCost rewritesSimple
-    cleanDB
+    -- ps <- Prelude.mapM canonical ps'
+    --let chunks = 1
+    --    (parts, r) = _nPop args `divMod` chunks -- chunks of 50
+    --    genChunk = Prelude.mapM canonical ps' >>= \ps -> replicateM chunks (tournament ps) >>= Prelude.mapM combine
+    --    genPart  = genChunk >>= \chunk -> (runEqSat myCost rewritesSimple 1 >> cleanDB) >> pure chunk
+    --newPop' <- (<>) <$> (concat <$> (replicateM parts genPart)) <*> (concat <$> replicateM r genPart)
+    --parents <- replicateM (_nPop args - if (_moo args) then (_maxSize args) else 0) (tournament ps)
+    --newPop' <- Prelude.mapM combine parents
+    --runEqSat myCost rewritesSimple 1 --applySingleMergeOnlyEqSat myCost rewritesSimple
+    --cleanDB
+    newPop' <- replicateM (_nPop args) (evolve ps')
 
+    totSz <- gets (IntMap.size . _eClass)
+    let full = totSz > max maxMem (_nPop args)
+    when full cleanEGraph
 
     newPop <- if (_moo args)
                 then do
-                        pareto <- concat <$> (forM [1 .. _maxSize args] $ \n -> getTopECLassWithSize n 1)
-                        Prelude.mapM canonical (pareto <> newPop')
-                        --let nPareto = length pareto
-                        --if nPareto < (_nPop args)
-                        --  then (pareto <>) <$> (getTopECLassThat (_nPop args - nPareto) (const True) >>= traverse canonical)
-                        --  else pure (Prelude.take (_nPop args) pareto)
-                else Prelude.mapM canonical newPop'
+                        let n_paretos = (_nPop args) `div` (_maxSize args)
+                        pareto <- concat <$> (forM [1 .. _maxSize args] $ \n -> getTopECLassWithSize n n_paretos)
+                        let remainder = _nPop args - length pareto
+                        lft <- if full
+                                  then getTopECLassThat remainder (const True)
+                                  else pure $ Prelude.take remainder newPop'
+                        Prelude.mapM canonical (pareto <> lft)
+                else if full
+                       then getTopECLassThat (_nPop args) (const True)
+                       else Prelude.mapM canonical newPop'
     when (_trace args) $ printPop newPop
+
+
     pure newPop
 
   io $ putStrLn "id,Expression,theta,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test"
@@ -95,6 +109,7 @@ egraphGP dataTrain dataVal dataTest args = do
   when ((not.null) (_dumpTo args)) $ get >>= (io . BS.writeFile (_dumpTo args) . encode )
   where
     maxSize = (_maxSize args)
+    maxMem = 15000 -- running 1 iter of eqsat for each new individual will consume ~3GB
     fitFun = fitnessFunRep (_optRepeat args) (_optIter args) (_distribution args) dataTrain dataVal
     nonTerms   = parseNonTerms (_nonterminals args)
     (Sz2 _ nFeats) = MA.size (getX dataTrain)
@@ -108,12 +123,30 @@ egraphGP dataTrain dataVal dataTest args = do
     isBin (Bin _ _ _) = True
     isBin _           = False
 
+    -- TODO: merge two or more egraphs
+    cleanEGraph = do let nParetos = (maxMem `div` 5) `div` _maxSize args
+                     pareto <- (concat <$> (forM [1 .. _maxSize args] $ \n -> getTopECLassWithSize n nParetos))
+                                 >>= Prelude.mapM canonical
+                     infos  <- forM pareto (\c -> gets (_info . (IntMap.! c) . _eClass))
+                     exprs  <- forM pareto getBestExpr
+                     put emptyGraph
+                     newIds <- fromTrees myCost exprs
+                     forM_ (Prelude.zip newIds (Prelude.reverse infos)) $ \(eId, info) ->
+                         insertFitness eId (fromJust $ _fitness info) (fromJust $ _theta info)
+
     rndTerm    = Random.randomFrom terms
     rndNonTerm = Random.randomFrom nonTerms
 
     iterateFor 0 xs f = pure xs
     iterateFor n xs f = do xs' <- f n xs
                            iterateFor (n-1) xs' f
+
+    evolve xs' = do xs <- Prelude.mapM canonical xs'
+                    parents <- tournament xs
+                    offspring <- combine parents
+                    b <- updateIfNothing fitFun offspring
+                    when b $ runEqSat myCost rewritesParams 1 >> cleanDB
+                    pure offspring
 
     tournament xs = do p1 <- applyTournament xs >>= canonical
                        p2 <- applyTournament xs >>= canonical
@@ -124,10 +157,7 @@ egraphGP dataTrain dataVal dataTest args = do
                             fits <- Prelude.map fromJust <$> Prelude.mapM getFitness challengers
                             pure . snd . maximumBy (compare `on` fst) $ Prelude.zip fits challengers
 
-    combine (p1, p2) = do child <- (crossover p1 p2 >>= mutate) >>= canonical
-                          updateIfNothing fitFun child
-
-                          canonical child
+    combine (p1, p2) = (crossover p1 p2 >>= mutate) >>= canonical
 
     crossover p1 p2 = do sz <- getSize p1
                          coin <- rnd $ tossBiased (_pc args)
