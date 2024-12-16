@@ -56,28 +56,28 @@ while p arg prog = do when (p arg) do arg' <- prog arg
                                       while p arg' prog
 
 fitnessFun :: Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> PVector -> (Double, PVector)
-fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) _tree thetaOrig =
-  if isNaN val || isNaN tr
+fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) tree thetaOrig =
+  if isNaN val -- || isNaN tr
     then (-(1/0), theta) -- infinity
-    else (min tr val, theta)
+    else (val, theta)
   where
-    tree          = relabelParams _tree
+    --tree          = relabelParams _tree
     nParams       = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
     (theta, _, _) = minimizeNLL' VAR1 distribution mYErr nIter x y tree thetaOrig
     evalF a b c   = negate $ nll distribution c a b tree $ if nParams == 0 then thetaOrig else theta
-    tr            = evalF x y mYErr
+    --tr            = evalF x y mYErr
     val           = evalF x_val y_val mYErr_val
 
-{-# INLINE fitnessFun #-}
+--{-# INLINE fitnessFun #-}
 
 fitnessFunRep :: Int -> Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> RndEGraph (Double, PVector)
 fitnessFunRep nRep nIter distribution dataTrain dataVal _tree = do
     let tree = relabelParams _tree
         nParams = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
     thetaOrigs <- replicateM nRep (rnd $ randomVec nParams)
-    let fits = Prelude.map (fitnessFun nIter distribution dataTrain dataVal _tree) thetaOrigs
-    pure (maximumBy (compare `on` fst) fits)
-{-# INLINE fitnessFunRep #-}
+    let fits = maximumBy (compare `on` fst) $ Prelude.map (fitnessFun nIter distribution dataTrain dataVal _tree) thetaOrigs
+    pure fits
+--{-# INLINE fitnessFunRep #-}
 
 
 -- helper query functions

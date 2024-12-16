@@ -79,7 +79,10 @@ egraphGP dataTrain dataVal dataTest args = do
     --newPop' <- Prelude.mapM combine parents
     --runEqSat myCost rewritesSimple 1 --applySingleMergeOnlyEqSat myCost rewritesSimple
     --cleanDB
-    newPop' <- replicateM (_nPop args) (evolve ps')
+    newPop'' <- replicateM (_nPop args) (evolve ps')
+    applySingleMergeOnlyEqSat myCost rewritesParams >> cleanDB
+    newPop' <- Prelude.mapM (\eId -> canonical eId >>= \eId' -> (updateIfNothing fitFun eId' >> pure eId')) newPop''
+    --Prelude.mapM_ (updateIfNothing fitFun) newPop'
 
     totSz <- gets (IntMap.size . _eClass)
     let full = totSz > max maxMem (_nPop args)
@@ -109,7 +112,7 @@ egraphGP dataTrain dataVal dataTest args = do
   when ((not.null) (_dumpTo args)) $ get >>= (io . BS.writeFile (_dumpTo args) . encode )
   where
     maxSize = (_maxSize args)
-    maxMem = 15000 -- running 1 iter of eqsat for each new individual will consume ~3GB
+    maxMem = 10000 -- running 1 iter of eqsat for each new individual will consume ~3GB
     fitFun = fitnessFunRep (_optRepeat args) (_optIter args) (_distribution args) dataTrain dataVal
     nonTerms   = parseNonTerms (_nonterminals args)
     (Sz2 _ nFeats) = MA.size (getX dataTrain)
@@ -144,8 +147,8 @@ egraphGP dataTrain dataVal dataTest args = do
     evolve xs' = do xs <- Prelude.mapM canonical xs'
                     parents <- tournament xs
                     offspring <- combine parents
-                    b <- updateIfNothing fitFun offspring
-                    when b $ runEqSat myCost rewritesParams 1 >> cleanDB
+                    --b <- updateIfNothing fitFun offspring
+                    --when b $ runEqSat myCost rewritesParams 1 >> cleanDB
                     pure offspring
 
     tournament xs = do p1 <- applyTournament xs >>= canonical

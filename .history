@@ -1,3 +1,23 @@
+top-patterns 10 v0 + v1
+v0 + v1
+top-patterns 5 v0 * x0
+top-patterns v0 * x0
+insert exp(x0) + t0
+subtrees 674
+subtree 674
+subtree 671
+subtrees 618
+top 5 10
+optimize 300 100
+optimize 300 100
+optimize 300 100
+optimize 300 100
+help optimize
+report 300
+report 274
+top 5 7
+help top
+top 5
 top-patterns 10 v0 * x0
 help top-patterns 
 optimize 711 1000
@@ -78,23 +98,3 @@ top-patterns 5 t101 * t102
 top-patterns 5 t100 + t101
 topPat 5 t100 + t101
 topPat 5 t100 + t101
-insert x0^2 + t0 * x0^3
-insert x0^2 + t0
-insert x0 + t0
-insert (x0 + t0)
-insert x0 + t0
-insert "x0" + "t0"
-report 207
-top 3
-optimize 271
-optimize 271
-optimize 271
-optimize 271
-optimize 271
-subtrees 368
-top 10 10
-subtrees 689
-top 10
-optimize 0
-optimize 0
-optimize 0

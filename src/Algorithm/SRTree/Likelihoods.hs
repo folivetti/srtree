@@ -221,7 +221,9 @@ nll ROXY mYerr xss ys tree theta
 -- WARNING: pass tree with parameters
 -- TODO: handle error similar to ROXY
 buildNLL MSE m tree = ((tree - var (-1)) ** 2) / constv m
-buildNLL Gaussian m tree = (tree - var (-1)) ** 2 / param p + constv m * log (2*pi* param p)
+-- TODO: fix me
+buildNLL Gaussian m tree =  (tree - var (-1)) ** 2 / constv m + (param p - 1)**2 -- (constv m * param p ** 2) + log (2*pi* (param p ** 2))
+  -- ((tree - var (-1)) / param p) ** 2 + constv m * log (2*pi* (param p ** 2))
   where
     p = countParams tree
 buildNLL HGaussian m tree = (tree - var (-1)) ** 2 / var (-2) + constv m * log (2*pi* var (-2))

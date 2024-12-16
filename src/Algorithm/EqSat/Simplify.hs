@@ -100,7 +100,8 @@ rewriteBasic =
     [
       "x" * "y" :=> "y" * "x"
     , "x" + "y" :=> "y" + "x"
-    , ("x" ** "y") * ("x" ** "z") :=> "x" ** ("y" + "z") -- :| isPositive "x"
+    --, ("x" ** "y") * ("x" ** "z") :=> "x" ** ("y" + "z") -- :| isPositive "x"
+    --, (powabs "x" "y") * (powabs "x" "z") :=> powabs "x" ("y" + "x")
     , ("x" + "y") + "z" :=> "x" + ("y" + "z")
     --, ("x" + "y") - "z" :=> "x" + ("y" - "z") -- TODO: check that I don't need that
     , ("x" * "y") * "z" :=> "x" * ("y" * "z")
@@ -132,6 +133,7 @@ rewritesFun =
     , log ("x" * "y") :=> log "x" + log "y" :| isConstPos "x" :| isConstPos "y"
     -- , log ("x" / "y") :=> log "x" - log "y" :| isConstPos "x" :| isConstPos "y"
     , log ("x" ** "y") :=> "y" * log "x"
+    , log (powabs "x" "y") :=> "y" * log (abs "x")
     --, sqrt ("x" ** "y") :=> "x" ** ("y" / 2) :| isEven "y"
     -- , sqrt ("y" * "x") :=> sqrt "y" * sqrt "x" --
     --, sqrt ("y" / "x") :=> sqrt "y" / sqrt "x"
@@ -154,22 +156,25 @@ constReduction =
     [
       0 + "x" :=> "x"
     -- , "x" - 0 :=> "x"
-    , 1 * "x" :=> "x"
+    --, 1 * "x" :=> "x"
     -- , 0 / "x" :=> 0 :| isNotZero "x"
     --, "x" - "x" :=> 0 :| isNotParam "x"
     --, "x" / "x" :=> 1 :| isNotZero "x" :| isNotParam "x"
     , "x" ** 1 :=> "x"
+    , powabs "x" 1 :=> abs "x"
 
     -- , "x" * (1 / "x") :=> 1 :| isNotParam "x" :| isNotZero "x"
     -- , negate ("x" * "y") :=> (negate "x") * "y" :| isConstPt "x"
 
     , "x" ** "y" * "x" ** "z" :==: "x" ** ("y" + "z") :| isPositive "x"
+    , (powabs "x" "y") * (powabs "x" "z") :=> powabs "x" ("y" + "x")
     , ("x" ** "y") ** "z" :==: "x" ** ("y" * "z") :| isPositive "x"
+    , powabs (powabs "x" "y") "z" :=> powabs "x" ("y" * "z")
     , ("x" * "y") ** "z" :==: "x" ** "z" * "y" ** "z" :| isPositive "x" :| isPositive "y"
 
-    , "x" ** "y" * "x" ** "z" :==: "x" ** ("y" + "z") :| isInteger "y" :| isInteger "z"  :| isNotZero "x"
-    , ("x" ** "y") ** "z" :==: "x" ** ("y" * "z") :| isInteger "y" :| isInteger "z" :| isNotZero "x"
-    , ("x" * "y") ** "z" :==: "x" ** "z" * "y" ** "z" :| isInteger "z" :| isNotZero "x" :| isNotZero "y"
+    --, "x" ** "y" * "x" ** "z" :==: "x" ** ("y" + "z") :| isInteger "y" :| isInteger "z"  :| isNotZero "x"
+    --, ("x" ** "y") ** "z" :==: "x" ** ("y" * "z") :| isInteger "y" :| isInteger "z" :| isNotZero "x"
+    --, ("x" * "y") ** "z" :==: "x" ** "z" * "y" ** "z" :| isInteger "z" :| isNotZero "x" :| isNotZero "y"
 
     ]
 
@@ -181,11 +186,14 @@ rewritesWithConstant =
     , "x" / "x" :=> 1 :| isNotZero "x"
     , "x" ** "y" * "x" :=> "x" ** ("y" + 1) :| isPositive "x"
     , 1 ** "x" :=> 1
+    , powabs 1 "x" :=> 1
     , log (sqrt "x") :=> 0.5 * log "x" :| isNotParam "x"
     , "x" ** (1/2)   :==: sqrt "x" -- <==>
+    , powabs "x" (1/2) :=> sqrt (abs "x")
     , "x" ** (1/3) :==: Fixed (Uni Cbrt "x")
     , 0 * "x" :=> 0 :| isValid "x" -- :| isNotParam "x"
     , 0 ** "x" :=> 0 :| isPositive "x"
+    , powabs 0 "x" :=> 0
     , 0 - "x" :=> negate "x"
     , "x" + negate "y" :==: "x" - "y"
     ]
@@ -196,6 +204,7 @@ rewritesWithParam =
     , "x" - "x" :=> Fixed (Param 0)
     , "x" / "x" :=> Fixed (Param 0) :| isNotZero "x"
     , 1 ** "x" :=> Fixed (Param 0)
+    , powabs 1 "x" :=> Fixed (Param 0)
     , log (sqrt "x") :=> Fixed (Param 0) * log "x" :| isNotParam "x"
     ]
 
@@ -230,6 +239,7 @@ rewritesSimple =
     , 1 ** "x" :=> Fixed (Param 0)
     , log (sqrt "x") :=> Fixed (Param 0) * log "x" :| isNotParam "x"
     ]
+powabs l r = Fixed (Bin PowerAbs l r)
 
 -- | default cost function for simplification
 -- TODO:

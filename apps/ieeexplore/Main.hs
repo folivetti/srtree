@@ -49,6 +49,7 @@ import qualified Data.ByteString.Lazy as BS
 import Data.Maybe ( fromMaybe )
 import Text.ParseSR (SRAlgs(..), parseSR, parsePat)
 import qualified Data.ByteString.Char8 as B
+import qualified Data.Set as Set
 
 data Args = Args
   { _dataset      :: String,
@@ -58,6 +59,14 @@ data Args = Args
     _loadFrom     :: String
   }
   deriving (Show)
+
+  {-
+-- top 5 by fitness|mdl [less than 5 params, less than 10 nodes]
+data Commands = Cmd Query | Pareto | Frequency | Intersect Query Query
+data Query = TOP Int Criteria (Set.Set Filter) | Pattern (Maybe Parents) pat
+data Criteria = ByFitness | ByMDL
+data Filter = NumParam Comp Int | Size Comp Int
+-}
 
 -- parser of command line arguments
 opt :: Parser Args
