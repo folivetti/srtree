@@ -80,7 +80,7 @@ egraphGP dataTrain dataVal dataTest args = do
     --runEqSat myCost rewritesSimple 1 --applySingleMergeOnlyEqSat myCost rewritesSimple
     --cleanDB
     newPop'' <- replicateM (_nPop args) (evolve ps')
-    --applySingleMergeOnlyEqSat myCost rewritesParams >> cleanDB
+    applySingleMergeOnlyEqSat myCost rewritesParams >> cleanDB
     newPop' <- Prelude.mapM (\eId -> canonical eId >>= \eId' -> (updateIfNothing fitFun eId' >> pure eId')) newPop''
     --Prelude.mapM_ (updateIfNothing fitFun) newPop'
 
