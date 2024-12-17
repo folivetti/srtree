@@ -149,7 +149,7 @@ applySingleMergeOnlyEqSat costFun rules =
          matchAll        = zipWithM matchSch [0..]
          (rls, sch') = runState (matchAll rules') IntMap.empty
      matches <- mapM (\rule -> map (rule,) <$> match (source rule)) $ concat rls
-     mapM_ (uncurry (applyMergeOnlyMatch costFun)) $ take 5000 $ concat matches
+     mapM_ (uncurry (applyMergeOnlyMatch costFun)) $ take 500 $ concat matches
      rebuild costFun
      -- recalculate heights
      --calculateHeights
