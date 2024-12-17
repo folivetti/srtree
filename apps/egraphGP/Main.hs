@@ -85,7 +85,7 @@ egraphGP dataTrain dataVal dataTest args = do
     --Prelude.mapM_ (updateIfNothing fitFun) newPop'
 
     totSz <- gets (IntMap.size . _eClass)
-    let full = totSz > max maxMem (_nPop args)
+    let full = False -- totSz > max maxMem (_nPop args)
     when full cleanEGraph
 
     newPop <- if (_moo args)
