@@ -43,8 +43,12 @@ import Debug.Trace
 -- list of values instead of single value
 joinData :: EClassData -> EClassData -> EClassData
 joinData (EData c1 b1 cn1 fit1 p1 sz1) (EData c2 b2 cn2 fit2 p2 sz2) =
-  EData (min c1 c2) b (combineConsts cn1 cn2) (minMaybe fit1 fit2) (bestParam p1 p2 fit1 fit2) (min sz1 sz2)
+  --EData (min c1 c2) b (combineConsts cn1 cn2) (minMaybe fit1 fit2) (bestParam p1 p2 fit1 fit2) (min sz1 sz2)
+  EData (min c1 c2) (choose b1 b2) (choose cn1 cn2) (choose fit1 fit2) (choose p1 p2) (choose sz1 sz2)
   where
+    isFst = c1 <= c2
+    choose x y = if isFst then x else y
+
     maxIsFst = case (fit1, fit2) of
                  (Nothing, Nothing) -> True
                  (Nothing,  Just f) -> False

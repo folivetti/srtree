@@ -79,9 +79,9 @@ egraphGP dataTrain dataVal dataTest args = do
     --newPop' <- Prelude.mapM combine parents
     --runEqSat myCost rewritesSimple 1 --applySingleMergeOnlyEqSat myCost rewritesSimple
     --cleanDB
-    newPop'' <- replicateM (_nPop args) (evolve ps')
+    newPop' <- replicateM (_nPop args) (evolve ps')
     --applySingleMergeOnlyEqSat myCost rewritesParams >> cleanDB
-    newPop' <- Prelude.mapM (\eId -> canonical eId >>= \eId' -> (updateIfNothing fitFun eId' >> pure eId')) newPop''
+    --newPop' <- Prelude.mapM (\eId -> canonical eId >>= \eId' -> (updateIfNothing fitFun eId' >> pure eId')) newPop''
     --Prelude.mapM_ (updateIfNothing fitFun) newPop'
 
     totSz <- gets (IntMap.size . _eClass)
@@ -146,12 +146,13 @@ egraphGP dataTrain dataVal dataTest args = do
 
     evolve xs' = do xs <- Prelude.mapM canonical xs'
                     parents <- tournament xs
-                    offspring <- combine parents
+                    offspring' <- combine parents
                     --b <- updateIfNothing fitFun offspring
                     --when b $ runEqSat myCost rewritesParams 1 >> cleanDB
                     applySingleMergeOnlyEqSat myCost rewritesParams >> cleanDB
-                    canonical offspring
-                    --pure offspring
+                    offspring <- canonical offspring'
+                    updateIfNothing fitFun offspring
+                    pure offspring
 
     tournament xs = do p1 <- applyTournament xs >>= canonical
                        p2 <- applyTournament xs >>= canonical
