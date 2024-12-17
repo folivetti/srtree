@@ -112,7 +112,7 @@ egraphGP dataTrain dataVal dataTest args = do
   when ((not.null) (_dumpTo args)) $ get >>= (io . BS.writeFile (_dumpTo args) . encode )
   where
     maxSize = (_maxSize args)
-    maxMem = 10000 -- running 1 iter of eqsat for each new individual will consume ~3GB
+    maxMem = 20000 -- running 1 iter of eqsat for each new individual will consume ~3GB
     fitFun = fitnessFunRep (_optRepeat args) (_optIter args) (_distribution args) dataTrain dataVal
     nonTerms   = parseNonTerms (_nonterminals args)
     (Sz2 _ nFeats) = MA.size (getX dataTrain)

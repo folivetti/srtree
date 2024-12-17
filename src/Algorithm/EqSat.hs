@@ -147,9 +147,10 @@ applySingleMergeOnlyEqSat costFun rules =
   do db <- gets (_patDB . _eDB) -- createDB
      let matchSch        = matchWithScheduler 10
          matchAll        = zipWithM matchSch [0..]
-         (rls, sch') = runState (matchAll rules') IntMap.empty
-     matches <- mapM (\rule -> map (rule,) <$> match (source rule)) $ concat rls
-     mapM_ (uncurry (applyMergeOnlyMatch costFun)) $ take 500 $ concat matches
+         (rls, sch')     = runState (matchAll rules') IntMap.empty
+     --matches <- mapM (\rule -> map (rule,) <$> match (source rule)) $ concat rls
+     --mapM_ (uncurry (applyMergeOnlyMatch costFun)) $ take 500 $ concat matches
+     matches <- getNMatches 500 rls
      rebuild costFun
      -- recalculate heights
      --calculateHeights
@@ -161,6 +162,18 @@ applySingleMergeOnlyEqSat costFun rules =
         replaceEqRules (p1 :=> p2)  = [p1 :=> p2]
         replaceEqRules (p1 :==: p2) = [p1 :=> p2, p2 :=> p1]
         replaceEqRules (r :| cond)  = map (:| cond) $ replaceEqRules r
+
+        getNMatches n []       = pure []
+        getNMatches 0 _        = pure []
+        getNMatches n ([]:rss) = getNMatches n rss
+        getNMatches n ((r:rs):rss) = do matches <- map (r,) <$> match (source r)
+                                        let (x, y) = splitAt n matches
+                                            m      = length x
+                                        if m == n
+                                           then pure matches
+                                           else do matches' <- getNMatches (n - length x) (rs:rss)
+                                                   pure (matches <> matches')
+
 
 -- | matches the rules given a scheduler
 matchWithScheduler :: Int -> Int -> Rule -> Scheduler [Rule] -- [(Rule, (Map ClassOrVar ClassOrVar, ClassOrVar))]
