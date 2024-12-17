@@ -442,7 +442,7 @@ opt = Args
        <> value 0.3
        <> showDefault
        <> help "probability of mutation.")
-  <*> option auto
+  <*> strOption
        ( long "non-terminals"
        <> value "Add,Sub,Mul,Div,PowerAbs,Recip"
        <> showDefault
