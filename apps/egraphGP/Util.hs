@@ -221,7 +221,7 @@ refit fitFun ec = do
 --printBest :: (Int -> EClassId -> RndEGraph ()) -> RndEGraph ()
 printBest fitFun printExprFun = do
       bec <- gets (snd . getGreatest . _fitRangeDB . _eDB) >>= canonical
-      bestFit <- gets (_fitness. _info . (IntMap.! bec) . _eClass)
+      bestFit <- gets (_fitness. _info . (IM.! bec) . _eClass)
       refit fitFun bec
       io.print $ "should be " <> show bestFit
       printExprFun 0 bec
