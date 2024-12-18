@@ -107,8 +107,8 @@ egraphGP dataTrain dataVal dataTest args = do
 
   io $ putStrLn "id,Expression,theta,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test"
   if (_printPareto args)
-    then paretoFront (_maxSize args) printExpr
-    else printBest printExpr
+    then paretoFront fitFun (_maxSize args) printExpr
+    else printBest fitFun printExpr
   when ((not.null) (_dumpTo args)) $ get >>= (io . BS.writeFile (_dumpTo args) . encode )
   where
     maxSize = (_maxSize args)

@@ -213,19 +213,19 @@ insertRndExpr maxSize rndTerm rndNonTerm =
          t <- rnd $ Random.randomTree 3 8 n rndTerm rndNonTerm grow
          fromTree myCost t >>= canonical
 
-refit ec = do
+refit fitFun ec = do
   t <- getBestExpr ec
   (f, p) <- fitFun t
   insertFitness ec f p
 
-printBest :: (Int -> EClassId -> RndEGraph ()) -> RndEGraph ()
-printBest printExprFun = do
+--printBest :: (Int -> EClassId -> RndEGraph ()) -> RndEGraph ()
+printBest fitFun printExprFun = do
       bec <- gets (snd . getGreatest . _fitRangeDB . _eDB) >>= canonical
-      refit bec
+      refit fitFun bec
       printExprFun 0 bec
 
-paretoFront :: Int -> (Int -> EClassId -> RndEGraph ()) -> RndEGraph ()
-paretoFront maxSize printExprFun = go 1 0 (-(1.0/0.0))
+--paretoFront :: Int -> (Int -> EClassId -> RndEGraph ()) -> RndEGraph ()
+paretoFront fitFun maxSize printExprFun = go 1 0 (-(1.0/0.0))
     where
     go :: Int -> Int -> Double -> RndEGraph ()
     go n ix f
@@ -236,7 +236,7 @@ paretoFront maxSize printExprFun = go 1 0 (-(1.0/0.0))
                 then do let (ec, mf) = head ecList
                             improved = fromJust mf > f
                         ec' <- canonical ec
-                        when improved $ refit bec >> printExprFun ix ec'
+                        when improved $ refit fitFun ec' >> printExprFun ix ec'
                         go (n+1) (ix + if improved then 1 else 0) (max f (fromJust mf))
                 else go (n+1) ix f
 
