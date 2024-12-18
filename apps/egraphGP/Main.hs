@@ -91,7 +91,7 @@ egraphGP dataTrain dataVal dataTest args = do
     newPop <- if (_moo args)
                 then do
                         let n_paretos = (_nPop args) `div` (_maxSize args)
-                        pareto <- concat <$> (forM [1 .. _maxSize args] $ \n -> getTopECLassWithSize n n_paretos)
+                        pareto <- concat <$> (forM [1 .. _maxSize args] $ \n -> getTopECLassWithSize n 50)
                         let remainder = _nPop args - length pareto
                         lft <- if full
                                   then getTopECLassThat remainder (const True)
@@ -149,7 +149,7 @@ egraphGP dataTrain dataVal dataTest args = do
                     offspring <- combine parents
                     --b <- updateIfNothing fitFun offspring
                     --when b $ runEqSat myCost rewritesParams 1 >> cleanDB
-                    applySingleMergeOnlyEqSat myCost rewritesParams >> cleanDB
+                    --applySingleMergeOnlyEqSat myCost rewritesParams >> cleanDB
                     canonical offspring
                     --pure offspring
 
@@ -167,7 +167,7 @@ egraphGP dataTrain dataVal dataTest args = do
     crossover p1 p2 = do sz <- getSize p1
                          coin <- rnd $ tossBiased (_pc args)
                          if sz == 1 || not coin
-                            then pure p2
+                            then rnd (randomFrom [p1, p2])
                             else do pos <- rnd $ randomRange (1, sz-1)
                                     cands <- getAllSubClasses p2
                                     tree <- getSubtree pos 0 Nothing [] cands p1

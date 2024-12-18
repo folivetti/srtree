@@ -277,7 +277,7 @@ opt = Args
        <> value 1
        <> showDefault
        <> help "number of retries of parameter fitting.")
-  <*> option auto
+  <*> strOption
        ( long "non-terminals"
        <> value "Add,Sub,Mul,Div,PowerAbs,Recip"
        <> showDefault
