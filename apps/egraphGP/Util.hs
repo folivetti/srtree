@@ -75,7 +75,7 @@ fitnessFunRep nRep nIter distribution dataTrain dataVal _tree = do
     let tree = relabelParams _tree
         nParams = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
     thetaOrigs <- replicateM nRep (rnd $ randomVec nParams)
-    let fits = maximumBy (compare `on` fst) $ Prelude.map (fitnessFun nIter distribution dataTrain dataVal _tree) thetaOrigs
+    let fits = maximumBy (compare `on` fst) $ Prelude.map (fitnessFun nIter distribution dataTrain dataVal tree) thetaOrigs
     pure fits
 --{-# INLINE fitnessFunRep #-}
 
