@@ -223,7 +223,7 @@ printBest fitFun printExprFun = do
       bec <- gets (snd . getGreatest . _fitRangeDB . _eDB) >>= canonical
       bestFit <- gets (_fitness. _info . (IM.! bec) . _eClass)
       --refit fitFun bec
-      io.print $ "should be " <> show bestFit
+      --io.print $ "should be " <> show bestFit
       printExprFun 0 bec
 
 --paretoFront :: Int -> (Int -> EClassId -> RndEGraph ()) -> RndEGraph ()
