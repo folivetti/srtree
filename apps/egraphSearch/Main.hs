@@ -31,6 +31,8 @@ import Algorithm.EqSat (runEqSat)
 import Data.Binary ( encode, decode )
 import qualified Data.ByteString.Lazy as BS
 import Debug.Trace
+import qualified Data.HashSet as Set
+import Control.Lens (over)
 
 import Util
 
@@ -76,7 +78,7 @@ egraphSearch dataTrain dataVal dataTest args = do
 
                       if isNothing curFitPareto
                         then pure ecPareto
-                        else do ecsBest    <- getTopECLassThat 100 (isSizeOf (<(_maxSize args)))
+                        else do ecsBest    <- getTopFitEClassThat 100 (isSizeOf (<(_maxSize args)))
                                 ecBest     <- combineFrom ecsBest >>= canonical
                                 curFitBest <- getFitness ecBest
                                 if isNothing curFitBest
@@ -89,7 +91,7 @@ egraphSearch dataTrain dataVal dataTest args = do
        -- when upd $
        ecN' <- canonical ecN
        upd <- updateIfNothing fitFun ecN'
-       when upd $ runEqSat myCost rewritesParams 1 >> cleanDB
+       when upd $ runEqSat myCost rewritesParams 1 >> cleanDB >> refitChanged
 
 
        when (upd && (_trace args))
@@ -111,6 +113,12 @@ egraphSearch dataTrain dataVal dataTest args = do
   when ((not.null) (_dumpTo args)) $ get >>= (io . BS.writeFile (_dumpTo args) . encode )
   where
     fitFun = fitnessFunRep (_optRepeat args) (_optIter args) (_distribution args) dataTrain dataVal
+
+    refitChanged = do ids <- gets (_refits . _eDB)
+                      modify' $ over (eDB . refits) (const Set.empty)
+                      forM_ ids $ \ec -> do t <- getBestExpr ec
+                                            (f, p) <- fitFun t
+                                            insertFitness ec f p
 
     combineFrom [] = pure 0 -- this is the first terminal and it will always be already evaluated
     combineFrom ecs = do

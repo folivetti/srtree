@@ -32,6 +32,8 @@ import Data.Char ( toLower )
 import qualified Data.IntSet as IntSet
 import Data.SRTree.Datasets
 import Algorithm.EqSat.Queries
+import Algorithm.EqSat.DB
+import Data.List (nub)
 import System.Console.Repline hiding (Repl)
 import Text.Printf
 import Text.Layout.Table hiding (top)
@@ -149,7 +151,7 @@ printExpr dataTrain dataTest distribution ec = do
         let rows = [ rowG ["MSE", printf "%.4f" mse_train, printf "%.4f" mse_te]
                    , rowG ["R^2", printf "%.4f" r2_train, printf "%.4f" r2_te]
                    , rowG ["nll", printf "%.4f" nll_train, printf "%.4f" nll_te]
-                   , rowG ["MDL", printf "%.4f" mdl_train, printf "%.4f" mdl_te]
+                   , rowG ["DL", printf "%.4f" mdl_train, printf "%.4f" mdl_te]
                    ]
             columnsReport = [def, numCol, numCol]
             headerReport = titlesH $ Prelude.map bold ["Metric", "Training", "Test"]
@@ -168,14 +170,30 @@ printsimpleExpr eid = do t   <- egraph $ getBestExpr eid
 
                          pure $ colsAllG center [[show eid], justifyText 50 $ showExpr t, [fit'], justifyText 50 p', [show sz]]
 
-printSimpleMultiExprs eids = do rows <- forM eids printsimpleExpr
+printCounts (pat, cnt) = do
+  let spat = showPat pat
+  pure $ colsAllG center [justifyText 50 spat, [show cnt]]
+  where
+    showPat (Fixed (Var ix)) = 'x' : show ix
+    showPat (Fixed (Param ix)) = 't' : show ix
+    showPat (Fixed (Const x))  = show x
+    showPat (Fixed (Bin op l r)) = concat ["(", showPat l, " ", showOp op, " ", showPat r, ")"]
+    showPat (Fixed (Uni f t)) = concat [show f, "(", showPat t, ")"]
+    showPat (VarPat ix) = 'v' : show (fromEnum ix-65)
+
+printSimpleMultiExprs eids = do rows <- forM (nub eids) printsimpleExpr
                                 io.putStrLn $ tableString (columnHeaderTableS columns unicodeS headerSimple rows)
+
+printMultiCounts cnts = do rows <- forM cnts printCounts
+                           io.putStrLn $ tableString (columnHeaderTableS [fixedLeftCol 50, numCol] unicodeS headerCount rows)
 
 bold s = formatted (setSGRCode [SetConsoleIntensity BoldIntensity]) (plain s) (setSGRCode [Reset])
 
 headerSimple :: HeaderSpec LineStyle (Formatted String)
 headerSimple = titlesH $ Prelude.map (bold) ["Id", "Expression", "Fitness", "Parameters", "Size"]
 columns = [numCol, fixedLeftCol 50, numCol, fixedLeftCol 50, numCol]
+headerCount :: HeaderSpec LineStyle (Formatted String)
+headerCount = titlesH $ Prelude.map bold ["Pattern", "Count"]
 
 -- RndEGraph utils
 -- fitFun fitnessFunRep rep iter distribution x y mYErr x_val y_val mYErr_val
@@ -197,10 +215,10 @@ updateIfNothing fitFun ec = do
           pure True
         Just _ -> pure False
 
-getParetoEcsUpTo n maxSize = concat <$> forM [1..maxSize] (\i -> getTopECLassWithSize i n)
+getParetoEcsUpTo b n maxSize = concat <$> forM [1..maxSize] (\i -> getTopEClassWithSize b i n)
 
 getBestExprWithSize n =
-        do ec <- getTopECLassWithSize n 1 >>= traverse canonical
+        do ec <- getTopFitEClassWithSize n 1 >>= traverse canonical
            if (not (null ec))
             then do
               bestFit <- getFitness $ head ec
@@ -235,3 +253,11 @@ evaluateUnevaluated fitFun = do
               t <- getBestExpr c
               (f, p) <- fitFun t
               insertFitness c f p
+
+fillDL dist (x, y, mYErr) = do
+  ecs <- getAllEvaluatedEClasses
+  forM_ ecs $ \ec -> do
+    theta <- fromJust <$> getTheta ec
+    bestExpr <- relabelParams <$> getBestExpr ec
+    let mdl_train  = mdl dist mYErr x y theta bestExpr
+    insertDL ec mdl_train

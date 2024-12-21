@@ -44,10 +44,11 @@ import Debug.Trace
 joinData :: EClassData -> EClassData -> EClassData
 joinData (EData c1 b1 cn1 fit1 p1 sz1) (EData c2 b2 cn2 fit2 p2 sz2) =
   --EData (min c1 c2) b (combineConsts cn1 cn2) (minMaybe fit1 fit2) (bestParam p1 p2 fit1 fit2) (min sz1 sz2)
-  EData (min c1 c2) (choose b1 b2) (choose cn1 cn2) (minMaybe fit1 fit2) (choose p1 p2) (choose sz1 sz2)
+  EData (min c1 c2) (choose b1 b2) (choose cn1 cn2) (minMaybe fit1 fit2) (chooseF p1 p2) (choose sz1 sz2)
   where
     isFst = c1 <= c2
     choose x y = if isFst then x else y
+    chooseF x y = if maxIsFst then x else y
 
     maxIsFst = case (fit1, fit2) of
                  (Nothing, Nothing) -> True
@@ -179,3 +180,10 @@ insertFitness eId fit params = do
                  . over (eDB . fitRangeDB) (insertRange eId fit)
                  . over (eDB . sizeFitDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith (><) sz Empty)
     else modify' $ over (eDB . fitRangeDB) (insertRange eId fit . removeRange eId (fromJust oldFit))
+
+insertDL :: Monad m => EClassId -> Double -> EGraphST m ()
+insertDL eId fit = do
+  ec <- gets ((IntMap.! eId) . _eClass)
+  let sz = _size . _info $ ec
+  modify' $ over (eDB . dlRangeDB) (insertRange eId fit)
+          . over (eDB . sizeDLDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith (><) sz Empty)

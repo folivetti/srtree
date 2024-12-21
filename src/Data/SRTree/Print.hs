@@ -23,6 +23,7 @@ module Data.SRTree.Print
          , printPython
          , showLatex
          , printLatex
+         , showOp
          )
          where
 
@@ -89,8 +90,8 @@ showOp Sub   = "-"
 showOp Mul   = "*"
 showOp Div   = "/"
 showOp Power = "^"
-showOp AQ    = "_aq_"
-showOp PowerAbs = "||^"
+showOp AQ    = "aq"
+showOp PowerAbs = "|^|"
 {-# INLINE showOp #-}
 
 -- | Displays a tree as a numpy compatible expression.

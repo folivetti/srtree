@@ -172,10 +172,13 @@ data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId   -- maps an e-clas
 
 data EGraphDB = EDB { _worklist      :: HashSet (EClassId, ENode)      -- e-nodes and e-class schedule for analysis
                     , _analysis      :: HashSet (EClassId, ENode)      -- e-nodes and e-class that changed data
+                    , _refits        :: HashSet EClassId
                     , _patDB         :: DB                         -- database of patterns
                     , _fitRangeDB    :: RangeTree Double           -- database of valid fitness
+                    , _dlRangeDB     :: RangeTree Double
                     , _sizeDB        :: IntMap IntSet              -- database of model sizes
                     , _sizeFitDB     :: IntMap (RangeTree Double)  -- hacky! Size x Fitness DB
+                    , _sizeDLDB      :: IntMap (RangeTree Double)
                     , _unevaluated   :: IntSet                     -- set of not-evaluated e-classes
                     , _nextId        :: Int                        -- next available id
                     } deriving (Show, Generic)
@@ -194,6 +197,7 @@ data EClassData = EData { _cost    :: Cost
                         , _best    :: ENode
                         , _consts  :: Consts
                         , _fitness :: Maybe Double    -- NOTE: this cannot be NaN
+                        -- , _dl :: Maybe Double
                         , _theta   :: Maybe PVector
                         , _size    :: Int
                         -- , _properties :: Property
@@ -281,7 +285,7 @@ emptyGraph = EGraph IntMap.empty Map.empty IntMap.empty emptyDB
 
 -- | returns an empty e-graph DB
 emptyDB :: EGraphDB
-emptyDB = EDB Set.empty Set.empty Map.empty FingerTree.empty IntMap.empty IntMap.empty IntSet.empty 0
+emptyDB = EDB Set.empty Set.empty Set.empty Map.empty FingerTree.empty FingerTree.empty IntMap.empty IntMap.empty IntMap.empty IntSet.empty 0
 {-# INLINE emptyDB #-}
 
 -- | Creates a new e-class from an e-class id, a new e-node,

@@ -200,8 +200,8 @@ rewritesWithConstant =
 rewritesWithParam :: [Rule]
 rewritesWithParam =
     [
-      "x" * "x" :=> "x" ** Fixed (Param 0)
-    , "x" - "x" :=> Fixed (Param 0)
+    --  "x" * "x" :=> "x" ** Fixed (Param 0)
+      "x" - "x" :=> Fixed (Param 0)
     , "x" / "x" :=> Fixed (Param 0) :| isNotZero "x"
     , 1 ** "x" :=> Fixed (Param 0)
     , powabs 1 "x" :=> Fixed (Param 0)

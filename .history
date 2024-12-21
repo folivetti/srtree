@@ -1,100 +1,100 @@
-top-patterns 10 v0 + v1
-v0 + v1
-top-patterns 5 v0 * x0
-top-patterns v0 * x0
-insert exp(x0) + t0
-subtrees 674
-subtree 674
-subtree 671
-subtrees 618
-top 5 10
-optimize 300 100
-optimize 300 100
-optimize 300 100
-optimize 300 100
-help optimize
-report 300
-report 274
-top 5 7
+pareto by dl
+pareto by dl
+pareto by fitness
+pareto
+top 10 by dl
+top 10 by fitness
+distribution with size <3 limited at 5 dsc
+distribution with size <3 limited at 5 dsc
+subtrees 16139
+report 16139
+subtrees 16139
+distribution with size <3 limited at 5 dsc
+distribution with size <3 limited at 5 asc
+distribution with size <3
+distribution with size <2
+top 5 with size <=5 not matching v0 + t0
+top 5 with size <=5 matching v0 + t0
+top 5 with size <=3
+top 5 with size <= 2
+top 5 with size = 12
+top 5 with size =12
+top 5 with size >= 11
+top 5 with size > 11
+top 5 with size > 10
+top 5 with size <= 2
+top 5 with size <2
+top 5 with size <=2
+top 5 
+distribution with size <= 2 limited at 10 asc
+distribution with size <=2 limited at 10 asc
+distribution with size 2 limited at 10 asc
+distribution with size 2 limited at 10 asc
+count-pattern v0 + (t0 * x0)
+distribution with size 5 limited at 10 asc
+subtrees 16139
+top 10
+subtrees 29356
+insert sqrt(x0 + t0)
+optimize 29356 2000
+optimize 29356 200
+optimize 29356
+report 29356
+top 10 with size =10 by dl matching root v0 + x0 * t0
+top 10 with size =10 by dl matching v0 + x0 * t0
+top 10 with size =10 by dl matching v0 + x0
+top 10 with size =10 by dl
+top 10 with size =10
+top 10 with size >5
+top 10 with size >7
+top 10 with size <=8
+top 10 with size <8
 help top
-top 5
-top-patterns 10 v0 * x0
-help top-patterns 
-optimize 711 1000
-insert t0 + x0^2
-optimize 686 100
-subtrees 689
-help subtrees
-help subrees
-report 583
-help report
-top 5
-help top
-help
-report 583
-top 5
-help top
-help
-report 651
-report 651
-report 651
-top-patterns 10 v0 * x0
-report 651
-top-patterns 10 v0 * x0
-top-patterns 1 v0 * x0
-top-patterns 2 v0 * x0
-top-patterns v0 * x0
-insert t0 + x0^2
-subtrees 651
-optimize 651
-report 651
-top 30
-top 30
-top 30
-top 30
-top 3
-top 3
-top 30
-top 30
-top 3
-top-patterns 5 t0 + x0 * v0
-top-patterns 5 t0 + x0 * v0
-top-patterns 5 t0 + x0 * v0
-top-patterns 5 t0 + x0 * v0
-top-patterns 5 t0 + x0 * v0
-top-patterns 5 t0 + x0 * t100
-top-patterns 5 t0 + x0 * t100
-insert exp(x0) + t0
-subtrees 583
-subtrees 583
-report 583
-optimize 583 100
-optimize 583 100
-optimize 583 100
-report 583
-top 5
-insert logabs(x0)
-insert x0 ** 2 + log(x0)
-insert x0 ** 2
-insert (log t0)
-insert (log x0)
-insert log x0
-insert logabs x0
-insert LogAbs x0
-insert LogAbs x0
-insert logabs x0
-top-patterns 5 t101 |**| t102
-top-patterns 5 t101 ** t102
-top-patterns 5 t101 ** t102
-top-patterns 5 t101 |**| t102
-top-patterns 5 t101 ** t102
-top-patterns 5 t101 ^ t102
-top-patterns 5 t101 * t102
-top-patterns 5 t101 + t102
-top-patterns 5 t101 + t102
-top-patterns 5 t101 + t102
-top-patterns 5 t101 * t102
-top-patterns 5 t101 * t102
-top-patterns 5 t100 + t101
-topPat 5 t100 + t101
-topPat 5 t100 + t101
+count-pattern x0 |**| t0
+top-patterns 10 v0 + x0
+dist-patterns
+dist-patterns
+dist-patterns
+dist-patterns
+dist-patterns
+dist-patterns
+dist-patterns
+dist-patterns
+dist-patterns
+dist-patterns
+dist-patterns
+dist-patterns
+dist-patterns  a
+dist-patterns  a
+dist-patterns 
+count-pattern x0 + v0 |**| v1
+count-pattern x0 + v0
+count-pattern x0
+count-pattern v0
+count-pattern x0 |**| (t0 * x0)
+count-pattern x0 |**| (t0 * x0)
+top-patterns 236 in including x0 |**| (t0 + x0)
+top-patterns 100 in including x0 |**| (t0 + x0)
+count-pattern x0 |**| (t0 * x0)
+top-patterns 10 in including x0 |**| (t0 + x0)
+top-patterns 10 in including x0 |**| (t0 + x0)
+top-patterns 10 in including v0 |**| (t0 + x0)
+top-patterns 10 in including t0 |**| (t0 + x0)
+count-pattern x0 |**| (t0 * x0)
+top-patterns 10 in including x0 |**| (t0 + x0)
+top-patterns 10 in including x0 |**| (t0 + x0)
+top-patterns 10 in including x0 |**| (t0 + x0)
+top-patterns 10 x0 |**| (t0 + x0)
+count-pattern x0 |**| (t0 * x0)
+count-pattern x0 |**| (t0 * x0)
+top-patterns 10 x0 |**| (t0 + x0)
+top-patterns 10 x0 |**| (t0 + x0)
+top-patterns 10 in x0 |**| (t0 + x0)
+top-patterns 10 in including x0 |**| (t0 + x0)
+count-pattern x0 |**| (t0 * x0)
+count-pattern x0 |**| t0
+count-pattern x0 * t0
+count-pattern x0 + t0
+count-pattern x0 |**| (v0 + t0)
+count-pattern sin(x0)
+count-pattern x0 |**| t0

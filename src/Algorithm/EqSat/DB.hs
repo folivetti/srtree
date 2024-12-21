@@ -37,7 +37,7 @@ import Debug.Trace
 
 -- A Pattern is either a fixed-point of a tree or an
 -- index to a pattern variable. The pattern variable matches anything. 
-data Pattern = Fixed (SRTree Pattern) | VarPat Char deriving Show -- Fixed structure of a pattern or a variable that matches anything
+data Pattern = Fixed (SRTree Pattern) | VarPat Char deriving (Show, Eq, Ord) -- Fixed structure of a pattern or a variable that matches anything
 
 -- The instance for `IsString` for a `Pattern` is 
 -- valid only for a single letter char from a-zA-Z. 

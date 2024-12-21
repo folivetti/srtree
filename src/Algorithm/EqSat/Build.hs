@@ -126,6 +126,7 @@ repairAnalysis costFun ecId enode =
      when (_info eclass /= newData) $
        do modify' $ over (eDB . analysis) (_parents eclass <>)
                   . over eClass (IntMap.insert ecId' eclass')
+                  . over (eDB . refits) (Set.insert ecId')
           _ <- modifyEClass costFun ecId'
           pure ()
 {-# INLINE repairAnalysis #-}
@@ -154,6 +155,7 @@ merge costFun c1 c2 =
                  . over (eDB . worklist) (_parents subC <>)         -- insert parents of sub into worklist
          when (_info newC /= _info ledC)                            -- if there was change in data,
            $ modify' $ over (eDB . analysis) (_parents ledC <>)     --   insert parents into analysis
+                     . over (eDB . refits) (Set.insert led)
          when (_info newC /= _info subC)
            $ modify' $ over (eDB . analysis) (_parents subC <>)
          updateDBs newC led ledC ledO sub subC subO
@@ -459,9 +461,12 @@ getAllChildEClasses eId' = do
   where
     go :: Monad m => Int -> EGraphST m [Int]
     go n = do nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! n) . _eClass)
-              let eids = concatMap childrenOf nodes
-              eids' <- mapM go eids
-              pure ((n : eids) <> concat eids')
+              let hasTerminal = any (null . childrenOf) nodes
+              eids <- mapM canonical $ concatMap childrenOf nodes
+              if hasTerminal
+                then pure [n]
+                else do eids' <- mapM go eids
+                        pure ((n : eids) <> concat eids')
 {-# INLINE getAllChildEClasses #-}
 
 -- | returns a random expression rooted at e-class `eId`

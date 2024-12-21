@@ -92,14 +92,14 @@ egraphGP dataTrain dataVal dataTest args = do
     newPop <- if (_moo args)
                 then do
                         let n_paretos = (_nPop args) `div` (_maxSize args)
-                        pareto <- concat <$> (forM [1 .. _maxSize args] $ \n -> getTopECLassWithSize n 50)
+                        pareto <- concat <$> (forM [1 .. _maxSize args] $ \n -> getTopFitEClassWithSize n 50)
                         let remainder = 0 -- _nPop args - length pareto
                         lft <- if full
-                                  then getTopECLassThat remainder (const True)
+                                  then getTopFitEClassThat remainder (const True)
                                   else pure $ Prelude.take remainder newPop'
                         Prelude.mapM canonical pareto -- (pareto <> lft)
                 else if full
-                       then getTopECLassThat (_nPop args) (const True)
+                       then getTopFitEClassThat (_nPop args) (const True)
                        else Prelude.mapM canonical newPop'
     when (_trace args) $ printPop newPop
 
@@ -129,7 +129,7 @@ egraphGP dataTrain dataVal dataTest args = do
 
     -- TODO: merge two or more egraphs
     cleanEGraph = do let nParetos = (maxMem `div` 5) `div` _maxSize args
-                     pareto <- (concat <$> (forM [1 .. _maxSize args] $ \n -> getTopECLassWithSize n nParetos))
+                     pareto <- (concat <$> (forM [1 .. _maxSize args] $ \n -> getTopFitEClassWithSize n nParetos))
                                  >>= Prelude.mapM canonical
                      infos  <- forM pareto (\c -> gets (_info . (IntMap.! c) . _eClass))
                      exprs  <- forM pareto getBestExpr

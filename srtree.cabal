@@ -208,6 +208,7 @@ executable eqsatrepr
 executable ieeexplore
   main-is: Main.hs
   other-modules:
+      Commands
       Random
       Util
       Paths_srtree

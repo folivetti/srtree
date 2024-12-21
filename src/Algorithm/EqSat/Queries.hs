@@ -57,9 +57,10 @@ findRootClasses = gets (Prelude.map fst . Prelude.filter isParent . IntMap.toLis
 
 -- | returns the e-class id with the best fitness that
 -- is true to a predicate
-getTopECLassThat :: Monad m => Int -> (EClass -> Bool) -> EGraphST m [EClassId]
-getTopECLassThat n p = do
-  gets (_fitRangeDB . _eDB)
+getTopECLassThat :: Monad m => Bool -> Int -> (EClass -> Bool) -> EGraphST m [EClassId]
+getTopECLassThat b n p = do
+  let f = if b then _fitRangeDB else _dlRangeDB
+  gets (f . _eDB)
     >>= go n []
   where
     go :: Monad m => Int -> [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
@@ -70,16 +71,18 @@ getTopECLassThat n p = do
                                      ecId <- canonical x
                                      ec <- gets ((IntMap.! ecId) . _eClass)
                                      if (isInfinite . fromJust . _fitness . _info $ ec)
-                                       then pure bests
+                                       then go m bests t
                                        else if p ec
-                                              then go (m-1) (x:bests) t
+                                              then go (m-1) (ecId:bests) t
                                               else go m bests t
 
-getTopECLassIn :: Monad m => Int -> [EClassId] -> EGraphST m [EClassId]
-getTopECLassIn n ecs = do
-  gets (_fitRangeDB . _eDB)
+getTopECLassIn :: Monad m => Bool -> Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
+getTopECLassIn b n p ecs' = do
+  let f = if b then _fitRangeDB else _dlRangeDB
+  gets (f . _eDB)
     >>= go n []
   where
+    ecs = Set.fromList ecs'
     go :: Monad m => Int -> [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
     go 0 bests rt = pure bests
     go m bests rt = case rt of
@@ -88,14 +91,50 @@ getTopECLassIn n ecs = do
                                      ecId <- canonical x
                                      ec <- gets ((IntMap.! ecId) . _eClass)
                                      if (isInfinite . fromJust . _fitness . _info $ ec)
-                                       then pure bests
-                                       else if ecId `elem` ecs
-                                              then go (m-1) (x:bests) t
+                                       then go m bests t -- pure bests
+                                       else if ecId `Set.member` ecs && p ec
+                                              then go (m-1) (ecId:bests) t
+                                              else go m bests t
+getTopECLassNotIn :: Monad m => Bool -> Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
+getTopECLassNotIn b n p ecs' = do
+  let f = if b then _fitRangeDB else _dlRangeDB
+  gets (f . _eDB)
+    >>= go n []
+  where
+    ecs = Set.fromList ecs'
+
+    go :: Monad m => Int -> [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
+    go 0 bests rt = pure bests
+    go m bests rt = case rt of
+                       Empty   -> pure bests
+                       t :|> y -> do let x = snd y
+                                     ecId <- canonical x
+                                     ec <- gets ((IntMap.! ecId) . _eClass)
+                                     if (isInfinite . fromJust . _fitness . _info $ ec)
+                                       then go m bests t
+                                       else if not (ecId `Set.member` ecs) && p ec
+                                              then go (m-1) (ecId:bests) t
                                               else go m bests t
 
-getTopECLassWithSize :: Monad m => Int -> Int -> EGraphST m [EClassId]
-getTopECLassWithSize sz n = do
-   gets (go n [] . (IntMap.!? sz) . _sizeFitDB . _eDB)
+getAllEvaluatedEClasses :: Monad m => EGraphST m [EClassId]
+getAllEvaluatedEClasses = do
+  gets (_fitRangeDB . _eDB)
+    >>= go []
+  where
+    go :: Monad m => [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
+    go bests rt = case rt of
+                    Empty   -> pure bests
+                    t :|> y -> do let x = snd y
+                                  ecId <- canonical x
+                                  ec <- gets ((IntMap.! ecId) . _eClass)
+                                  if (isInfinite . fromJust . _fitness . _info $ ec)
+                                    then go bests t
+                                    else go (ecId:bests) t
+
+getTopEClassWithSize :: Monad m => Bool -> Int -> Int -> EGraphST m [EClassId]
+getTopEClassWithSize b sz n = do
+   let fun = if b then _sizeFitDB else _sizeDLDB
+   gets (go n [] . (IntMap.!? sz) . fun . _eDB)
     -- >>= mapM canonical
   where
     -- go :: Monad m => Int -> [EClassId] -> Maybe (RangeTree Double) -> EGraphST m [EClassId]
@@ -104,3 +143,20 @@ getTopECLassWithSize sz n = do
     go m bests (Just rt) = case rt of
                              Empty   -> bests
                              t :|> (f, x) -> if isInfinite f then bests else go (m-1) (x:bests) (Just t)
+
+getTopFitEClassThat :: Monad m => Int -> (EClass -> Bool) -> EGraphST m [EClassId]
+getTopFitEClassThat  = getTopECLassThat True
+getTopDLEClassThat :: Monad m => Int -> (EClass -> Bool) -> EGraphST m [EClassId]
+getTopDLEClassThat   = getTopECLassThat False
+getTopFitEClassIn :: Monad m => Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
+getTopFitEClassIn    = getTopECLassIn True
+getTopDLEClassIn :: Monad m => Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
+getTopDLEClassIn     = getTopECLassIn False
+getTopFitEClassNotIn :: Monad m => Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
+getTopFitEClassNotIn = getTopECLassNotIn True
+getTopDLEClassNotIn :: Monad m => Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
+getTopDLEClassNotIn  = getTopECLassNotIn True
+getTopFitEClassWithSize :: Monad m => Int -> Int -> EGraphST m [EClassId]
+getTopFitEClassWithSize = getTopEClassWithSize True
+getTopDLEClassWithSize :: Monad m => Int -> Int -> EGraphST m [EClassId]
+getTopDLEClassWithSize  = getTopEClassWithSize False

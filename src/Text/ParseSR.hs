@@ -335,19 +335,22 @@ parsePatExpr = parsePattern (prefixOps : binOps) binFuns var
                   , ("asinh", asinh), ("acosh", acosh), ("atanh", atanh)
                   , ("asin", asin), ("acos", acos), ("atan", atan)
                   , ("sqrtabs", sqrtabs'), ("sqrt", sqrt), ("cbrt", cbrt'), ("square", (**2))
-                  , ("logabs", logabs'), ("log", log), ("exp", exp), ("cube", cube'), ("recip", recip)
+                  , ("logabs", logabs'), ("log", log), ("exp", exp), ("cube", cube'), ("recip", recip')
                   , ("Id", id), ("Abs", abs)
                   , ("Sinh", sinh), ("Cosh", cosh), ("Tanh", tanh)
                   , ("Sin", sin), ("Cos", cos), ("Tan", tan)
                   , ("ASinh", asinh), ("ACosh", acosh), ("ATanh", atanh)
                   , ("ASin", asin), ("ACos", acos), ("ATan", atan)
                   , ("SqrtAbs", sqrtabs'), ("Sqrt", sqrt), ("Cbrt", cbrt'), ("Square", (**2))
-                  , ("LogAbs", logabs'), ("Log", log), ("Exp", exp), ("Recip", recip), ("Cube", cube')
+                  , ("LogAbs", logabs'), ("Log", log), ("Exp", exp), ("Recip", recip'), ("Cube", cube')
+                  , ("|log|", logabs'), ("|Log|", logabs'), ("|sqrt|", sqrtabs'), ("|Sqrt|", sqrtabs')
+                  , ("√", sqrt), ("|√|", sqrtabs')
                 ]
     binOps = [[binary "^" (**) AssocLeft], [binary "**" (**) AssocLeft]
             , [binary "*" (*) AssocLeft, binary "/" (/) AssocLeft]
             , [binary "+" (+) AssocLeft, binary "-" (-) AssocLeft]
-            , [binary "|**|" powabs AssocLeft], [binary "aq" aq AssocLeft]
+            , [binary "|**|" powabs AssocLeft], [binary "|^|" powabs AssocLeft]
+            , [binary "aq" aq AssocLeft], [binary "|/|" aq AssocLeft]
             ]
     powabs l r = Fixed $ Bin PowerAbs l r
     aq l r = Fixed $ Bin AQ l r
@@ -355,6 +358,7 @@ parsePatExpr = parsePattern (prefixOps : binOps) binFuns var
     sqrtabs' t = Fixed $ Uni SqrtAbs t
     cbrt' t = Fixed $ Uni Cbrt t
     cube' t = Fixed $ Uni Cube t
+    recip' t = Fixed $ Uni Recip t
 
     var = do char 'x'
              ix <- decimal

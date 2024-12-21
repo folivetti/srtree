@@ -24,49 +24,45 @@ import qualified Data.IntMap as IM
 import Data.Massiv.Array as MA hiding (forM_, forM, Continue)
 import Data.Maybe (fromJust, isNothing, isJust)
 import Data.SRTree
+import Data.SRTree.Recursion
 import Data.SRTree.Datasets
 import Data.SRTree.Eval
 import Data.SRTree.Random (randomTree)
 import Data.SRTree.Print hiding ( printExpr )
 import Options.Applicative as Opt hiding (Const, columns)
 import System.Random
-import qualified Data.Set as Set
-import Data.List ( sort )
+import qualified Data.HashSet as Set
+import Data.List ( sort, sortOn )
 import qualified Data.Map as Map
 import Data.Map ( Map )
 import qualified Data.IntMap.Strict as IntMap
-
+import Data.Char ( toLower )
 import Debug.Trace
 import Algorithm.EqSat (runEqSat)
 
 import System.Console.Repline hiding (Repl)
 import Util
+import Commands
 import Data.List ( isPrefixOf, intercalate, nub )
 import Text.Read
-import Control.Monad ( forM )
+import Control.Monad ( forM, when )
 import Data.Binary ( encode, decode )
 import qualified Data.ByteString.Lazy as BS
 import Data.Maybe ( fromMaybe )
 import Text.ParseSR (SRAlgs(..), parseSR, parsePat)
 import qualified Data.ByteString.Char8 as B
-import qualified Data.Set as Set
+import qualified Data.IntSet as IntSet
+import qualified Data.Set as SSet
 
 data Args = Args
   { _dataset      :: String,
     _testData     :: String,
     _distribution :: Distribution,
     _dumpTo       :: String,
-    _loadFrom     :: String
+    _loadFrom     :: String,
+    _calcDL       :: Bool
   }
   deriving (Show)
-
-  {-
--- top 5 by fitness|mdl [less than 5 params, less than 10 nodes]
-data Commands = Cmd Query | Pareto | Frequency | Intersect Query Query
-data Query = TOP Int Criteria (Set.Set Filter) | Pattern (Maybe Parents) pat
-data Criteria = ByFitness | ByMDL
-data Filter = NumParam Comp Int | Size Comp Int
--}
 
 -- parser of command line arguments
 opt :: Parser Args
@@ -97,80 +93,68 @@ opt = Args
        ( long "load-from"
        <> help "load initial e-graph from a file."
        )
+  <*> switch
+       ( long "calculate-dl"
+       <> help "(re)calculate DL."
+       )
 
+runIfRight cmd = case cmd of
+                    Left err -> io.print $ "wrong command format."
+                    Right c  -> run c
 
+topCmd :: [String] -> Repl ()
+topCmd []    = helpCmd ["top"]
+topCmd args  = do
+  let cmd = parseCmd parseTop (B.pack $ unwords args)
+  runIfRight cmd
 
-top :: [String] -> Repl ()
-top []    = helpCmd ["top"]
-top [arg] = case readMaybe @Int arg of
-              Nothing -> io.putStrLn $ "The first argument should be an integer."
-              Just n  -> do ids <- egraph $ getTopECLassThat n (const True)
-                            printSimpleMultiExprs ids
-top (arg1:arg2:_) = case (readMaybe @Int arg1, readMaybe @Int arg2) of
-                      (Just n, Just sz) -> do ids <- egraph $ getTopECLassWithSize sz n
-                                              printSimpleMultiExprs ids
-                      (Just n, Nothing) -> top [arg1]
-                      _                 -> helpCmd ["top"]
+distCmd :: [String] -> Repl ()
+distCmd []   = helpCmd ["distribution"]
+distCmd args = do
+  let cmd = parseCmd parseDist (B.pack $ unwords args)
+  runIfRight cmd
 
-
-
-report :: Distribution -> DataSet -> DataSet -> [String] -> Repl ()
-report _ _ _ [] = helpCmd ["report"]
-report dist trainData testData args =
+reportCmd :: Distribution -> DataSet -> DataSet -> [String] -> Repl ()
+reportCmd _ _ _ [] = helpCmd ["report"]
+reportCmd dist trainData testData args =
   case readMaybe @Int (head args) of
     Nothing -> io.putStrLn $ "The id must be an integer."
-    Just n  -> do egraph $ printExpr trainData testData dist n
+    Just n  -> run (Report n (dist, trainData, testData))
 
-optimize :: Distribution -> DataSet -> DataSet -> [String] -> Repl ()
-optimize _ _ _ [] = helpCmd ["optimize"]
-optimize dist trainData testData args =
+optimizeCmd :: Distribution -> DataSet -> DataSet -> [String] -> Repl ()
+optimizeCmd _ _ _ [] = helpCmd ["optimize"]
+optimizeCmd dist trainData testData args =
   case readMaybe @Int (head args) of
     Nothing -> io.putStrLn $ "The id must be an integer."
     Just n  -> do let nIters = if length args > 1 then fromMaybe 100 (readMaybe @Int (args !! 1)) else 100
-                  t <- egraph $ getBestExpr n
-                  (f, theta) <- egraph $ fitnessFunRep nIters dist trainData trainData t
-                  egraph $ insertFitness n f theta
-                  printSimpleMultiExprs [n]
+                  run (Optimize n nIters (dist, trainData, trainData))
 
-subtrees :: [String] -> Repl ()
-subtrees [] = helpCmd ["subtrees"]
-subtrees (arg:_) = case readMaybe @Int arg of
-                     Nothing -> io.putStrLn $ "The argument must be an integer."
-                     Just n  -> do isValid <- egraph $ gets ((IntMap.member n) . _eClass)
-                                   if isValid
-                                      then do ids <- egraph $ getAllChildEClasses n
-                                              printSimpleMultiExprs ids
-                                      else io.putStrLn $ "Invalid id."
+subtreesCmd :: [String] -> Repl ()
+subtreesCmd [] = helpCmd ["subtrees"]
+subtreesCmd (arg:_) = case readMaybe @Int arg of
+                        Nothing -> io.putStrLn $ "The argument must be an integer."
+                        Just n  -> run (Subtrees n)
 
-insert :: Distribution -> DataSet -> DataSet -> [String] -> Repl ()
-insert dist trainData testData [] = helpCmd ["insert"]
-insert dist trainData testData args = do
+insertCmd :: Distribution -> DataSet -> DataSet -> [String] -> Repl ()
+insertCmd dist trainData testData [] = helpCmd ["insert"]
+insertCmd dist trainData testData args = do
   let etree = parseSR TIR "" False $ B.pack (unwords args)
   case etree of
-    Left _ -> io.putStrLn $ "no parse for " <> unwords args
+    Left _     -> io.putStrLn $ "no parse for " <> unwords args
     Right tree -> do ec <- egraph $ fromTree myCost tree
-                     optimize dist trainData testData [show ec, "100"]
+                     run (Optimize ec 100 (dist, trainData, trainData))
 
-topPat :: [String] -> Repl ()
-topPat []  = helpCmd ["topPat"]
-topPat [x] = helpCmd ["topPat"]
-topPat (sn:spat) = case readMaybe @Int sn of
-                       Nothing -> io.putStrLn $ "The first argument must be an integer."
-                       Just n  -> do let etree = parsePat $ B.pack (unwords spat)
-                                     case etree of
-                                          Left _     -> io.putStrLn $ "no parse for " <> unwords spat
-                                          Right pat  -> do mm <- egraph $ match pat
-                                                           ecs' <- egraph $ (Prelude.map fromLeft . Prelude.filter isLeft . Prelude.map snd) <$> match pat
-                                                           ecs <- egraph $ Prelude.mapM canonical ecs'
-                                                           ids <- egraph $ getTopECLassIn n ecs
-                                                           printSimpleMultiExprs (nub ids)
-  where
-    isLeft (Left _)   = True
-    isLeft _          = False
-    fromLeft (Left x) = x
-    fromLeft _        = undefined
+paretoCmd :: [String] -> Repl ()
+paretoCmd []   = run (Pareto ByFitness)
+paretoCmd args = case (Prelude.map toLower $ unwords args) of
+                    "by fitness" -> run (Pareto ByFitness )
+                    "by dl"      -> run (Pareto ByDL)
 
-commands = ["help", "top", "report", "optimize", "subtrees", "insert", "top-patterns"]
+countPatCmd :: [String] -> Repl ()
+countPatCmd []   = helpCmd ["count-pattern"]
+countPatCmd args = run (CountPat (unwords args))
+
+commands = ["help", "top", "report", "optimize", "subtrees", "insert", "count-pattern", "distribution", "pareto"]
 
 hlpMap = Map.fromList $ Prelude.zip commands
                             [ "help <cmd>: shows a brief explanation for the command."
@@ -179,7 +163,9 @@ hlpMap = Map.fromList $ Prelude.zip commands
                             , "optimize <n>: (re)optimize expression with id n."
                             , "subtrees <n>: shows the subtrees for the tree rotted with id <n>."
                             , "insert <expr>: inserts a new tree and evaluates."
-                            , "top-patterns <n> <pat>: displays the top-n expressions following the pattern <pat>."
+                            , "count-pattern <pat> : count the occurrence of the pattern <pat> in the evaluated expressions."
+                            , "distribution: shows the distribution of patterns."
+                            , "pareto: shows the pareto front."
                             ]
 
 -- Evaluation
@@ -205,7 +191,7 @@ ini = do (io . putStrLn) "Welcome to Incredible e-graph equation explorer.\nPres
 final :: Repl ExitDecision
 final = do io.print $ "good-bye!"
            return Exit
-
+-- TODO: DL is sorted by min not max as the fitness
 main :: IO ()
 main = do
   args <- execParser opts
@@ -218,17 +204,21 @@ main = do
   let --alg = evalStateT (repl dataTrain dataVal dataTest args) emptyGraph
       dist = _distribution args
       funs = [ helpCmd
-             , top
-             , report dist dataTrain dataTest
-             , optimize dist dataTrain dataTest
-             , subtrees
-             , insert dist dataTrain dataTest
-             , topPat
+             , topCmd
+             , reportCmd dist dataTrain dataTest
+             , optimizeCmd dist dataTrain dataTest
+             , subtreesCmd
+             , insertCmd dist dataTrain dataTest
+             , countPatCmd
+             , distCmd
+             , paretoCmd
              ]
       cmdMap = Map.fromList $ Prelude.zip commands funs
 
       repl = evalRepl (const $ pure ">>> ") (cmd cmdMap) [] Nothing Nothing (Word comp) ini final
-  eg' <- execStateT createDB eg
+      crDB = if _calcDL args then (createDB >> fillDL dist dataTrain) else (createDB >> pure ())
+  when (_calcDL args) $ putStrLn "Calculating DL..."
+  eg' <- execStateT crDB eg
   evalStateT repl eg'
 
 
