@@ -103,6 +103,9 @@ getSize c = gets (_size . _info . (IM.! c) . _eClass)
 isSizeOf :: (Int -> Bool) -> EClass -> Bool
 isSizeOf p = p . _size . _info
 {-# INLINE isSizeOf #-}
+getDL :: EClassId -> RndEGraph (Maybe Double)
+getDL c = gets (_dl . _info . (IM.! c) . _eClass)
+{-# INLINE getDL #-}
 
 getBestFitness :: RndEGraph (Maybe Double)
 getBestFitness = do
@@ -161,14 +164,18 @@ printsimpleExpr eid = do t   <- egraph $ getBestExpr eid
                          fit <- egraph $ getFitness eid
                          sz  <- egraph $ getSize eid
                          p   <- egraph $ getTheta eid
+                         dl  <- egraph $ getDL eid
                          let fit' = case fit of
                                       Nothing -> "--"
                                       Just f  -> printf "%.4f" f
                              p' = case p of
                                     Nothing -> "--"
                                     Just ps -> "[" <> intercalate ", " (Prelude.map (printf "%.4f") (MA.toList ps)) <> "]"
+                             dl' = case dl of
+                                    Nothing -> "--"
+                                    Just d  -> printf "%.4f" d
 
-                         pure $ colsAllG center [[show eid], justifyText 50 $ showExpr t, [fit'], justifyText 50 p', [show sz]]
+                         pure $ colsAllG center [[show eid], justifyText 50 $ showExpr t, [fit'], justifyText 50 p', [show sz], [dl']]
 
 printCounts (pat, cnt) = do
   let spat = showPat pat
@@ -190,8 +197,8 @@ printMultiCounts cnts = do rows <- forM cnts printCounts
 bold s = formatted (setSGRCode [SetConsoleIntensity BoldIntensity]) (plain s) (setSGRCode [Reset])
 
 headerSimple :: HeaderSpec LineStyle (Formatted String)
-headerSimple = titlesH $ Prelude.map (bold) ["Id", "Expression", "Fitness", "Parameters", "Size"]
-columns = [numCol, fixedLeftCol 50, numCol, fixedLeftCol 50, numCol]
+headerSimple = titlesH $ Prelude.map (bold) ["Id", "Expression", "Fitness", "Parameters", "Size", "DL"]
+columns = [numCol, fixedLeftCol 50, numCol, fixedLeftCol 50, numCol, numCol]
 headerCount :: HeaderSpec LineStyle (Formatted String)
 headerCount = titlesH $ Prelude.map bold ["Pattern", "Count"]
 

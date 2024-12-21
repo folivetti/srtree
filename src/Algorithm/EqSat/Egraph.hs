@@ -197,7 +197,7 @@ data EClassData = EData { _cost    :: Cost
                         , _best    :: ENode
                         , _consts  :: Consts
                         , _fitness :: Maybe Double    -- NOTE: this cannot be NaN
-                        -- , _dl :: Maybe Double
+                        , _dl      :: Maybe Double
                         , _theta   :: Maybe PVector
                         , _size    :: Int
                         -- , _properties :: Property
@@ -254,7 +254,7 @@ instance Binary EGraphDB
 instance Binary EGraph
 
 instance Eq EClassData where
-  EData c1 b1 cs1 ft1 _ s1 == EData c2 b2 cs2 ft2 _ s2 = c1==c2 && b1==b2 && cs1==cs2 && ft1==ft2 && s1==s2
+  EData c1 b1 cs1 ft1 dl1 _ s1 == EData c2 b2 cs2 ft2 dl2 _ s2 = c1==c2 && b1==b2 && cs1==cs2 && ft1==ft2 && dl1==dl2 && s1==s2
 
 -- The database maps a symbol to an IntTrie
 -- The IntTrie stores the possible paths from a certain e-class

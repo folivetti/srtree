@@ -33,6 +33,9 @@ import Algorithm.EqSat.Queries
 import Algorithm.EqSat.DB
 import Algorithm.EqSat.Simplify
 
+import Data.Binary ( encode, decode )
+import qualified Data.ByteString.Lazy as BS
+
 import Util
 
 -- * Parsing
@@ -47,6 +50,8 @@ data Command  = Top Int Filter Criteria PatStr
               | Subtrees EClassId -- TODO: bug
               | Pareto Criteria -- TODO
               | CountPat String
+              | Save String
+              | Load String
 
 type Filter = EClass -> Bool -- pattern?
 type FilterDist = Int -> Bool
@@ -147,7 +152,7 @@ putEOL bs | B.last bs == '\n' = bs
 run (Top n filters criteria NoPat) = do
    let getFun = if criteria == ByFitness then getTopFitEClassThat else getTopDLEClassThat
    ids <- egraph $ getFun n filters
-   printSimpleMultiExprs ids
+   printSimpleMultiExprs $ reverse ids
 
 run (Top n filters criteria withPat) = do
    let (pat', getFun, isParents) =
@@ -163,7 +168,7 @@ run (Top n filters criteria withPat) = do
         ecs  <- egraph $ Prelude.mapM canonical ecs'
                            >>= getParents isParents
         ids  <- egraph $ getFun n filters ecs
-        printSimpleMultiExprs (nub ids)
+        printSimpleMultiExprs (reverse $ nub ids)
 
 run (Distribution pSz mLimit) = do
   ee <- egraph $ IntSet.toList . IntSet.fromList <$> getAllEvaluatedEClasses
@@ -212,6 +217,14 @@ run (CountPat spat) = do
     Left _     -> io.putStrLn $ "no parse for " <> spat
     Right pat  -> do (p, cnt) <- countPattern pat
                      io . putStrLn $ spat <> " appears in " <> show cnt <> " equations."
+
+run (Save fname) = do
+  eg <- egraph get
+  io $ BS.writeFile fname (encode eg)
+
+run (Load fname) = do
+  eg <- io $ BS.readFile fname
+  egraph $ put (decode eg)
 
 -- * auxiliary functions
 

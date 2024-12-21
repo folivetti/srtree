@@ -154,7 +154,15 @@ countPatCmd :: [String] -> Repl ()
 countPatCmd []   = helpCmd ["count-pattern"]
 countPatCmd args = run (CountPat (unwords args))
 
-commands = ["help", "top", "report", "optimize", "subtrees", "insert", "count-pattern", "distribution", "pareto"]
+saveCmd :: [String] -> Repl ()
+saveCmd [] = helpCmd ["save"]
+saveCmd args = run (Save (unwords args))
+
+loadCmd :: [String] -> Repl ()
+loadCmd [] = helpCmd ["load"]
+loadCmd args = run (Load (unwords args))
+
+commands = ["help", "top", "report", "optimize", "subtrees", "insert", "count-pattern", "distribution", "pareto", "save", "load"]
 
 hlpMap = Map.fromList $ Prelude.zip commands
                             [ "help <cmd>: shows a brief explanation for the command."
@@ -166,6 +174,8 @@ hlpMap = Map.fromList $ Prelude.zip commands
                             , "count-pattern <pat> : count the occurrence of the pattern <pat> in the evaluated expressions."
                             , "distribution: shows the distribution of patterns."
                             , "pareto: shows the pareto front."
+                            , "save: save current e-graph to a file."
+                            , "load: load current e-graph from a file."
                             ]
 
 -- Evaluation
@@ -212,6 +222,8 @@ main = do
              , countPatCmd
              , distCmd
              , paretoCmd
+             , saveCmd
+             , loadCmd
              ]
       cmdMap = Map.fromList $ Prelude.zip commands funs
 

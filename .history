@@ -1,3 +1,15 @@
+top 10 by dl
+top 10
+load egraph_dl.dump
+load egraph_dl.dump
+top 10
+load egraph.dump
+top 10
+save egrap_dl.dump
+top 10 by dl dsc
+top 10 by dl asc
+top 10 by dl
+top 10
 pareto by dl
 pareto by dl
 pareto by fitness
@@ -86,15 +98,3 @@ top-patterns 10 in including x0 |**| (t0 + x0)
 top-patterns 10 in including x0 |**| (t0 + x0)
 top-patterns 10 x0 |**| (t0 + x0)
 count-pattern x0 |**| (t0 * x0)
-count-pattern x0 |**| (t0 * x0)
-top-patterns 10 x0 |**| (t0 + x0)
-top-patterns 10 x0 |**| (t0 + x0)
-top-patterns 10 in x0 |**| (t0 + x0)
-top-patterns 10 in including x0 |**| (t0 + x0)
-count-pattern x0 |**| (t0 * x0)
-count-pattern x0 |**| t0
-count-pattern x0 * t0
-count-pattern x0 + t0
-count-pattern x0 |**| (v0 + t0)
-count-pattern sin(x0)
-count-pattern x0 |**| t0

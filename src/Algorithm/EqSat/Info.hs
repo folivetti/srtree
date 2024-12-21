@@ -42,9 +42,9 @@ import Debug.Trace
 -- TODO: instead of folding, just do not apply rules
 -- list of values instead of single value
 joinData :: EClassData -> EClassData -> EClassData
-joinData (EData c1 b1 cn1 fit1 p1 sz1) (EData c2 b2 cn2 fit2 p2 sz2) =
+joinData (EData c1 b1 cn1 fit1 dl1 p1 sz1) (EData c2 b2 cn2 fit2 dl2 p2 sz2) =
   --EData (min c1 c2) b (combineConsts cn1 cn2) (minMaybe fit1 fit2) (bestParam p1 p2 fit1 fit2) (min sz1 sz2)
-  EData (min c1 c2) (choose b1 b2) (choose cn1 cn2) (minMaybe fit1 fit2) (chooseF p1 p2) (choose sz1 sz2)
+  EData (min c1 c2) (choose b1 b2) (choose cn1 cn2) (minMaybe fit1 fit2) (chooseF dl1 dl2) (chooseF p1 p2) (choose sz1 sz2)
   where
     isFst = c1 <= c2
     choose x y = if isFst then x else y
@@ -90,7 +90,7 @@ makeAnalysis costFun enode =
      enode' <- canonize enode
      cost   <- calculateCost costFun enode'
      sz <- sum <$> mapM (\ecId -> gets (_size . _info . (IntMap.! ecId) . _eClass)) (childrenOf enode')
-     pure $ EData cost enode' consts Nothing Nothing (sz+1)
+     pure $ EData cost enode' consts Nothing Nothing Nothing (sz+1)
 
 getChildrenMinHeight :: Monad m => ENode -> EGraphST m Int
 getChildrenMinHeight enode = do
@@ -182,8 +182,12 @@ insertFitness eId fit params = do
     else modify' $ over (eDB . fitRangeDB) (insertRange eId fit . removeRange eId (fromJust oldFit))
 
 insertDL :: Monad m => EClassId -> Double -> EGraphST m ()
-insertDL eId fit = do
+insertDL eId fit' = do
+  let fit = negate fit'
   ec <- gets ((IntMap.! eId) . _eClass)
   let sz = _size . _info $ ec
+      newInfo = (_info ec){_dl = Just fit'}
+      newEc   = ec{_info=newInfo}
+  modify' $ over eClass (IntMap.insert eId newEc)
   modify' $ over (eDB . dlRangeDB) (insertRange eId fit)
           . over (eDB . sizeDLDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith (><) sz Empty)

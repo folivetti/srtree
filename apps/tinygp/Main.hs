@@ -53,7 +53,7 @@ opt = Args
       <> value 0.3
       <> help "Mutation probability." )
 
-nonterms = [Right (+), Right (-), Right (*), Right (/), Right (\l r -> abs l ** r), Left (1/)]
+nonterms = [Right (+), Right (-), Right (*), Right (/), Right PowerAbs, Left Recip, Left Log, Left Exp, Left SqrtAbs]
 --nonterms = [Right (+), Right (-), Right (*)]
 
 main :: IO ()
