@@ -16,13 +16,15 @@ import Data.Vector qualified as V
 import Control.Monad (when)
 import Data.Massiv.Array qualified as M
 import Debug.Trace ( traceShow, trace )
+import Util
+import Data.List ( intercalate )
 
 data Method = Grow | Full | BTC
+type Rng a = StateT StdGen IO a
 
-type Rng a = StateT StdGen IO a 
 type GenUni = Fix SRTree -> Fix SRTree 
 type GenBin = Fix SRTree -> Fix SRTree -> Fix SRTree
-type FitFun = Individual -> Individual 
+type FitFun = Individual -> Rng Individual
 
 data Individual = Individual { _tree :: Fix SRTree, _fit :: Double, _params :: PVector }
 
@@ -111,8 +113,8 @@ randomIndividual hyperparams fitFun grow = do
     t <- randomTree hyperparams grow 
     let p = countParams t
     theta' <- replicateM p (randomRange (-1,1))
-    let ind = fitFun $ Individual t 0.0 (M.fromList compMode theta' :: PVector)
-    pure ind
+    fitFun $ Individual t 0.0 (M.fromList compMode theta' :: PVector)
+    --pure ind
     --if isInfinite (_fit ind)
     --   then randomIndividual hyperparams fitFun grow 
     --   else pure ind
@@ -128,19 +130,20 @@ initialPop hyperparams fitFun = do
    pure (V.concat pop)
 {-# INLINE initialPop #-}
 
-fitness :: SRMatrix -> PVector -> Individual -> Individual
-fitness x y ind =
-    let 
-        tree = relabelParams $ _tree ind
-        thetaOrig = _params ind
-        (theta, fit, _) = minimizeNLL MSE Nothing 10 x y tree thetaOrig
-        --theta = _params ind
-        fit' = negate $ mse x y tree thetaOrig -- nll Gaussian (Just 1) x y (relabelParams $ _tree ind) (_params ind)
-       -- (fit, g) = gradNLL Gaussian Nothing x y (_tree ind) (_params ind)
-    in if M.isNull (_params ind)
-          then ind{_fit=fit'}
-          else ind{_fit = negate (mse x y tree theta), _params = theta}
-    --in ind{_fit = fit, _params = theta}
+fitness :: SRMatrix -> PVector -> Individual -> Rng Individual
+fitness x y ind = do
+    let tree = relabelParams $ _tree ind
+        p    = countParams tree
+    theta1' <- M.fromList M.Seq <$> replicateM p (randomRange (-1,1))
+    theta2' <- M.fromList M.Seq <$> replicateM p (randomRange (-1,1))
+    let (theta1, _, _) = minimizeNLL MSE Nothing 50 x y tree theta1'
+        (theta2, _, _) = minimizeNLL MSE Nothing 50 x y tree theta2'
+        fit1 = negate $ mse x y tree theta1
+        fit2 = negate $ mse x y tree theta2
+        thetaOpt = if fit1 < fit2 then theta1 else theta2
+        fitOpt   = min fit1 fit2
+    pure ind{_fit = fitOpt, _params = thetaOpt}
+
 {-# INLINE fitness #-}
 
 isAbs (Fix (Uni Abs _)) = True 
@@ -154,37 +157,56 @@ isInv _ = False
 mutate :: HyperParams -> Individual -> Rng Individual
 mutate hp ind = do
   let sz = countNodes' (_tree ind)
-  (t, b) <- go sz (_pm hp) (_tree ind)
-  if b 
+  p <- state $ randomR (0, sz-1)
+  b <- state random
+  t <- go p (_maxSize hp) (_tree ind)
+  --(t, b) <- go sz (_pm hp) (_tree ind)
+  if b <= _pm hp
      then pure $ Individual t 0.0 M.empty
      else pure ind
       where
-        go s p t
-          | isAbs t = do let [x] = getChildren t
-                         (t', b) <- go s p x
-                         pure (Fix $ replaceChildren [t'] $ unfix t, b)
-          | otherwise = do
-              v <- state random 
-              if v < p 
-                then do let sz2 = countNodes' t 
-                            maxSz = _maxSize hp - s + sz2 - 2
-                        (, True) <$> randomTree hp{_maxSize = maxSz} True 
-                else case arity t of 
-                       0 -> pure (t, False)
-                       1 -> do let [x] = getChildren t 
-                               (t', b) <- go s p x 
-                               pure (Fix $ replaceChildren [t'] $ unfix t, b)
-                       2 -> do let [l,r] = getChildren t 
-                               (l', b) <- if isInv t 
-                                             then pure (l, False)
-                                             else go s p l
-                               if b 
-                                 then pure (Fix $ replaceChildren [l', r] $ unfix t, b)
-                                 else do (r', b') <- go s p r 
-                                         pure (Fix $ replaceChildren [l, r'] $ unfix t, b')
+        go 0 msz t = randomTree hp{_maxSize = msz} True
+        go n msz (Fix (Uni f t)) = Fix . Uni f <$> go (n-1) (msz-1) t
+        go n msz (Fix (Bin op l r)) = do
+          let nl = countNodes l
+              nr = countNodes r
+          if nl <= n - 1
+             then Fix . Bin op l <$> go (n-nl-1) (msz-nl-1) r
+             else do l' <- go (n-1) (msz-nr-1) l
+                     pure $ Fix $ Bin op l' r
 
 crossover :: HyperParams -> Individual -> Individual -> Rng Individual
-crossover hp ind1 ind2 = pure ind1
+crossover hp ind1 ind2 = do
+  b <- state random
+  if b < (_pc hp)
+     then do let n1 = countNodes $ _tree ind1
+                 n2 = countNodes $ _tree ind2
+             p1 <- state $ randomR (0, n1-1)
+             p2 <- state $ randomR (0, n2-1)
+             let part1 = pickLeft p1 $ _tree ind1
+                 part2 = pickRight p2 $ _tree ind2
+                 t = part1 part2
+                 n = countNodes t
+             if n <= _maxSize hp
+                then pure ind1{_tree = t}
+                else pure ind1
+     else pure ind1
+  where
+    pickRight :: Int -> Fix SRTree -> Fix SRTree
+    pickRight 0 node = node
+    pickRight n (Fix (Uni f t)) = pickRight (n-1) t
+    pickRight n (Fix (Bin op l r)) = let nl = countNodes l
+                                     in if nl <= n-1
+                                           then pickRight (n-nl-1) r
+                                           else pickRight (n-1) l
+    pickLeft :: Int -> Fix SRTree -> (Fix SRTree -> Fix SRTree)
+    pickLeft 0 node = \t -> t
+    pickLeft n (Fix (Uni f t)) = let g = pickLeft (n-1) t in \t' -> Fix $ Uni f (g t')
+    pickLeft n (Fix (Bin op l r)) = let nl = countNodes l
+                                    in if nl <= n-1
+                                          then let g = pickLeft (n-nl-1) r in \t -> Fix $ Bin op l (g t)
+                                          else let g = pickLeft (n-1) l in \t -> Fix $ Bin op (g t) r
+
 
 evolve :: HyperParams -> FitFun -> V.Vector Individual -> Rng Individual
 evolve hp fitFun pop = do 
@@ -193,9 +215,20 @@ evolve hp fitFun pop = do
     child <- crossover hp parent1 parent2
     child' <- mutate hp child
     let p = countParams (_tree child')
-    theta' <- M.fromList compMode <$> replicateM p (randomRange (-1,1))
-    pure $ fitFun child'{_params = theta'}
+    --theta' <- M.fromList compMode <$> replicateM p (randomRange (-1,1))
+    fitFun child'--{_params = theta'}
 {-# INLINE evolve #-}
+
+printFinal ind x y x_test y_test = do
+  let tree     = relabelParams $ _tree ind
+      theta    = _params ind
+      mseTrain = mse x y tree theta
+      mseTest  = mse x_test y_test tree theta
+      r2Train  = r2 x y tree theta
+      r2Test   = r2 x_test y_test tree theta
+      thetaStr = intercalate ";" $ map show $ M.toList theta
+  putStrLn "id,Expression,theta,size,MSE_train,MSE_test,R2_train,R2_test"
+  putStr $ "0," <> showExpr tree <> "," <> thetaStr <> "," <> show (countNodes tree) <> "," <> show mseTrain <> "," <> show mseTest <> "," <> show r2Train <> "," <> show r2Test
 
 report :: Int -> V.Vector Individual -> IO ()
 report gen = mapM_ reportOne
@@ -208,15 +241,15 @@ report gen = mapM_ reportOne
                            print (M.toList $ _params ind)
 {-# INLINE report #-}
 
-evolution :: Int -> HyperParams -> FitFun -> Rng (V.Vector Individual)
+evolution :: Int -> HyperParams -> FitFun -> Rng (Individual)
 evolution gen hp fitFun = do 
     pop <- initialPop hp fitFun
-    liftIO $ report (-1) pop
+    --liftIO $ report (-1) pop
     go gen pop 
         where 
-            go 0 pop = pure pop 
+            go 0 pop = pure $ pop  V.! 0
             go n pop = do 
                 let best = V.maximumOn _fit $ V.filter (not.isNaN._fit) pop
                 pop' <- V.cons best <$> V.replicateM (_popSize hp - 1) (evolve hp fitFun pop)
-                liftIO $ report (gen-n) pop'
+                --liftIO $ report (gen-n) pop'
                 go (n-1) pop'
