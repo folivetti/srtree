@@ -274,4 +274,4 @@ The main functions of this module are:
 
 - support more advanced functions
 - support conditional branching (`IF-THEN-ELSE`)
-
+- document egraph-search and ieeexplore
