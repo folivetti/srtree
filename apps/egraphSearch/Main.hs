@@ -318,5 +318,8 @@ main = do
 
   where
     opts = Opt.info (opt <**> helper)
-            ( fullDesc <> progDesc "Very simple example of GP using SRTree."
-           <> header "tinyGP - a very simple example of GP using SRTRee." )
+            ( fullDesc <> progDesc "Symbolic Regression search algorithm\
+                                   \ exploiting the potentials of equality saturation\
+                                   \ and e-graphs."
+           <> header "SymREgg - symbolic regression with e-graphs."
+            )

@@ -475,5 +475,6 @@ main = do
   evalStateT alg g'
   where
     opts = Opt.info (opt <**> helper)
-            ( fullDesc <> progDesc "Very simple example of GP using SRTree."
-           <> header "tinyGP - a very simple example of GP using SRTRee." )
+            ( fullDesc <> progDesc "An implementation of GP with modified crossover and mutation\
+                                   \ operators designed to exploit equality saturation and e-graphs."
+           <> header "GPEgg - Genetic Programming for Symbolic Regression using e-graphs." )

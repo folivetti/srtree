@@ -47,8 +47,8 @@ data Command  = Top Int Filter Criteria PatStr
               | Report EClassId ArgOpt
               | Optimize EClassId Int ArgOpt
               | Insert String ArgOpt
-              | Subtrees EClassId -- TODO: bug
-              | Pareto Criteria -- TODO
+              | Subtrees EClassId
+              | Pareto Criteria
               | CountPat String
               | Save String
               | Load String
@@ -66,6 +66,8 @@ type ArgOpt = (Distribution, DataSet, DataSet)
 -- insert eq
 -- subtrees id
 -- distribution with size <=10 limited at 10 asc|dsc
+--
+
 
 parseCmd parser = eitherResult . (`feed` "") . parse parser . putEOL . B.strip
 

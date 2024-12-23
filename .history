@@ -1,3 +1,16 @@
+help count-pattern 
+help count-pattern 
+help distribution 
+help top
+help top
+top 10 with complexiy = 12
+top 10 with size <= 10 with complexity <=12
+top 10 with size <= 10 and complexity <=12
+top 10 with size <= 10
+top 10 by dl
+top 10
+top 10
+top
 top 10 by dl
 top 10
 load egraph_dl.dump
@@ -84,17 +97,4 @@ count-pattern x0 + v0
 count-pattern x0
 count-pattern v0
 count-pattern x0 |**| (t0 * x0)
-count-pattern x0 |**| (t0 * x0)
-top-patterns 236 in including x0 |**| (t0 + x0)
-top-patterns 100 in including x0 |**| (t0 + x0)
-count-pattern x0 |**| (t0 * x0)
-top-patterns 10 in including x0 |**| (t0 + x0)
-top-patterns 10 in including x0 |**| (t0 + x0)
-top-patterns 10 in including v0 |**| (t0 + x0)
-top-patterns 10 in including t0 |**| (t0 + x0)
-count-pattern x0 |**| (t0 * x0)
-top-patterns 10 in including x0 |**| (t0 + x0)
-top-patterns 10 in including x0 |**| (t0 + x0)
-top-patterns 10 in including x0 |**| (t0 + x0)
-top-patterns 10 x0 |**| (t0 + x0)
 count-pattern x0 |**| (t0 * x0)

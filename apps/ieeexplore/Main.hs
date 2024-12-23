@@ -164,18 +164,73 @@ loadCmd args = run (Load (unwords args))
 
 commands = ["help", "top", "report", "optimize", "subtrees", "insert", "count-pattern", "distribution", "pareto", "save", "load"]
 
+topHlp = "top N [FILTER...] [CRITERIA] [[not] matching [root] PATTERN] \n \
+         \ \n \
+         \ FILTER: with [size|cost|parameters] [<|<=|=|>|>=] N \n \
+         \ CRITERIA: [by fitness | by dl]  \n \
+         \ \n \
+         \ where \"dl\" is the description length, \"cost\" is the default cost function \n \
+         \ and \"parameters\" refer to the number of parameters. The cost function  \n \
+         \ assigns a cost of 1 to terminals, 2 to binary operators and 3 to \n \
+         \ nonlinear functions. \n \
+         \ \n \
+         \ Example: \n \
+         \ \n \
+         \ top 10 with size <= 10 with parameters > 2 by fitness matching v0 * x0 + t0 \n \
+         \ \n \
+         \ This will return the 10 best expressions by fitness with size less than \n \
+         \ or equal to 10 and more than 2 parameters containing any sub-expression  \n \
+         \ in the format f(x) * x0 + t0. \n \
+         \ To create a pattern for matching you can use x0 .. xn to represent a variable \n \
+         \  t0 .. tn to represent a numerical parameter, and v0 .. vn to represent wildcards. \n \
+         \ Notice that v0 * x0 + v0 will pattern expressions such as (sin(t0) + x0) * x0 + (sin(t0) + x0) \n \
+         \ but not (sin(t0) + x0) * x0 + t0, since both occurrences of v0 will match the same expression. \n \
+         \ (see `help count-pattern` for more details) \
+         \ The keyword \"root\" will matches only expressions starting with this pattern."
+
+distHlp = "distribution [FILTER] [LIMIT] \n\n \
+          \ FILTER: with size [<|<=|=|>|>=] N \n \
+          \ LIMIT: limited at N [asc|dsc] \n\n \
+          \ Shows the distribution of all the patterns in the set of evaluated expressions.\n \
+          \ The list can be filtered by the size of the pattern and limited by the top most frequent (dsc) \n \
+          \ or least frequent (asc) patterns. \n\n \
+          \ See `help count-pattern` for details on the syntax of pattern."
+
+countHlp = "count-pattern PAT \n\n \
+           \ Count the number of occurrence of the pattern PAT in the e-graph. \n\n \
+           \ A pattern follows the same syntax of an expression: \n\n\
+           \ EXPR := FUN(EXPR) | EXPR OP EXPR | TERM \n\
+           \ FUN := abs | sin | cos | tan | sinh | cosh | tanh | asin | acos | atan | asinh | acosh | atanh | sqrt | sqrtabs | cbrt | square | log | logabs | exp | recip | cube \n\
+           \ OP := + | - | * | / | aq | ^ | |^| \n\
+           \ TERM := xN | tN | vN \n\n\
+           \ where: \n \
+           \ - aq is the analytical quotient (x aq y = x / sqrt(1 + y^2)) \n \
+           \ - x |^| y = abs(x) ^ y \n \
+           \ - xN is the N-th input variable \n \
+           \ - tN is the N-th numerical parameter \n \
+           \ - vN is the N-th pattern variable (see below) \n\n \
+           \ The pattern variable works as a wildcard matching any expression. \n \
+           \ If we use the same pattern variable multiple times in the expression, \n \
+           \ the pattern must be the same in every occurrence. \n\n \
+           \ Examples: \n\n \
+           \ v0 + x0 will match anything added to x0\n \
+           \ v0 + v1 * x0 will match anything added to any expression multiplied by x0. \
+           \ For example: t0 ^ 2 + exp(t1 + x1) * x0. \n \
+           \ v0 + v0 * x0 will match any expression added with this same expression multiplied by x0. \
+           \ For example: t0 ^ 2 + (t0 ^ 2) * x0."
+
 hlpMap = Map.fromList $ Prelude.zip commands
                             [ "help <cmd>: shows a brief explanation for the command."
-                            , "top <n> [size]: displays the top-n expression sorted by fitness. If <size> is provided, then it will retrieve the top-n with that size."
-                            , "report <n>: displays a detailed report for the expression with id n."
-                            , "optimize <n>: (re)optimize expression with id n."
-                            , "subtrees <n>: shows the subtrees for the tree rotted with id <n>."
-                            , "insert <expr>: inserts a new tree and evaluates."
-                            , "count-pattern <pat> : count the occurrence of the pattern <pat> in the evaluated expressions."
-                            , "distribution: shows the distribution of patterns."
-                            , "pareto: shows the pareto front."
-                            , "save: save current e-graph to a file."
-                            , "load: load current e-graph from a file."
+                            , topHlp
+                            , "report N: displays a detailed report for the expression with id N."
+                            , "optimize N: (re)optimize expression with id N."
+                            , "subtrees N: shows the subtrees for the tree rotted with id N."
+                            , "insert EXPR: inserts a new expression EXPR and evaluates."
+                            , countHlp
+                            , distHlp
+                            , "pareto [by fitness| by dl]: shows the pareto front where the first objective is the criteria (default: fitness) and the second objective is model size."
+                            , "save FILE: save current e-graph to a file named FILE."
+                            , "load FILE: load current e-graph from a file named FILE."
                             ]
 
 -- Evaluation
@@ -236,6 +291,6 @@ main = do
 
   where
     opts = Opt.info (opt <**> helper)
-            ( fullDesc <> progDesc "Very simple example of GP using SRTree."
-           <> header "tinyGP - a very simple example of GP using SRTRee." )
+            ( fullDesc <> progDesc "Tool to explore symbolic regression expressions."
+           <> header "ieeexplore - Incredible E-graphs Equations Explorer." )
 
