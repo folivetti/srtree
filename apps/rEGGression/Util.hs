@@ -146,7 +146,7 @@ printExpr dataTrain dataTest distribution ec = do
             thetaStr   = intercalate ", " $ Prelude.map show (MA.toList theta)
         lift . putStr $ "Evaluation metrics for expression (" <> (show ec) <> "): "
         lift . putStr $ setSGRCode [SetConsoleIntensity BoldIntensity]
-        lift . putStrLn $ showExpr bestExpr
+        lift . putStrLn $ showExpr best'
         lift . putStr $ setSGRCode [Reset]
         lift . putStrLn $ "# of nodes\t" <> show (countNodes $ convertProtectedOps expr)
         lift . putStrLn $ "params:\t[" <> thetaStr <> "]"
@@ -160,7 +160,7 @@ printExpr dataTrain dataTest distribution ec = do
             headerReport = titlesH $ Prelude.map bold ["Metric", "Training", "Test"]
         lift . putStrLn $ tableString (columnHeaderTableS columnsReport unicodeS headerReport rows)
 
-printsimpleExpr eid = do t   <- egraph $ getBestExpr eid
+printsimpleExpr eid = do t   <- egraph $ relabelParams <$> getBestExpr eid
                          fit <- egraph $ getFitness eid
                          sz  <- egraph $ getSize eid
                          p   <- egraph $ getTheta eid

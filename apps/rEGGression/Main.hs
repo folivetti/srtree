@@ -250,7 +250,7 @@ comp :: (Monad m, MonadState EGraph m) => WordCompleter m
 comp n = pure $ filter (isPrefixOf n) commands
 
 ini :: Repl ()
-ini = do (io . putStrLn) "Welcome to Incredible e-graph equation explorer.\nPress Ctrl-D to exit.\nPress <TAB> to see the commands."
+ini = do (io . putStrLn) "Welcome to rEGGression.\nPress Ctrl-D to exit.\nPress <TAB> to see the commands."
          pure ()
 
 final :: Repl ExitDecision
@@ -291,6 +291,6 @@ main = do
 
   where
     opts = Opt.info (opt <**> helper)
-            ( fullDesc <> progDesc "Tool to explore symbolic regression expressions."
-           <> header "ieeexplore - Incredible E-graphs Equations Explorer." )
+            ( fullDesc <> progDesc "Exploration and query system for a database of regression models using e-graphs."
+           <> header "rEGGression - Nonlinear regression models exploration and query system with e-graphs (egg)." )
 

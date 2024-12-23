@@ -33,6 +33,8 @@ import Algorithm.EqSat.Queries
 import Algorithm.EqSat.DB
 import Algorithm.EqSat.Simplify
 
+import Algorithm.SRTree.ModelSelection
+
 import Data.Binary ( encode, decode )
 import qualified Data.ByteString.Lazy as BS
 
@@ -85,23 +87,25 @@ parseTop = do n <- decimal
                         (x:_) -> pure $ x
               pure $ Top n (getAll . mconcat filters) criteria pats
 
-parseDist = do filters <- fromMaybe (const True) . listToMaybe <$> many' parseFilterDist
+parseDist = do filters <- many' parseFilterDist
                stripSp
                limit   <- listToMaybe <$> many' parseLimit
-               pure $ Distribution filters limit
+               pure $ Distribution (getAll . mconcat filters) limit
 
 parseFilter = do stringCI "with"
                  stripSp
                  field <- parseSz <|> parseCost <|> parseParams
                  stripSp
                  cmp <- parseCmp
+                 stripSp
                  pure (\ec -> All $ cmp (field ec))
 parseFilterDist = do stringCI "with"
                      stripSp
                      stringCI "size"
                      stripSp
                      cmp <- parseCmp
-                     pure cmp
+                     stripSp
+                     pure (\pat -> All $ cmp pat)
 
 parseSz = stringCI "size" >> pure (_size . _info)
 parseCost = stringCI "cost" >> pure (_cost . _info)
@@ -186,10 +190,12 @@ run (Distribution pSz mLimit) = do
 
 run (Report eid (dist, trainData, testData)) = egraph $ printExpr trainData testData dist eid
 
-run (Optimize eid nIters (dist, trainData, testData)) = do -- dist trainData testData
+run (Optimize eid nIters (dist, trainData@(x, y, mYErr), testData)) = do -- dist trainData testData
    t <- egraph $ getBestExpr eid
    (f, theta) <- egraph $ fitnessFunRep nIters dist trainData trainData t
    egraph $ insertFitness eid f theta
+   let mdl_train  = mdl dist mYErr x y theta t
+   egraph $ insertDL eid mdl_train
    printSimpleMultiExprs [eid]
 
 run (Insert expr argOpt) = do

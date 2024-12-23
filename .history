@@ -1,3 +1,60 @@
+pareto by dl
+pareto
+distribution with size > 3 with size <= 5 limited at 10 dsc
+distribution with size > 3 with size <= 5 limited at 10 asc
+count-pattern t0 |^| x0
+subtrees 47073
+report 47073
+optimize 47073
+optimize 47073
+optimize 47073
+report 47073
+top 10 with size > 10 with parameters >= 2 by dl not matching v0 |^| v1
+top 10 with size > 10 with parameters >= 2 by dl
+top 10 with size > 10 by dl
+top 10 by dl
+top 10
+top 10
+op 10
+pareto by dl
+pareto
+distribution with size > 3 with size <= 5 limited at 10 asc
+distribution with size > 3 with size <= 5
+count-pattern x0 |^| t0
+optimize 67208
+insert sqrt(abs(x0 * t0)) + t0
+subtrees 47073
+report 47073
+optimize 47073
+report 47073
+top 10 with size > 3 with parameters >= 2 by dl not matching v0 |^| v1
+top 10 with size > 3 with parameters >= 2 by dl not matching x0 |^| t0
+top 10 with size > 3 with parameters >= 2 by dl
+top 10 with size > 3 by dl
+top 10 by dl
+top 10
+top 10
+subtrees 4394
+insert sqrt(abs(x0) + t0) * t0
+subtrees 4394
+report 4394
+top 10 with size < 10 with size > 3 with parameters > 2 by dl
+top 10 with size < 10 with size > 3 by dl
+top 10 with size < 10 by dl
+top 10 with size < 10
+top 10
+top 10 with size < 9 with parameters > 2
+top 10 with size < 9 with parameters > 2
+top 10 with size < 9 with size > 3
+top 10 with size < 9
+top 10 with size > 3 with size < 9
+top 10 with size > 3 with size < 10
+top 10 with size > 3
+top 10 with size > 3 with size <= 10
+top 10 by dl
+top 10
+help top
+help
 help count-pattern 
 help count-pattern 
 help distribution 
@@ -41,60 +98,3 @@ distribution with size <2
 top 5 with size <=5 not matching v0 + t0
 top 5 with size <=5 matching v0 + t0
 top 5 with size <=3
-top 5 with size <= 2
-top 5 with size = 12
-top 5 with size =12
-top 5 with size >= 11
-top 5 with size > 11
-top 5 with size > 10
-top 5 with size <= 2
-top 5 with size <2
-top 5 with size <=2
-top 5 
-distribution with size <= 2 limited at 10 asc
-distribution with size <=2 limited at 10 asc
-distribution with size 2 limited at 10 asc
-distribution with size 2 limited at 10 asc
-count-pattern v0 + (t0 * x0)
-distribution with size 5 limited at 10 asc
-subtrees 16139
-top 10
-subtrees 29356
-insert sqrt(x0 + t0)
-optimize 29356 2000
-optimize 29356 200
-optimize 29356
-report 29356
-top 10 with size =10 by dl matching root v0 + x0 * t0
-top 10 with size =10 by dl matching v0 + x0 * t0
-top 10 with size =10 by dl matching v0 + x0
-top 10 with size =10 by dl
-top 10 with size =10
-top 10 with size >5
-top 10 with size >7
-top 10 with size <=8
-top 10 with size <8
-help top
-count-pattern x0 |**| t0
-top-patterns 10 v0 + x0
-dist-patterns
-dist-patterns
-dist-patterns
-dist-patterns
-dist-patterns
-dist-patterns
-dist-patterns
-dist-patterns
-dist-patterns
-dist-patterns
-dist-patterns
-dist-patterns
-dist-patterns  a
-dist-patterns  a
-dist-patterns 
-count-pattern x0 + v0 |**| v1
-count-pattern x0 + v0
-count-pattern x0
-count-pattern v0
-count-pattern x0 |**| (t0 * x0)
-count-pattern x0 |**| (t0 * x0)
