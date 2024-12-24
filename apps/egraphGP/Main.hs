@@ -141,7 +141,7 @@ egraphGP dataTrain dataVal dataTest args = do
     rndTerm    = Random.randomFrom terms
     rndNonTerm = Random.randomFrom nonTerms
 
-    refitChanged = do ids <- gets (_refits . _eDB)
+    refitChanged = do ids <- gets (_refits . _eDB) >>= Prelude.mapM canonical . Set.toList
                       modify' $ over (eDB . refits) (const Set.empty)
                       forM_ ids $ \ec -> do t <- getBestExpr ec
                                             (f, p) <- fitFun t
@@ -155,7 +155,7 @@ egraphGP dataTrain dataVal dataTest args = do
                     parents <- tournament xs
                     offspring <- combine parents
                     --applySingleMergeOnlyEqSat myCost rewritesParams >> cleanDB
-                    runEqSat myCost rewritesParams 1 >> cleanDB >> >> refitChanged
+                    runEqSat myCost rewritesParams 1 >> cleanDB >> refitChanged
                     canonical offspring >>= updateIfNothing fitFun
                     canonical offspring
                     --pure offspring

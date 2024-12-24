@@ -114,7 +114,7 @@ egraphSearch dataTrain dataVal dataTest args = do
   where
     fitFun = fitnessFunRep (_optRepeat args) (_optIter args) (_distribution args) dataTrain dataVal
 
-    refitChanged = do ids <- gets (_refits . _eDB)
+    refitChanged = do ids <- gets (_refits . _eDB) >>= Prelude.mapM canonical . Set.toList
                       modify' $ over (eDB . refits) (const Set.empty)
                       forM_ ids $ \ec -> do t <- getBestExpr ec
                                             (f, p) <- fitFun t
