@@ -26,6 +26,7 @@ import Data.SRTree.Eval (evalTree)
 import Data.SRTree.Recursion (cata)
 import qualified Data.Vector.Storable as VS
 
+import Debug.Trace
 
 -- | Bayesian information criterion
 bic :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
@@ -56,8 +57,8 @@ evidence dist mYerr xss ys theta tree = (1 - b) * nll dist mYerr xss ys tree the
 -- Bartlett, Deaglan J., Harry Desmond, and Pedro G. Ferreira. "Exhaustive symbolic regression." IEEE Transactions on Evolutionary Computation (2023).
 mdl :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
 mdl dist mYerr xss ys theta tree = nll' dist mYerr xss ys theta' tree
-                                  + logFunctional tree
-                                  + logParameters dist mYerr xss ys theta tree
+                                   + logFunctional tree
+                                   + logParameters dist mYerr xss ys theta tree
   where
     fisher = fisherNLL dist mYerr xss ys tree theta
     theta' = A.computeAs A.S $ A.zipWith (\t f -> if isSignificant t f then t else 0.0) theta fisher

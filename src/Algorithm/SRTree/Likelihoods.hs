@@ -222,9 +222,9 @@ nll ROXY mYerr xss ys tree theta
 -- TODO: handle error similar to ROXY
 buildNLL MSE m tree = ((tree - var (-1)) ** 2) / constv m
 -- TODO: fix me
-buildNLL Gaussian m _tree =  ((tree - var (-1)) ** 2 / param p ** 2) + constv m * log ((param p ** 2))
+buildNLL Gaussian m tree =  (square(tree - var (-1)) / square (param p)) + log ((square (param p)))
   where
-    tree = relabelParams _tree
+    square = Fix . Uni Square
     p = countParams tree
 buildNLL HGaussian m tree = (tree - var (-1)) ** 2 / var (-2) + constv m * log (2*pi* var (-2))
 buildNLL Poisson m tree = var (-1) * log (var (-1)) + exp tree - var (-1) * tree
@@ -383,16 +383,33 @@ fisherNLL ROXY mYerr xss ys tree theta = makeArray cmp (Sz p) finiteDiff
                       let fPlus     = nll ROXY mYerr xss ys tree thetaPlus
                           fMinus    = nll ROXY mYerr xss ys tree thetaMinus
                       pure $ (fPlus + fMinus - 2*f)/(eps*eps)
-
+fisherNLL Gaussian mYerr xss ys tree theta = makeArray cmp (Sz p) finiteDiff
+  where
+    cmp    = getComp xss
+    (Sz m) = M.size ys
+    (Sz p) = M.size theta
+    f      = nll Gaussian mYerr xss ys tree theta
+    eps = 1e-6
+    finiteDiff ix = unsafePerformIO $ do
+                      theta' <- Mut.thaw theta
+                      v <- Mut.readM theta' ix
+                      Mut.writeM theta' ix (v + eps)
+                      thetaPlus <- Mut.freezeS theta'
+                      Mut.writeM theta' ix (v - eps)
+                      thetaMinus <- Mut.freezeS theta'
+                      let fPlus     = nll Gaussian mYerr xss ys tree thetaPlus
+                          fMinus    = nll Gaussian mYerr xss ys tree thetaMinus
+                      pure $ (fPlus + fMinus - 2*f)/(eps*eps)
 fisherNLL dist mYerr xss ys tree theta = makeArray cmp (Sz p) build
   where
     build ix = let dtdix   = deriveByParam ix t'
                    d2tdix2 = deriveByParam ix dtdix 
                    f'      = eval dtdix 
                    f''     = eval d2tdix2 
-               in case dist of
-                    Gaussian -> M.sum . (/delay yErr) $ phi' * f'^2 - res * f''
-                    _        -> M.sum $ phi' * f'^2 - res * f''
+               in M.sum $ phi' * f'^2 - res * f''
+               --case dist of
+               --     Gaussian -> M.sum . (/delay (theta M.! (p-1))) $ phi' * f'^2 - res * f''
+               --     _        -> M.sum $ phi' * f'^2 - res * f''
     cmp    = getComp xss 
     (Sz m) = M.size ys
     (Sz p) = M.size theta
