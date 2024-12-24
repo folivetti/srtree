@@ -142,7 +142,7 @@ getTopEClassWithSize b sz n = do
     go 0 bests (Just rt) = bests
     go m bests (Just rt) = case rt of
                              Empty   -> bests
-                             t :|> (f, x) -> if isInfinite f then bests else go (m-1) (x:bests) (Just t)
+                             t :|> (f, x) -> if isInfinite f || isNaN f then go m bests (Just t) else go (m-1) (x:bests) (Just t)
 
 getTopFitEClassThat :: Monad m => Int -> (EClass -> Bool) -> EGraphST m [EClassId]
 getTopFitEClassThat  = getTopECLassThat True

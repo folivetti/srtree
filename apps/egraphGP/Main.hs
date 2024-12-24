@@ -92,12 +92,12 @@ egraphGP dataTrain dataVal dataTest args = do
     newPop <- if (_moo args)
                 then do
                         let n_paretos = (_nPop args) `div` (_maxSize args)
-                        pareto <- concat <$> (forM [1 .. _maxSize args] $ \n -> getTopFitEClassWithSize n 50)
-                        let remainder = 0 -- _nPop args - length pareto
+                        pareto <- concat <$> (forM [1 .. _maxSize args] $ \n -> getTopFitEClassWithSize n 2)
+                        let remainder = _nPop args - length pareto
                         lft <- if full
                                   then getTopFitEClassThat remainder (const True)
                                   else pure $ Prelude.take remainder newPop'
-                        Prelude.mapM canonical pareto -- (pareto <> lft)
+                        Prelude.mapM canonical (pareto <> lft)
                 else if full
                        then getTopFitEClassThat (_nPop args) (const True)
                        else Prelude.mapM canonical newPop'
