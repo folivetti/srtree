@@ -141,6 +141,12 @@ egraphGP dataTrain dataVal dataTest args = do
     rndTerm    = Random.randomFrom terms
     rndNonTerm = Random.randomFrom nonTerms
 
+    refitChanged = do ids <- gets (_refits . _eDB)
+                      modify' $ over (eDB . refits) (const Set.empty)
+                      forM_ ids $ \ec -> do t <- getBestExpr ec
+                                            (f, p) <- fitFun t
+                                            insertFitness ec f p
+
     iterateFor 0 xs f = pure xs
     iterateFor n xs f = do xs' <- f n xs
                            iterateFor (n-1) xs' f
@@ -149,7 +155,7 @@ egraphGP dataTrain dataVal dataTest args = do
                     parents <- tournament xs
                     offspring <- combine parents
                     --applySingleMergeOnlyEqSat myCost rewritesParams >> cleanDB
-                    runEqSat myCost rewritesParams 1 >> cleanDB
+                    runEqSat myCost rewritesParams 1 >> cleanDB >> >> refitChanged
                     canonical offspring >>= updateIfNothing fitFun
                     canonical offspring
                     --pure offspring
