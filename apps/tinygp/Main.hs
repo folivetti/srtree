@@ -3,7 +3,7 @@ module Main (main) where
 import GP ( HyperParams(HP), fitness, evolution, printFinal )
 import Data.SRTree
 import System.Random ( getStdGen )
-import Control.Monad.State ( evalStateT )
+import Control.Monad.State.Strict ( evalStateT )
 import Data.SRTree.Datasets ( loadDataset ) 
 import Options.Applicative
 import Data.Massiv.Array 

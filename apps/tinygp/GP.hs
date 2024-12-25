@@ -10,7 +10,7 @@ import Data.SRTree.Print
 import Data.SRTree.Eval
 import Data.SRTree.Recursion ( cata )
 import System.Random
-import Control.Monad.State
+import Control.Monad.State.Strict
 import Control.Monad
 import Data.Vector qualified as V
 import Control.Monad (when)
@@ -18,6 +18,7 @@ import Data.Massiv.Array qualified as M
 import Debug.Trace ( traceShow, trace )
 import Util
 import Data.List ( intercalate )
+import qualified Data.Vector.Mutable as MV
 
 data Method = Grow | Full | BTC
 type Rng a = StateT StdGen IO a
@@ -84,7 +85,6 @@ randomTree hp grow
                       if r
                         then randomFrom term 
                         else genNonTerm        
-{-# INLINE randomTree #-}
 
 data HyperParams = 
     HP { _minDepth  :: Int 
@@ -106,7 +106,6 @@ tournament hp pop = do
   if null selection
      then randomFromV pop
      else randomFromV champions
-{-# INLINE tournament #-}
 
 randomIndividual :: HyperParams -> FitFun -> Bool -> Rng Individual
 randomIndividual hyperparams fitFun grow = do
@@ -118,7 +117,6 @@ randomIndividual hyperparams fitFun grow = do
     --if isInfinite (_fit ind)
     --   then randomIndividual hyperparams fitFun grow 
     --   else pure ind
-{-# INLINE randomIndividual #-}
 
 initialPop :: HyperParams -> FitFun -> Rng (V.Vector Individual)
 initialPop hyperparams fitFun = do 
@@ -128,7 +126,6 @@ initialPop hyperparams fitFun = do
                   g = V.fromList . take m $ cycle [True, False]
               mapM (randomIndividual hyperparams{ _maxDepth = md} fitFun) g
    pure (V.concat pop)
-{-# INLINE initialPop #-}
 
 fitness :: SRMatrix -> PVector -> Individual -> Rng Individual
 fitness x y ind = do
@@ -136,36 +133,27 @@ fitness x y ind = do
         p    = countParams tree
     theta1' <- M.fromList M.Seq <$> replicateM p (randomRange (-1,1))
     theta2' <- M.fromList M.Seq <$> replicateM p (randomRange (-1,1))
-    let (theta1, _, _) = minimizeNLL MSE Nothing 50 x y tree theta1'
-        (theta2, _, _) = minimizeNLL MSE Nothing 50 x y tree theta2'
-        fit1 = negate $ mse x y tree theta1
-        fit2 = negate $ mse x y tree theta2
-        thetaOpt = if fit1 < fit2 then theta1 else theta2
-        fitOpt   = min fit1 fit2
+    let (theta1, f1, _) = minimizeNLL MSE Nothing 50 x y tree theta1'
+        (theta2, f2, _) = minimizeNLL MSE Nothing 50 x y tree theta2'
+        fit1 = negate f1
+        fit2 = negate f2
+        thetaOpt = if fit1 > fit2 then theta1 else theta2
+        fitOpt   = max fit1 fit2
     pure ind{_fit = fitOpt, _params = thetaOpt}
 
-{-# INLINE fitness #-}
 
-isAbs (Fix (Uni Abs _)) = True 
-isAbs _ = False 
-{-# INLINE isAbs #-}
-
-isInv (Fix (Bin Div (Fix (Const 1.0)) _)) = True 
-isInv _ = False 
-{-# INLINE isInv #-}
-
-mutate :: HyperParams -> Individual -> Rng Individual
+mutate :: HyperParams -> Individual -> Rng (Maybe Individual)
 mutate hp ind = do
   let sz = countNodes' (_tree ind)
   p <- state $ randomR (0, sz-1)
   b <- state random
   t <- go p (_maxSize hp) (_tree ind)
   --(t, b) <- go sz (_pm hp) (_tree ind)
-  if b <= _pm hp
-     then pure $ Individual t 0.0 M.empty
-     else pure ind
+  if b <= _pm hp && countNodes t <= _maxSize hp
+     then pure . Just $ Individual t 0.0 M.empty
+     else pure Nothing
       where
-        go 0 msz t = randomTree hp{_maxSize = msz} True
+        go 0 msz t = randomTree hp{_maxSize = msz-1} True
         go n msz (Fix (Uni f t)) = Fix . Uni f <$> go (n-1) (msz-1) t
         go n msz (Fix (Bin op l r)) = do
           let nl = countNodes l
@@ -175,7 +163,7 @@ mutate hp ind = do
              else do l' <- go (n-1) (msz-nr-1) l
                      pure $ Fix $ Bin op l' r
 
-crossover :: HyperParams -> Individual -> Individual -> Rng Individual
+crossover :: HyperParams -> Individual -> Individual -> Rng (Maybe Individual)
 crossover hp ind1 ind2 = do
   b <- state random
   if b < (_pc hp)
@@ -188,9 +176,9 @@ crossover hp ind1 ind2 = do
                  t = part1 part2
                  n = countNodes t
              if n <= _maxSize hp
-                then pure ind1{_tree = t}
-                else pure ind1
-     else pure ind1
+                then pure . Just $ ind1{_tree = t}
+                else pure Nothing
+     else pure Nothing
   where
     pickRight :: Int -> Fix SRTree -> Fix SRTree
     pickRight 0 node = node
@@ -212,12 +200,15 @@ evolve :: HyperParams -> FitFun -> V.Vector Individual -> Rng Individual
 evolve hp fitFun pop = do 
     parent1 <- tournament hp pop
     parent2 <- tournament hp pop 
-    child <- crossover hp parent1 parent2
-    child' <- mutate hp child
-    let p = countParams (_tree child')
+    mChild <- crossover hp parent1 parent2
+    child' <- case mChild of
+                Nothing    -> mutate hp parent1
+                Just child -> mutate hp child
+    --let p = countParams (_tree child')
     --theta' <- M.fromList compMode <$> replicateM p (randomRange (-1,1))
-    fitFun child'--{_params = theta'}
-{-# INLINE evolve #-}
+    case child' of
+        Nothing -> pure parent1
+        Just c  -> fitFun c
 
 printFinal ind x y x_test y_test = do
   let tree     = relabelParams $ _tree ind
@@ -245,11 +236,11 @@ evolution :: Int -> HyperParams -> FitFun -> Rng (Individual)
 evolution gen hp fitFun = do 
     pop <- initialPop hp fitFun
     --liftIO $ report (-1) pop
-    go gen pop 
+    go gen pop
         where 
-            go 0 pop = pure $ pop  V.! 0
-            go n pop = do 
+            go 0 !pop = pure $ pop  V.! 0
+            go n !pop = do
                 let best = V.maximumOn _fit $ V.filter (not.isNaN._fit) pop
-                pop' <- V.cons best <$> V.replicateM (_popSize hp - 1) (evolve hp fitFun pop)
+                pop' <- V.modify (\v -> MV.write v 0 best) <$> V.replicateM (_popSize hp) (evolve hp fitFun pop)
                 --liftIO $ report (gen-n) pop'
                 go (n-1) pop'
