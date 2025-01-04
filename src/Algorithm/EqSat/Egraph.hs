@@ -131,6 +131,9 @@ removeRange eid x rt = go rt
         n = FingerTree.length root
 
 
+
+
+
 -- TODO: check this \/
 getWithinRange :: Ord a => a -> a -> RangeTree a -> [EClassId]
 getWithinRange lb ub rt = map snd . toList $ go rt

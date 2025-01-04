@@ -7,25 +7,30 @@ import Control.Applicative ((<|>))
 import Data.Attoparsec.ByteString.Char8 hiding ( match )
 import qualified Data.ByteString.Char8 as B
 import Data.Maybe
+import Text.Read ( readMaybe )
 import Data.Monoid (All(..))
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Control.Monad.State.Strict
+import Control.Monad ( forM_ )
+import Data.Char ( toUpper )
 import qualified Data.Map as Map
 import qualified Data.HashSet as Set
 import qualified Data.Massiv.Array as MA
 import Data.List ( nub, sortOn )
+import Data.List.Split ( splitOn )
 
 import Data.SRTree
 import Data.SRTree.Datasets
 import Data.SRTree.Recursion
 import Data.SRTree.Eval
 import Data.SRTree.Print hiding ( printExpr )
-import Text.ParseSR (SRAlgs(..), parseSR, parsePat)
+import Text.ParseSR (SRAlgs(..), parseSR, parsePat, Output(..), showOutput)
 
 import Algorithm.SRTree.Likelihoods
 import Algorithm.SRTree.Opt
 
+import Algorithm.EqSat
 import Algorithm.EqSat.Egraph
 import Algorithm.EqSat.Build
 import Algorithm.EqSat.Info
@@ -54,6 +59,7 @@ data Command  = Top Int Filter Criteria PatStr
               | CountPat String
               | Save String
               | Load String
+              | Import String Distribution String Bool
 
 type Filter = EClass -> Bool -- pattern?
 type FilterDist = Int -> Bool
@@ -234,7 +240,76 @@ run (Load fname) = do
   eg <- io $ BS.readFile fname
   egraph $ put (decode eg)
 
+run (Import fname dist varnames params) = do
+  egraph $ importCSV dist fname varnames params
+
 -- * auxiliary functions
+importCSV :: Distribution -> String -> String -> Bool -> RndEGraph ()
+importCSV dist fname hdr convertParam = cleanDB >> parseEqs >> createDB >> rebuildAllRanges
+  where
+    alg = getFormat fname
+
+    toTuple :: [String] -> (String, [Double], Double)
+    toTuple [eq, t, f] = (eq, Prelude.map Prelude.read $ Prelude.filter (not.null) $ splitOn ";" t, fromMaybe (-1.0/0.0) $ readMaybe f)
+    toTuple xss = error $ show xss
+
+    parseEqs :: RndEGraph ()
+    parseEqs = do content <- Prelude.map (toTuple . splitOn ",") . lines <$> (liftIO $ readFile fname)
+                  forM_ content $ \(eq, params, f) -> do
+                    case parseSR alg (B.pack hdr) False (B.pack eq) of
+                         Left _ -> liftIO $ putStrLn $ "Skippping " <> eq
+                         Right tree' -> do
+                           let (tree, ps) = if convertParam then floatConstsToParam tree' else (tree', theta)
+                               theta      = if convertParam then if dist==MSE then ps <> params else ps else params
+                           eid <- fromTree myCost tree >>= canonical
+                           insertFitness eid f $ MA.fromList MA.Seq theta
+                           runEqSat myCost rewritesParams 1
+                           cleanDB
+
+
+parseCSV :: Distribution -> String -> String -> Bool -> IO EGraph
+parseCSV dist fname hdr convertParam = execStateT parseEqs emptyGraph
+  where
+    alg = getFormat fname
+
+    toTuple :: [String] -> (String, [Double], Double)
+    toTuple [eq, t, f] = (eq, Prelude.map Prelude.read $ Prelude.filter (not.null) $ splitOn ";" t, fromMaybe (-1.0/0.0) $ readMaybe f)
+    toTuple xss = error $ show xss
+
+    parseEqs :: RndEGraph ()
+    parseEqs = do content <- Prelude.map (toTuple . splitOn ",") . lines <$> (liftIO $ readFile fname)
+                  forM_ content $ \(eq, params, f) -> do
+                    case parseSR alg (B.pack hdr) False (B.pack eq) of
+                         Left _ -> liftIO $ putStrLn $ "Skippping " <> eq
+                         Right tree' -> do
+                           let (tree, ps) = if convertParam then floatConstsToParam tree' else (tree', theta)
+                               theta      = if convertParam then if dist==MSE then ps <> params else ps else params
+                           eid <- fromTree myCost tree >>= canonical
+                           insertFitness eid f $ MA.fromList MA.Seq theta
+                           runEqSat myCost rewritesParams 1
+                           cleanDB
+getFormat :: String -> SRAlgs
+getFormat = Prelude.read . Prelude.map toUpper . Prelude.last . splitOn "."
+
+
+
+convert :: String -> Output -> String -> IO ()
+convert fname out hdr = do
+  let alg = getFormat fname
+  content <- Prelude.map (toTuple . splitOn ",") . lines <$> readFile fname
+  forM_ content $ \(eq, params, f) -> do
+    case parseSR alg (B.pack hdr) False (B.pack eq) of
+          Left _ -> pure ()
+          Right tree -> do
+            putStr (showOutput out tree)
+            putChar ','
+            putStr params
+            putChar ','
+            putStrLn f
+  where
+    toTuple :: [String] -> (String, String, String)
+    toTuple [eq, t, f] = (eq, t, f)
+    toTuple xss = error $ show xss
 
 getParents False ecs = pure ecs
 getParents True  ecs = IntSet.toList <$> getParentsOf (IntSet.fromList ecs) 500000 (IntSet.fromList ecs)

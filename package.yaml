@@ -22,7 +22,7 @@ extra-source-files:
 description:         A Symbolic Regression Tree data structure to work with mathematical expressions with support to first order derivative and simplification;
 
 dependencies:
-- base >= 4.16 && < 5
+- base >= 4.19 && < 5
 - mtl >= 2.2 && < 2.4
 - containers >= 0.6.7 && < 0.8
 - unordered-containers >= 0.2 && < 0.3

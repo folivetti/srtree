@@ -342,7 +342,7 @@ egraphGP dataTrain dataVal dataTest args = do
     printPop pop = forM_ pop $ \ecN'-> do
             ecN'' <- canonical ecN'
             _tree <- getBestExpr ecN''
-            fi <- negate . fromJust <$> getFitness ecN''
+            fi <- fromJust <$> getFitness ecN''
             theta <- fromJust <$> getTheta ecN''
             let thetaStr   = intercalate ";" $ Prelude.map show (MA.toList theta)
             io . putStrLn $ showExpr _tree <> "," <> thetaStr <> "," <> show fi

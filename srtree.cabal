@@ -64,7 +64,7 @@ library
   build-depends:
       attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
-    , base >=4.16 && <5
+    , base >=4.19 && <5
     , binary >=0.8.9.1 && <0.9
     , bytestring >=0.11 && <0.13
     , containers >=0.6.7 && <0.8
@@ -101,7 +101,7 @@ executable egraphGP
   build-depends:
       attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
-    , base >=4.16 && <5
+    , base >=4.19 && <5
     , binary >=0.8.9.1 && <0.9
     , bytestring >=0.11 && <0.13
     , containers >=0.6.7 && <0.8
@@ -141,7 +141,7 @@ executable egraphSearch
   build-depends:
       attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
-    , base >=4.16 && <5
+    , base >=4.19 && <5
     , binary >=0.8.9.1 && <0.9
     , bytestring >=0.11 && <0.13
     , containers >=0.6.7 && <0.8
@@ -179,7 +179,7 @@ executable eqsatrepr
   build-depends:
       attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
-    , base >=4.16 && <5
+    , base >=4.19 && <5
     , binary >=0.8.9.1 && <0.9
     , bytestring >=0.11 && <0.13
     , containers >=0.6.7 && <0.8
@@ -219,7 +219,7 @@ executable reggression
       ansi-terminal >=1.1.2 && <1.2
     , attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
-    , base >=4.16 && <5
+    , base >=4.19 && <5
     , binary >=0.8.9.1 && <0.9
     , bytestring >=0.11 && <0.13
     , containers >=0.6.7 && <0.8
@@ -259,7 +259,7 @@ executable srsimplify
   build-depends:
       attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
-    , base >=4.16 && <5
+    , base >=4.19 && <5
     , binary >=0.8.9.1 && <0.9
     , bytestring >=0.11 && <0.13
     , containers >=0.6.7 && <0.8
@@ -299,7 +299,7 @@ executable srtools
   build-depends:
       attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
-    , base >=4.16 && <5
+    , base >=4.19 && <5
     , binary >=0.8.9.1 && <0.9
     , bytestring >=0.11 && <0.13
     , containers >=0.6.7 && <0.8
@@ -340,7 +340,7 @@ executable tinygp
   build-depends:
       attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
-    , base >=4.16 && <5
+    , base >=4.19 && <5
     , binary >=0.8.9.1 && <0.9
     , bytestring >=0.11 && <0.13
     , containers >=0.6.7 && <0.8
@@ -380,7 +380,7 @@ test-suite srtree-test
     , ad
     , attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
-    , base >=4.16 && <5
+    , base >=4.19 && <5
     , binary >=0.8.9.1 && <0.9
     , bytestring >=0.11 && <0.13
     , containers >=0.6.7 && <0.8

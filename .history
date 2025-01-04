@@ -1,3 +1,8 @@
+top 10
+top 10
+top 5
+:q
+top 10
 pareto by dl
 pareto
 distribution with size > 3 with size <= 5 limited at 10 dsc
@@ -93,8 +98,3 @@ report 16139
 subtrees 16139
 distribution with size <3 limited at 5 dsc
 distribution with size <3 limited at 5 asc
-distribution with size <3
-distribution with size <2
-top 5 with size <=5 not matching v0 + t0
-top 5 with size <=5 matching v0 + t0
-top 5 with size <=3

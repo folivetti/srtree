@@ -112,8 +112,8 @@ getBestFitness = do
     bec <- (gets (snd . getGreatest . _fitRangeDB . _eDB) >>= canonical)
     gets (_fitness . _info . (IM.! bec) . _eClass)
 
-getTrain :: ((a, b1, c1, d1), (c2, b2), c3, d2) -> (a, b1, c2)
-getTrain ((a, b, _, _), (c, _), _, _) = (a,b,c)
+getTrain :: ((a, b1, c1, d1), (c2, b2), c3, d2) -> ((a, b1, c2), c3)
+getTrain ((a, b, _, _), (c, _), varnames, _) = ((a,b,c), varnames)
 
 getX :: DataSet -> SRMatrix
 getX (a, _, _) = a

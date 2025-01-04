@@ -1,5 +1,6 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE TupleSections #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Algorithm.EqSat.Queries
@@ -25,6 +26,8 @@ import Control.Monad ( filterM )
 import Control.Lens ( over )
 import Data.Maybe
 import Data.Sequence ( Seq(..) )
+import qualified Data.Sequence as FingerTree
+import qualified Data.Foldable as Foldable
 
 import Debug.Trace
 
@@ -160,3 +163,28 @@ getTopFitEClassWithSize :: Monad m => Int -> Int -> EGraphST m [EClassId]
 getTopFitEClassWithSize = getTopEClassWithSize True
 getTopDLEClassWithSize :: Monad m => Int -> Int -> EGraphST m [EClassId]
 getTopDLEClassWithSize  = getTopEClassWithSize False
+
+rebuildAllRanges :: Monad m => EGraphST m ()
+rebuildAllRanges = do szF <- gets (_sizeFitDB._eDB) >>= traverse rebuildRange
+                      dlF <- gets (_sizeDLDB._eDB) >>= traverse rebuildRange
+                      fR  <- gets (_fitRangeDB._eDB) >>= rebuildRange
+                      dR  <- gets (_dlRangeDB._eDB) >>= rebuildRange
+
+                      modify' $ over (eDB.fitRangeDB) (const fR)
+                              . over (eDB.dlRangeDB) (const dR)
+                              . over (eDB.sizeFitDB) (const szF)
+                              . over (eDB.sizeDLDB) (const dlF)
+
+canonizeRange :: Monad m => RangeTree Double -> EGraphST m (RangeTree Double)
+canonizeRange = traverse (\(x, eid) -> (x,) <$> canonical eid)
+
+rebuildRange :: Monad m => RangeTree Double -> EGraphST m (RangeTree Double)
+rebuildRange rt = go Set.empty Empty <$> canonizeRange rt
+  where
+    go :: Set.HashSet EClassId -> RangeTree Double -> RangeTree Double -> RangeTree Double
+    go seen root Empty = root
+    go seen root (xs :|> (x,eid)) = go (Set.insert eid seen)
+                                       (if Set.member eid seen
+                                          then root
+                                          else (x, eid) :<| root)
+                                        xs -- (Prelude.filter ((/= eid) . snd) xs)

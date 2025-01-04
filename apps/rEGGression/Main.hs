@@ -21,7 +21,7 @@ import Algorithm.EqSat.DB
 import Algorithm.EqSat.Simplify
 
 import qualified Data.IntMap as IM
-import Data.Massiv.Array as MA hiding (forM_, forM, Continue)
+import Data.Massiv.Array as MA hiding (forM_, forM, Continue, convert)
 import Data.Maybe (fromJust, isNothing, isJust)
 import Data.SRTree
 import Data.SRTree.Recursion
@@ -33,10 +33,11 @@ import Options.Applicative as Opt hiding (Const, columns)
 import System.Random
 import qualified Data.HashSet as Set
 import Data.List ( sort, sortOn )
+import Data.List.Split ( splitOn )
 import qualified Data.Map as Map
 import Data.Map ( Map )
 import qualified Data.IntMap.Strict as IntMap
-import Data.Char ( toLower )
+import Data.Char ( toLower, toUpper )
 import Debug.Trace
 import Algorithm.EqSat (runEqSat)
 
@@ -45,22 +46,26 @@ import Util
 import Commands
 import Data.List ( isPrefixOf, intercalate, nub )
 import Text.Read
-import Control.Monad ( forM, when )
+import Control.Monad ( forM, when, forM_ )
 import Data.Binary ( encode, decode )
 import qualified Data.ByteString.Lazy as BS
 import Data.Maybe ( fromMaybe )
-import Text.ParseSR (SRAlgs(..), parseSR, parsePat)
+import Text.ParseSR (SRAlgs(..), parseSR, parsePat, Output(..), showOutput)
 import qualified Data.ByteString.Char8 as B
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as SSet
 
 data Args = Args
-  { _dataset      :: String,
-    _testData     :: String,
-    _distribution :: Distribution,
-    _dumpTo       :: String,
-    _loadFrom     :: String,
-    _calcDL       :: Bool
+  { _dataset       :: String,
+    _testData      :: String,
+    _distribution  :: Distribution,
+    _dumpTo        :: String,
+    _loadFrom      :: String,
+    _parseCSV      :: String,
+    _convertFromTo :: String,
+    _parseParams   :: Bool,
+    _to            :: Output,
+    _calcDL        :: Bool
   }
   deriving (Show)
 
@@ -91,7 +96,31 @@ opt = Args
        )
   <*> strOption
        ( long "load-from"
+       <> value ""
+       <> showDefault
        <> help "load initial e-graph from a file."
+       )
+  <*> strOption
+       ( long "parse-csv"
+       <> value ""
+       <> showDefault
+       <> help "parse-csv CSV file with the format expression,parameters,fitness. The fitness value should be maximization and the parameters a ; separated list (there must be an additional parameter for sigma in the Gaussian distribution). The format of the equation is determined by the extension of the file, supported extensions are operon, pysr, tir, itea, hl (heuristiclab), gomea, feat, etc."
+       )
+  <*> strOption
+       ( long "convert"
+       <> value ""
+       <> showDefault
+       <> help "convert FROM TO, converts equation format from a given format (see 'parse-csv') to either 'math' or 'numpy'. The 'math' format is compatible with the tir format, so you can use this to standardize the equations from multiple sources into a single file. The output will be written to stdout."
+       )
+  <*> switch
+       ( long "parse-parameters"
+       <> help "Extract the numerical parameters from the expression. In this case the csv file should be formatted as \"equation,error,fitness, where 'error' is the error term used in Gaussia likelihood, it can be empty if using other distributions.\""
+       )
+  <*> option auto
+       ( long "to"
+       <> value MATH
+       <> showDefault
+       <> help "Format to convert to."
        )
   <*> switch
        ( long "calculate-dl"
@@ -162,7 +191,12 @@ loadCmd :: [String] -> Repl ()
 loadCmd [] = helpCmd ["load"]
 loadCmd args = run (Load (unwords args))
 
-commands = ["help", "top", "report", "optimize", "subtrees", "insert", "count-pattern", "distribution", "pareto", "save", "load"]
+importCmd :: Distribution -> String -> [String] -> Repl ()
+importCmd dist varnames (fname:params:_) = run (Import fname dist varnames (Prelude.read params))
+importCmd dist varnames _   = helpCmd ["import"]
+
+
+commands = ["help", "top", "report", "optimize", "subtrees", "insert", "count-pattern", "distribution", "pareto", "save", "load", "import"]
 
 topHlp = "top N [FILTER...] [CRITERIA] [[not] matching [root] PATTERN] \n \
          \ \n \
@@ -250,7 +284,7 @@ comp :: (Monad m, MonadState EGraph m) => WordCompleter m
 comp n = pure $ filter (isPrefixOf n) commands
 
 ini :: Repl ()
-ini = do (io . putStrLn) "Welcome to rEGGression.\nPress Ctrl-D to exit.\nPress <TAB> to see the commands."
+ini = do (io . putStrLn) "Welcome to r🥚ression.\nPress Ctrl-D to exit.\nPress <TAB> to see the commands."
          pure ()
 
 final :: Repl ExitDecision
@@ -261,11 +295,15 @@ main :: IO ()
 main = do
   args <- execParser opts
   g <- getStdGen
-  dataTrain <- loadTrainingOnly (_dataset args) True
-  dataTest  <- if null (_testData args)
-                  then pure dataTrain
-                  else loadTrainingOnly (_testData args) True
-  eg <- decode <$> BS.readFile (_loadFrom args)
+  (dataTrain, varnames) <- loadTrainingOnly (_dataset args) True
+  (dataTest, _)  <- if null (_testData args)
+                     then pure (dataTrain, "")
+                     else loadTrainingOnly (_testData args) True
+  eg <- if (not.null) (_loadFrom args)
+           then decode <$> BS.readFile (_loadFrom args)
+           else if (not. null) (_parseCSV args)
+                 then parseCSV (_distribution args) (_parseCSV args) varnames (_parseParams args)
+                 else pure emptyGraph
   let --alg = evalStateT (repl dataTrain dataVal dataTest args) emptyGraph
       dist = _distribution args
       funs = [ helpCmd
@@ -279,18 +317,19 @@ main = do
              , paretoCmd
              , saveCmd
              , loadCmd
+             , importCmd dist varnames
              ]
       cmdMap = Map.fromList $ Prelude.zip commands funs
 
       repl = evalRepl (const $ pure ">>> ") (cmd cmdMap) [] Nothing Nothing (Word comp) ini final
-      crDB = if _calcDL args then (createDB >> fillDL dist dataTrain) else (createDB >> pure ())
-  when (_calcDL args) $ putStrLn "Calculating DL..."
-  eg' <- execStateT crDB eg
-  evalStateT repl eg'
-
-
+      crDB = if _calcDL args then (createDB >> fillDL dist dataTrain >> rebuildAllRanges) else (createDB >> rebuildAllRanges)
+  if (not.null) (_convertFromTo args)
+     then convert (_convertFromTo args) (_to args) varnames
+     else do when (_calcDL args) $ putStrLn "Calculating DL..."
+             eg' <- execStateT crDB eg
+             evalStateT repl eg'
   where
     opts = Opt.info (opt <**> helper)
             ( fullDesc <> progDesc "Exploration and query system for a database of regression models using e-graphs."
-           <> header "rEGGression - Nonlinear regression models exploration and query system with e-graphs (egg)." )
+           <> header "r🥚ression - Nonlinear regression models exploration and query system with e-graphs (egg)." )
 
