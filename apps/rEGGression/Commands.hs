@@ -93,7 +93,10 @@ parseTop = do n <- decimal
                         (x:_) -> pure $ x
               pure $ Top n (getAll . mconcat filters) criteria pats
 
-parseDist = do filters <- many' parseFilterDist
+parseDist = do filters' <- many' parseFilterDist
+               let filters = if null filters'
+                               then [(\pat -> All $ pat <= 10)]
+                               else filters'
                stripSp
                limit   <- listToMaybe <$> many' parseLimit
                pure $ Distribution (getAll . mconcat filters) limit
@@ -184,7 +187,7 @@ run (Top n filters criteria withPat) = do
 
 run (Distribution pSz mLimit) = do
   ee <- egraph $ IntSet.toList . IntSet.fromList <$> getAllEvaluatedEClasses
-  allPats <- egraph $ getAllPatternsFrom Map.empty ee
+  allPats <- egraph $ getAllPatternsFrom pSz Map.empty ee
   let (n, isAsc) = case mLimit of
                      Nothing -> (Map.size allPats, True)
                      Just (Limit sz asc) -> (sz, asc)
@@ -343,10 +346,11 @@ isLeft _          = False
 fromLeft (Left x) = x
 fromLeft _        = undefined
 
-getAllPatternsFrom :: Monad m => Map.Map Pattern Int -> [EClassId] -> EGraphST m (Map.Map Pattern Int)
-getAllPatternsFrom counts []     = pure counts
-getAllPatternsFrom counts (x:xs) = do pats <- Map.fromListWith (+) . Prelude.map (,1) <$> getAllPatterns x
-                                      getAllPatternsFrom (Map.unionWith (+) pats counts) xs
+getAllPatternsFrom :: Monad m => (Int -> Bool) -> Map.Map Pattern Int -> [EClassId] -> EGraphST m (Map.Map Pattern Int)
+getAllPatternsFrom pSz counts []     = pure counts
+getAllPatternsFrom pSz counts (x:xs) = do pats <- Map.fromListWith (+) . Prelude.map (,1) . Prelude.filter (pSz . lenPat) <$> getAllPatterns (<=max_pat) x
+                                          getAllPatternsFrom pSz (Map.unionWith (+) pats counts) xs
+  where max_pat = 10
 
 relabelVarPat :: Pattern -> Pattern
 relabelVarPat t = alg t `evalState` 65
@@ -370,20 +374,20 @@ countPattern pat = do
 
 getEvaluated ecs = getParentsOf (IntSet.fromList ecs) 500000 (IntSet.fromList ecs)
 
-getAllPatterns :: Monad m => EClassId -> EGraphST m [Pattern]
-getAllPatterns eid = do
+getAllPatterns :: Monad m => (Int -> Bool) -> EClassId -> EGraphST m [Pattern]
+getAllPatterns pSz eid = do
    eid' <- canonical eid
    best <- gets (_best . _info . (IntMap.! eid') . _eClass)
    case best of
       Var ix     -> pure [VarPat 'A', Fixed (Var ix)]
       Param ix   -> pure [VarPat 'A', Fixed (Param ix)]
       Const x    -> pure [VarPat 'A', Fixed (Const x)]
-      Uni f t    -> do pats <- getAllPatterns t
+      Uni f t    -> do pats <- Prelude.filter (pSz . lenPat) <$> getAllPatterns pSz t
                        pure (VarPat 'A' : [relabelVarPat $ Fixed (Uni f t') | t' <- pats])
-      Bin op l r | l==r -> do pats <- getAllPatterns l
+      Bin op l r | l==r -> do pats <- Prelude.filter (pSz . lenPat) <$> getAllPatterns pSz l
                               pure (VarPat 'A' : [relabelVarPat $ Fixed (Bin op l' l') | l' <- pats])
-                  | otherwise -> do patsL <- getAllPatterns l
-                                    patsR <- getAllPatterns r
+                  | otherwise -> do patsL <- Prelude.filter (pSz . lenPat) <$> getAllPatterns pSz l
+                                    patsR <- Prelude.filter (pSz . lenPat) <$> getAllPatterns pSz r
                                     pure (VarPat 'A' : [relabelVarPat $ Fixed (Bin op l' r') | l' <- patsL, r' <- patsR])
 
 
