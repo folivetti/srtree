@@ -200,8 +200,8 @@ run (Distribution pSz mLimit) = do
 run (Report eid (dist, trainData, testData)) = egraph $ printExpr trainData testData dist eid
 
 run (Optimize eid nIters (dist, trainData@(x, y, mYErr), testData)) = do -- dist trainData testData
-   t <- egraph $ getBestExpr eid
-   (f, theta) <- egraph $ fitnessFunRep nIters dist trainData trainData t
+   t <- egraph $ relabelParams <$> getBestExpr eid
+   (f, theta) <- egraph $ fitnessFunRep nIters dist trainData t
    egraph $ insertFitness eid f theta
    let mdl_train  = mdl dist mYErr x y theta t
    egraph $ insertDL eid mdl_train

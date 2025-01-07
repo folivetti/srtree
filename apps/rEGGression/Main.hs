@@ -178,6 +178,7 @@ paretoCmd []   = run (Pareto ByFitness)
 paretoCmd args = case (Prelude.map toLower $ unwords args) of
                     "by fitness" -> run (Pareto ByFitness )
                     "by dl"      -> run (Pareto ByDL)
+                    _            -> helpCmd ["pareto"]
 
 countPatCmd :: [String] -> Repl ()
 countPatCmd []   = helpCmd ["count-pattern"]

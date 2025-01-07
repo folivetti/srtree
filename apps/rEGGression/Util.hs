@@ -11,6 +11,7 @@ import Algorithm.SRTree.Opt
 import Algorithm.EqSat.Egraph
 import Algorithm.EqSat.Build
 import Algorithm.EqSat.Info
+import Algorithm.EqSat ( recalculateBest )
 
 import Algorithm.SRTree.NonlinearOpt
 import System.Random
@@ -63,29 +64,28 @@ myCost (Param _)   = 1
 myCost (Bin _ l r) = 2 + l + r
 myCost (Uni _ t)   = 3 + t
 
-fitnessFun :: Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> PVector -> (Double, PVector)
-fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) _tree thetaOrig =
-  if isNaN val || isNaN tr
+fitnessFun :: Int -> Distribution -> DataSet -> Fix SRTree -> PVector -> (Double, PVector)
+fitnessFun nIter distribution (x, y, mYErr) _tree thetaOrig =
+  if isNaN tr
     then (-(1/0), theta) -- infinity
-    else (min tr val, theta)
+    else (tr, theta)
   where
     tree          = relabelParams _tree
     nParams       = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
     (theta, _, _) = minimizeNLL' VAR1 distribution mYErr nIter x y tree thetaOrig
     evalF a b c   = negate $ nll distribution c a b tree $ if nParams == 0 then thetaOrig else theta
     tr            = evalF x y mYErr
-    val           = evalF x_val y_val mYErr_val
 
 {-# INLINE fitnessFun #-}
 
-fitnessFunRep :: Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> RndEGraph (Double, PVector)
-fitnessFunRep nIter distribution dataTrain dataVal _tree = do
+fitnessFunRep :: Int -> Distribution -> DataSet -> Fix SRTree -> RndEGraph (Double, PVector)
+fitnessFunRep nIter distribution dataTrain _tree = do
     let tree = relabelParams _tree
         nParams = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
 
     thetaOrigs <- lift (randomVec nParams)
-    lift $ print thetaOrigs
-    pure (fitnessFun nIter distribution dataTrain dataVal _tree thetaOrigs)
+    --lift $ print thetaOrigs
+    pure (fitnessFun nIter distribution dataTrain tree thetaOrigs)
 {-# INLINE fitnessFunRep #-}
 
 
@@ -266,5 +266,7 @@ fillDL dist (x, y, mYErr) = do
   forM_ ecs $ \ec -> do
     theta <- fromJust <$> getTheta ec
     bestExpr <- relabelParams <$> getBestExpr ec
-    let mdl_train  = mdl dist mYErr x y theta bestExpr
-    insertDL ec mdl_train
+    if MA.size theta /= countParams bestExpr
+       then (lift . putStrLn) $ "Wrong number of parameters in " <> showExpr bestExpr <> ": " <> show theta <> "   " <> show ec
+       else do let mdl_train  = mdl dist mYErr x y theta bestExpr
+               insertDL ec mdl_train

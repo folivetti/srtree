@@ -32,7 +32,7 @@ import Options.Applicative as Opt hiding (Const)
 import Random
 import System.Random
 import qualified Data.HashSet as Set
-import Data.List ( sort, maximumBy, intercalate, sortOn, intersperse )
+import Data.List ( sort, maximumBy, intercalate, sortOn, intersperse, nub )
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
 import qualified Data.Sequence as FingerTree
@@ -141,7 +141,7 @@ egraphGP dataTrain dataVal dataTest args = do
     rndTerm    = Random.randomFrom terms
     rndNonTerm = Random.randomFrom nonTerms
 
-    refitChanged = do ids <- gets (_refits . _eDB) >>= Prelude.mapM canonical . Set.toList
+    refitChanged = do ids <- gets (_refits . _eDB) >>= Prelude.mapM canonical . Set.toList >>= pure . nub
                       modify' $ over (eDB . refits) (const Set.empty)
                       forM_ ids $ \ec -> do t <- getBestExpr ec
                                             (f, p) <- fitFun t

@@ -79,6 +79,10 @@ fitnessFunRep nRep nIter distribution dataTrain dataVal _tree = do
     pure (maximumBy (compare `on` fst) fits)
 {-# INLINE fitnessFunRep #-}
 
+--fitnessMV :: Int -> Int -> Distribution -> [DataSet] -> [DataSet] -> Fix SRTree -> RndEGraph (Double, [PVector])
+--fitnessMV nRep nIter distribution dataTrains dataVals _tree = do
+--  response <- forM (zip dataTrains dataVals) $ \(dt, dv) -> fitnessFunRep nRep nIter distribution dt dv _tree
+--  pure (minimum (map fst response), map snd response)
 
 -- helper query functions
 -- TODO: move to egraph lib

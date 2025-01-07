@@ -56,9 +56,9 @@ evidence dist mYerr xss ys theta tree = (1 - b) * nll dist mYerr xss ys tree the
 -- | MDL as described in 
 -- Bartlett, Deaglan J., Harry Desmond, and Pedro G. Ferreira. "Exhaustive symbolic regression." IEEE Transactions on Evolutionary Computation (2023).
 mdl :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
-mdl dist mYerr xss ys theta tree = nll' dist mYerr xss ys theta' tree
+mdl dist mYerr xss ys theta tree =   nll' dist mYerr xss ys theta tree
                                    + logFunctional tree
-                                   + logParameters dist mYerr xss ys theta tree
+                                   -- + logParameters dist mYerr xss ys theta tree
   where
     fisher = fisherNLL dist mYerr xss ys tree theta
     theta' = A.computeAs A.S $ A.zipWith (\t f -> if isSignificant t f then t else 0.0) theta fisher

@@ -205,7 +205,7 @@ rewritesWithParam =
     , "x" / "x" :=> Fixed (Param 0) :| isNotZero "x"
     , 1 ** "x" :=> Fixed (Param 0)
     , powabs 1 "x" :=> Fixed (Param 0)
-    , log (sqrt "x") :=> Fixed (Param 0) * log "x" :| isNotParam "x"
+    -- , log (sqrt "x") :=> Fixed (Param 0) * log "x" :| isNotParam "x"
     ]
 
 rewritesSimple :: [Rule]

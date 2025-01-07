@@ -221,10 +221,11 @@ modifyEClass costFun ecId =
          let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
          maybeEid <- gets ((Map.!? en) . _eNodeToEClass)
          modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.singleton (encodeEnode en) , _info = infoEc})
+         when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (Set.insert ecId)
          case maybeEid of
            Nothing   -> pure ecId
            Just eid' -> merge costFun eid' ecId
-           {-
+
        ParamIx x -> do
          let en = Param x
          c <- calculateCost costFun en
@@ -232,11 +233,12 @@ modifyEClass costFun ecId =
          let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
          maybeEid <- gets ((Map.!? en) . _eNodeToEClass)
          modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.insert (encodeEnode en) (_eNodes ec), _info = infoEc})
+         when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (Set.insert ecId)
          -- TODO: what happen to the orphans?
          case maybeEid of
            Nothing   -> pure ecId
-           Just eid' -> trace "merge" $ merge costFun eid' ecId
-           -}
+           Just eid' -> merge costFun eid' ecId
+
        _ -> pure ecId
 
   where

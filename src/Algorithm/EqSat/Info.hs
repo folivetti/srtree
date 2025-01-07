@@ -44,7 +44,7 @@ import Debug.Trace
 joinData :: EClassData -> EClassData -> EClassData
 joinData (EData c1 b1 cn1 fit1 dl1 p1 sz1) (EData c2 b2 cn2 fit2 dl2 p2 sz2) =
   --EData (min c1 c2) b (combineConsts cn1 cn2) (minMaybe fit1 fit2) (bestParam p1 p2 fit1 fit2) (min sz1 sz2)
-  EData (min c1 c2) (choose b1 b2) (choose cn1 cn2) (minMaybe fit1 fit2) (chooseF dl1 dl2) (chooseF p1 p2) (choose sz1 sz2)
+  EData (min c1 c2) (choose b1 b2) (choose cn1 cn2) (maxMaybe fit1 fit2) (choose dl1 dl2) (choose p1 p2) (choose sz1 sz2)
   where
     isFst = c1 <= c2
     choose x y = if isFst then x else y
@@ -56,9 +56,9 @@ joinData (EData c1 b1 cn1 fit1 dl1 p1 sz1) (EData c2 b2 cn2 fit2 dl2 p2 sz2) =
                  (Just f , Nothing) -> True
                  (Just f1, Just f2) -> f1 >= f2
 
-    minMaybe Nothing x = x
-    minMaybe x Nothing = x
-    minMaybe x y       = max x y
+    maxMaybe Nothing x = x
+    maxMaybe x Nothing = x
+    maxMaybe x y       = max x y
 
     bestParam Nothing x _ _ = x
     bestParam x Nothing _ _ = x
@@ -159,7 +159,7 @@ combineConsts (Param ix)   = ParamIx ix
 combineConsts (Var _)      = NotConst
 combineConsts (Uni f t)    = case t of
                               ConstVal x -> ConstVal $ evalFun f x
-                              -- ParamIx  x -> ParamIx x
+                              --ParamIx  x -> ParamIx x
                               _          -> t
 combineConsts (Bin op l r) = evalOp' l r
   where
@@ -172,12 +172,12 @@ insertFitness eId' fit params = do
   eId <- canonical eId'
   ec <- gets ((IntMap.! eId) . _eClass)
   let oldFit  = _fitness . _info $ ec
-  when (oldFit < Just fit) $ do
-   let newInfo = (_info ec){_fitness = Just fit, _theta = Just params}
-       newEc   = ec{_info = newInfo}
-       sz = _size newInfo
-   modify' $ over eClass (IntMap.insert eId newEc)
-   if (isNothing oldFit)
+  --when (oldFit < Just fit) $ do
+  let newInfo = (_info ec){_fitness = Just fit, _theta = Just params}
+      newEc   = ec{_info = newInfo}
+      sz = _size newInfo
+  modify' $ over eClass (IntMap.insert eId newEc)
+  if (isNothing oldFit)
     then modify' $ over (eDB . unevaluated) (IntSet.delete eId)
                  . over (eDB . fitRangeDB) (insertRange eId fit)
                  . over (eDB . sizeFitDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith (><) sz Empty)
