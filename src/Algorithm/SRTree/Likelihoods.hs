@@ -147,7 +147,7 @@ nll HGaussian mYerr xss ys t theta =
 -- y log phi + (1-y) log (1 - phi), assuming y \in {0,1}
 nll Bernoulli _ xss ys tree theta
   | notValid ys = error "For Bernoulli distribution the output must be either 0 or 1."
-  | otherwise   = negate . M.sum $ delay ys * yhat - log (1 + exp yhat)
+  | otherwise   = negate . M.sum $ delay ys * yhat - log (M.map (1+) $ exp yhat)
   where
     (Sz m)   = M.size ys
     yhat     = evalTree xss theta tree
@@ -221,14 +221,13 @@ nll ROXY mYerr xss ys tree theta
 -- WARNING: pass tree with parameters
 -- TODO: handle error similar to ROXY
 buildNLL MSE m tree = ((tree - var (-1)) ** 2) / constv m
--- TODO: fix me
 buildNLL Gaussian m tree =  (square(tree - var (-1)) / square (param p)) + log ((square (param p)))
   where
     square = Fix . Uni Square
     p = countParams tree
 buildNLL HGaussian m tree = (tree - var (-1)) ** 2 / var (-2) + constv m * log (2*pi* var (-2))
 buildNLL Poisson m tree = var (-1) * log (var (-1)) + exp tree - var (-1) * tree
-buildNLL Bernoulli m tree = log (1 + exp tree) - var (-1) * tree
+buildNLL Bernoulli m tree = log (1 + exp (negate tree)) + (1 - var (-1)) * tree
 buildNLL ROXY m tree = neglogP
   where
     p = countParams tree
