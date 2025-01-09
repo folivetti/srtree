@@ -7,8 +7,7 @@ import Data.Maybe ( fromMaybe )
 import Statistics.Distribution.FDistribution ( fDistribution )
 import Statistics.Distribution.ChiSquared ( chiSquared )
 import Statistics.Distribution ( quantile )
-import System.Random ( StdGen, split )
-import Data.Random.Normal ( normals )
+import System.Random ( StdGen, split, randomRs )
 
 import Data.SRTree ( SRTree, Fix (..), floatConstsToParam, paramsToConst, countNodes )
 import Data.SRTree.Eval
@@ -136,7 +135,7 @@ getBasicStats args seed dset tree theta0 ix
   where
     -- (tree', theta0) = floatConstsToParam tree
     thetas          = if restart args
-                        then A.fromList compMode $ take nParams (normals seed)
+                        then A.fromList compMode $ take nParams (randomRs (-1.0, 1.0) seed)
                         else A.fromList compMode theta0
     (t,_,nEvs)      = minimizeNLL (dist args) (_yErrTr dset) (niter args) (_xTr dset) (_yTr dset) tree thetas
     tOpt            = paramsToConst (A.toList t) tree

@@ -23,6 +23,7 @@ description:         A Symbolic Regression Tree data structure to work with math
 
 dependencies:
 - base >= 4.19 && < 5
+#- base >= 4.9 && < 5
 - mtl >= 2.2 && < 2.4
 - containers >= 0.6.7 && < 0.8
 - unordered-containers >= 0.2 && < 0.3
@@ -84,7 +85,6 @@ executables:
     dependencies:
     - srtree
     - optparse-applicative >= 0.17 && < 0.19
-    - normaldistribution >= 1.1.0.3 && < 1.2 
   eqsatrepr:
     main:                Main.hs
     source-dirs:         apps/eqsatrepr
@@ -124,7 +124,6 @@ executables:
     - srtree
     - optparse-applicative >= 0.17 && < 0.19
     - split >= 0.2.5
-    - normaldistribution >= 1.1.0.3 && < 1.2 
   egraphGP:
     main:                Main.hs
     source-dirs:         apps/egraphGP
@@ -139,7 +138,6 @@ executables:
     dependencies:
     - srtree
     - optparse-applicative >= 0.17 && < 0.19
-    - normaldistribution >= 1.1.0.3 && < 1.2
   reggression:
     main:                Main.hs
     source-dirs:         apps/rEGGression
@@ -153,7 +151,6 @@ executables:
     - srtree
     - optparse-applicative >= 0.17 && < 0.19
     - repline >= 0.4.2.0 && < 0.5
-    - normaldistribution >= 1.1.0.3 && < 1.2
     - ansi-terminal >= 1.1.2 && < 1.2
     - table-layout >= 1.0.0.1 && < 1.1
 

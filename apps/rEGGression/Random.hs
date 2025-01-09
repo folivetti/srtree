@@ -6,7 +6,6 @@ import Control.Monad
 import Data.SRTree 
 import Data.SRTree.Eval
 import Data.Massiv.Array as MA
-import Data.Random.Normal
 
 type Rng a = IO a
 

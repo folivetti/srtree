@@ -59,7 +59,7 @@ fitnessFun :: Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> PVector
 fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) _tree thetaOrig =
   if isNaN val || isNaN tr
     then (-(1/0), theta) -- infinity
-    else (min tr val, theta)
+    else (val, theta) -- (min tr val, theta)
   where
     tree          = relabelParams _tree
     nParams       = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
