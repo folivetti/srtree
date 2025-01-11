@@ -50,10 +50,16 @@ jobs:
           tagRegexGroup: 1
 
 
+          #- name: Install dependencies
+          #uses: msys2/setup-msys2@v2
+          #with:
+          #install: pacman-mirrors pkg-config base-devel mingw-w64-x86_64-toolchain upx mingw-w64-x86_64-dlfcn git
+          #update: false
       - name: Install nlopt
         run: |
-          pacman -Sy --noconfirm mingw-w64-x86_64-nlopt
-          pacman -Ql mingw-w64-x86_64-nlopt
+          choco install nlopt
+        # pacman -Sy --noconfirm mingw-w64-x86_64-nlopt
+        # pacman -Ql mingw-w64-x86_64-nlopt
 
       - name: Setup Haskell
         uses: haskell-actions/setup@v2
