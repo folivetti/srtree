@@ -80,13 +80,10 @@ jobs:
           msys2-root: C:\msys64
           install: pacman
       - if: matrix.os == 'windows-latest'
-        name: Path to MSYS2
+        name: Install nlopt on Windows
         run: |
           echo "C:\msys64\usr\bin" >> $env:GITHUB_PATH
           echo "C:\msys64\mingw64\bin" >> $env:GITHUB_PATH
-      - if: matrix.os == 'windows-latest'
-        name: Install nlopt on Windows
-        run: |
           pacman -Sy --noconfirm mingw-w64-x86_64-nlopt
 
       - name: Build binary
