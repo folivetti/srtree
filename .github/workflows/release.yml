@@ -82,7 +82,7 @@ jobs:
               msys2-root: C:\msys64
               install: pacman
           - name: Install nlopt on Windows
-            runs: |
+            run: |
               pacman -Sy --noconfirm mingw-w64-x86_64-nlopt
 
       - name: Build binary
