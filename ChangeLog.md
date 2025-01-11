@@ -1,5 +1,21 @@
 # Changelog for srtree
 
+## 2.0.1.0
+
+- Support to Multiview Symbolic Regression in egraphGP and egraphSearch 
+
+## 2.0.0.4
+
+- Cleaned up test cases (they were deprecated), will include new ones later 
+
+## 2.0.0.3
+
+- Fixed compatibility with random-1.3.0 and GHC-9.12.1 
+- Fixed bug in Bernoulli distribution 
+- Removed `log(sqrt(x))` rule in parametric rules due to generating longer expressions 
+- Fixed DL calculation without the correct number of parameters 
+- Fixed memory issue when querying pattern distribution 
+
 ## 2.0.0.0 
 
 - Complete refactoring of the library

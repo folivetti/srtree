@@ -5,7 +5,7 @@ cabal-version: 1.12
 -- see: https://github.com/sol/hpack
 
 name:           srtree
-version:        2.0.0.2
+version:        2.0.0.4
 synopsis:       A general library to work with Symbolic Regression expression trees.
 description:    A Symbolic Regression Tree data structure to work with mathematical expressions with support to first order derivative and simplification;
 category:       Math, Data, Data Structures
@@ -77,13 +77,13 @@ library
     , list-shuffle >=1.0.0.1 && <1.1
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
-    , random ==1.2.*
+    , random >=1.2 && <1.4
     , scheduler >=2.0.0.1 && <3
     , split >=0.2.5 && <0.3
     , statistics >=0.16.2.1 && <0.17
     , transformers >=0.6.1.0 && <0.7
     , unliftio >=0.2.10 && <1
-    , unliftio-core
+    , unliftio-core >=0.2.1 && <1
     , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib >=0.6.3 && <0.8
@@ -97,7 +97,7 @@ executable egraphGP
       Paths_srtree
   hs-source-dirs:
       apps/egraphGP
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -O1
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
@@ -115,14 +115,14 @@ executable egraphGP
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , optparse-applicative >=0.17 && <0.19
-    , random ==1.2.*
+    , random >=1.2 && <1.4
     , scheduler >=2.0.0.1 && <3
     , split >=0.2.5 && <0.3
     , srtree
     , statistics >=0.16.2.1 && <0.17
     , transformers >=0.6.1.0 && <0.7
     , unliftio >=0.2.10 && <1
-    , unliftio-core
+    , unliftio-core >=0.2.1 && <1
     , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib >=0.6.3 && <0.8
@@ -136,7 +136,7 @@ executable egraphSearch
       Paths_srtree
   hs-source-dirs:
       apps/egraphSearch
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -O1 -Wall
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
       attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
@@ -154,14 +154,14 @@ executable egraphSearch
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , optparse-applicative >=0.17 && <0.19
-    , random ==1.2.*
+    , random >=1.2 && <1.4
     , scheduler >=2.0.0.1 && <3
     , split >=0.2.5
     , srtree
     , statistics >=0.16.2.1 && <0.17
     , transformers >=0.6.1.0 && <0.7
     , unliftio >=0.2.10 && <1
-    , unliftio-core
+    , unliftio-core >=0.2.1 && <1
     , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib >=0.6.3 && <0.8
@@ -173,7 +173,7 @@ executable eqsatrepr
       Paths_srtree
   hs-source-dirs:
       apps/eqsatrepr
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2 -optc-O3
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
@@ -190,14 +190,14 @@ executable eqsatrepr
     , list-shuffle >=1.0.0.1 && <1.1
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
-    , random ==1.2.*
+    , random >=1.2 && <1.4
     , scheduler >=2.0.0.1 && <3
     , split >=0.2.5 && <0.3
     , srtree
     , statistics >=0.16.2.1 && <0.17
     , transformers >=0.6.1.0 && <0.7
     , unliftio >=0.2.10 && <1
-    , unliftio-core
+    , unliftio-core >=0.2.1 && <1
     , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib >=0.6.3 && <0.8
@@ -212,7 +212,7 @@ executable reggression
       Paths_srtree
   hs-source-dirs:
       apps/rEGGression
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2 -optc-O3
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       ansi-terminal >=1.1.2 && <1.2
     , attoparsec >=0.14.4 && <0.15
@@ -231,7 +231,7 @@ executable reggression
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , optparse-applicative >=0.17 && <0.19
-    , random ==1.2.*
+    , random >=1.2 && <1.4
     , repline >=0.4.2.0 && <0.5
     , scheduler >=2.0.0.1 && <3
     , split >=0.2.5 && <0.3
@@ -240,7 +240,7 @@ executable reggression
     , table-layout >=1.0.0.1 && <1.1
     , transformers >=0.6.1.0 && <0.7
     , unliftio >=0.2.10 && <1
-    , unliftio-core
+    , unliftio-core >=0.2.1 && <1
     , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib >=0.6.3 && <0.8
@@ -252,7 +252,7 @@ executable srsimplify
       Paths_srtree
   hs-source-dirs:
       apps/srsimplify
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2 -optc-O3
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
@@ -270,14 +270,14 @@ executable srsimplify
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , optparse-applicative >=0.17 && <0.19
-    , random ==1.2.*
+    , random >=1.2 && <1.4
     , scheduler >=2.0.0.1 && <3
     , split >=0.2.5 && <0.3
     , srtree
     , statistics >=0.16.2.1 && <0.17
     , transformers >=0.6.1.0 && <0.7
     , unliftio >=0.2.10 && <1
-    , unliftio-core
+    , unliftio-core >=0.2.1 && <1
     , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib >=0.6.3 && <0.8
@@ -292,7 +292,7 @@ executable srtools
       Paths_srtree
   hs-source-dirs:
       apps/srtools
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2 -optc-O3
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
@@ -310,14 +310,14 @@ executable srtools
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , optparse-applicative >=0.17 && <0.19
-    , random ==1.2.*
+    , random >=1.2 && <1.4
     , scheduler >=2.0.0.1 && <3
     , split >=0.2.5 && <0.3
     , srtree
     , statistics >=0.16.2.1 && <0.17
     , transformers >=0.6.1.0 && <0.7
     , unliftio >=0.2.10 && <1
-    , unliftio-core
+    , unliftio-core >=0.2.1 && <1
     , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib >=0.6.3 && <0.8
@@ -332,7 +332,7 @@ executable tinygp
       Paths_srtree
   hs-source-dirs:
       apps/tinygp
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2 -optc-O3
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       attoparsec >=0.14.4 && <0.15
     , attoparsec-expr >=0.1.1.2 && <0.2
@@ -350,14 +350,14 @@ executable tinygp
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
     , optparse-applicative >=0.17 && <0.19
-    , random ==1.2.*
+    , random >=1.2 && <1.4
     , scheduler >=2.0.0.1 && <3
     , split >=0.2.5 && <0.3
     , srtree
     , statistics >=0.16.2.1 && <0.17
     , transformers >=0.6.1.0 && <0.7
     , unliftio >=0.2.10 && <1
-    , unliftio-core
+    , unliftio-core >=0.2.1 && <1
     , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib >=0.6.3 && <0.8
@@ -389,14 +389,14 @@ test-suite srtree-test
     , list-shuffle >=1.0.0.1 && <1.1
     , massiv >=1.0.4.0 && <1.1
     , mtl >=2.2 && <2.4
-    , random ==1.2.*
+    , random >=1.2 && <1.4
     , scheduler >=2.0.0.1 && <3
     , split >=0.2.5 && <0.3
     , srtree
     , statistics >=0.16.2.1 && <0.17
     , transformers >=0.6.1.0 && <0.7
     , unliftio >=0.2.10 && <1
-    , unliftio-core
+    , unliftio-core >=0.2.1 && <1
     , unordered-containers ==0.2.*
     , vector >=0.12 && <0.14
     , zlib >=0.6.3 && <0.8
