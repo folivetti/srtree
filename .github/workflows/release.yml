@@ -77,5 +77,10 @@ jobs:
 
       - if: matrix.os == 'windows-latest'
         name: Build windows binary
+        shell: msys2 {0}
         run: |
-          dir /msys64
+          dir /mingw64/bin/
+      - if: matrix.os == 'windows-latest'
+        name: Build windows binary
+        run: |
+          dir /mingw64/bin/
