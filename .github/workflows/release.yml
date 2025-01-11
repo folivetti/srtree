@@ -75,8 +75,15 @@ jobs:
 
       - if: matrix.os == 'windows-latest'
         name: Install dependencies
-        run: |
-          pacman -Sy --noconfirm mingw-w64-x86_64-nlopt
+        steps:
+        - name: Install MSYS2
+          uses: msys2/setup-msys2@v2
+          with:
+            msys2-root: C:\msys64
+            install: pacman
+        - name: Install nlopt on Windows
+          runs: |
+            pacman -Sy --noconfirm mingw-w64-x86_64-nlopt
 
       - name: Build binary
         run: |
