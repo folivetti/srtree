@@ -49,18 +49,6 @@ jobs:
           tagRegex: "v(.*)"
           tagRegexGroup: 1
 
-      - name: Setup Haskell
-        uses: haskell-actions/setup@v2
-        id: setup-haskell-cabal
-        with:
-          ghc-version: ${{ matrix.ghc }}
-          cabal-version: ${{ matrix.cabal }}
-
-      - name: Cache ~/.cabal/store
-        uses: actions/cache@v2
-        with:
-          key: ${{ runner.os }}-ghc-${{ matrix.ghc }}-${{ github.sha }}
-          path: ~/.cabal/store
 
       - if: matrix.os == 'windows-latest'
         name: Install dependencies
@@ -70,16 +58,33 @@ jobs:
           update: false
       - if: matrix.os == 'windows-latest'
         name: Install nlopt
+        shell: msys2 {0}
         run: |
           pacman -Sy --noconfirm mingw-w64-x86_64-nlopt
           pacman -Ql mingw-w64-x86_64-nlopt
+
+      - name: Setup Haskell
+        shell: msys2 {0}
+        uses: haskell-actions/setup@v2
+        id: setup-haskell-cabal
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: ${{ matrix.cabal }}
+
+      - name: Cache ~/.cabal/store
+        shell: msys2 {0}
+        uses: actions/cache@v2
+        with:
+          key: ${{ runner.os }}-ghc-${{ matrix.ghc }}-${{ github.sha }}
+          path: ~/.cabal/store
 
       - if: matrix.os == 'windows-latest'
         name: Build windows binary
         shell: msys2 {0}
         run: |
-          dir /mingw64/bin/
-      - if: matrix.os == 'windows-latest'
-        name: Build windows binary
-        run: |
-          dir /mingw64/bin/
+          mkdir dist
+          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
+          cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
+          cabal install exe:srtools --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
+          cabal install exe:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
+          cabal install exe:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
