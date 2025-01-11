@@ -30,7 +30,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [windows-latest]
         ghc:
           - 9.10.1
         cabal: ["3.14.1.1"]
@@ -62,17 +62,6 @@ jobs:
           key: ${{ runner.os }}-ghc-${{ matrix.ghc }}-${{ github.sha }}
           path: ~/.cabal/store
 
-      - if: matrix.os == 'ubuntu-latest'
-        name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libnlopt-dev libnlopt0
-
-      - if: matrix.os == 'macOS-latest'
-        name: Install dependencies
-        run: |
-          brew install nlopt
-
       - if: matrix.os == 'windows-latest'
         name: Install dependencies
         uses: msys2/setup-msys2@v2
@@ -88,43 +77,5 @@ jobs:
       - if: matrix.os == 'windows-latest'
         name: Build windows binary
         run: |
-          mkdir dist
-          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
-          cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
-          cabal install exe:srtools --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
-          cabal install exe:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
-          cabal install exe:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
-      - if: matrix.os != 'windows-latest'
-        name: Build binary
-        run: |
-          mkdir dist
-          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist
-          cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist
-          cabal install exe:srtools --install-method=copy --overwrite-policy=always --installdir=dist
-          cabal install exe:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist
-          cabal install exe:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist
-
-      - if: matrix.os == 'windows-latest'
-        name: Set extension to .exe on Windows
-        run: echo "EXT=.exe" >> $GITHUB_ENV
-
-      - name: Set binary path name
-        run: |
-          echo "BINARY_PATH1=./dist/srsimplify${{ env.EXT }}" >> $GITHUB_ENV
-          echo "BINARY_PATH2=./dist/srtools${{ env.EXT }}" >> $GITHUB_ENV
-          echo "BINARY_PATH2=./dist/egraphGP${{ env.EXT }}" >> $GITHUB_ENV
-          echo "BINARY_PATH2=./dist/egraphSearch${{ env.EXT }}" >> $GITHUB_ENV
-          echo "BINARY_PATH2=./dist/rEGGression${{ env.EXT }}" >> $GITHUB_ENV
-
-      - name: Upload Release Asset
-        id: upload-release-asset
-        uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          files: |
-             ${{ env.BINARY_PATH1 }}/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
-             ${{ env.BINARY_PATH2 }}/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
-             ${{ env.BINARY_PATH2 }}/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
-             ${{ env.BINARY_PATH2 }}/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
-             ${{ env.BINARY_PATH2 }}/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
+          dir /mingw64/bin 
+          dir /mingw64/lib 
