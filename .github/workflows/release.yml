@@ -81,9 +81,12 @@ jobs:
           install: pacman
       - if: matrix.os == 'windows-latest'
         name: Path to MSYS2
-        run: |
-          echo "::add-path::C:\msys64\usr\bin"
-          echo "::add-path::C:\msys64\mingw64\bin"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+          script: |
+            echo "::add-path::C:\msys64\usr\bin"
+            echo "::add-path::C:\msys64\mingw64\bin"
       - if: matrix.os == 'windows-latest'
         name: Install nlopt on Windows
         run: |
