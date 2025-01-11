@@ -26,7 +26,7 @@ jobs:
 
   build_artifact:
     needs: [create_release]
-    name: windows-latest/GHC ${{ ghc }}/${{ github.ref }}
+    name: ${{ matrix.os }}/GHC ${{ matrix.ghc }}/${{ github.ref }}
     runs-on: windows-latest
     strategy:
       matrix:
@@ -65,13 +65,13 @@ jobs:
         uses: haskell-actions/setup@v2
         id: setup-haskell-cabal
         with:
-          ghc-version: ${{ ghc }}
-          cabal-version: ${{ cabal }}
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: ${{ matrix.cabal }}
 
       - name: Cache ~/.cabal/store
         uses: actions/cache@v2
         with:
-          key: ${{ runner.os }}-ghc-${{ ghc }}-${{ github.sha }}
+          key: ${{ runner.os }}-ghc-${{ matrix.ghc }}-${{ github.sha }}
           path: ~/.cabal/store
 
       - name: Build windows binary
