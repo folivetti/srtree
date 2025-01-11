@@ -32,7 +32,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macOS-latest, windows-latest]
         ghc:
-          - 9.12.1
+          - 9.8.4
         cabal: ["3.14.1.1"]
     defaults:
       run:
@@ -50,7 +50,7 @@ jobs:
           tagRegexGroup: 1
 
       - name: Setup Haskell
-        uses: haskell/actions/setup@v2
+        uses: haskell-actions/setup
         id: setup-haskell-cabal
         with:
           ghc-version: ${{ matrix.ghc }}
