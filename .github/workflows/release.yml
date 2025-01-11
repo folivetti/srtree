@@ -30,7 +30,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [windows-latest]
         ghc:
           - 9.10.1
         cabal: ["3.14.1.1"]
@@ -85,11 +85,11 @@ jobs:
         run: |
           pacman -Sy --noconfirm mingw-w64-x86_64-nlopt
           mkdir lib
-          copy /mingw64/bin/libnlopt.dll lib 
-          copy /mingw64/lib/libnlopt.dll.a lib 
+          cp /mingw64/bin/libnlopt.dll lib 
+          cp /mingw64/lib/libnlopt.dll.a lib 
           mkdir include 
-          copy /mingw64/include/nlopt.h include
-          copy /mingw64/include/nlopt.hpp include
+          cp /mingw64/include/nlopt.h include
+          cp /mingw64/include/nlopt.hpp include
 
       - if: matrix.os == 'windows-latest'
         name: Build windows binary
