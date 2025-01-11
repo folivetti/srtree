@@ -82,8 +82,8 @@ jobs:
       - if: matrix.os == 'windows-latest'
         name: Path to MSYS2
         run: |
-          echo "C:\msys64\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "C:\msys64\usr\bin" >> $env:GITHUB_PATH
+          echo "C:\msys64\mingw64\bin" >> $env:GITHUB_PATH
       - if: matrix.os == 'windows-latest'
         name: Install nlopt on Windows
         run: |
