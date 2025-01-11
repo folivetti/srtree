@@ -1,4 +1,4 @@
-name: srtools Release
+name: srtols Release
 
 on: 
   # Trigger the workflow on the new 'v*' tag created
@@ -9,7 +9,7 @@ on:
 jobs:
   create_release:
     name: Create Github Release
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
@@ -27,10 +27,10 @@ jobs:
   build_artifact:
     needs: [create_release]
     name: ${{ matrix.os }}/GHC ${{ matrix.ghc }}/${{ github.ref }}
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest]
+        os: [ubuntu-latest, windows-latest]
         ghc:
           - 9.10.1
         cabal: ["3.14.1.1"]
@@ -49,18 +49,6 @@ jobs:
           tagRegex: "v(.*)"
           tagRegexGroup: 1
 
-
-          #- name: Install dependencies
-          #uses: msys2/setup-msys2@v2
-          #with:
-          #install: pacman-mirrors pkg-config base-devel mingw-w64-x86_64-toolchain upx mingw-w64-x86_64-dlfcn git
-          #update: false
-      - name: Install nlopt
-        run: |
-          choco install nlopt
-        # pacman -Sy --noconfirm mingw-w64-x86_64-nlopt
-        # pacman -Ql mingw-w64-x86_64-nlopt
-
       - name: Setup Haskell
         uses: haskell-actions/setup@v2
         id: setup-haskell-cabal
@@ -74,11 +62,75 @@ jobs:
           key: ${{ runner.os }}-ghc-${{ matrix.ghc }}-${{ github.sha }}
           path: ~/.cabal/store
 
-      - name: Build windows binary
+      - if: matrix.os == 'ubuntu-latest'
+        name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnlopt-dev libnlopt0
+
+      - if: matrix.os == 'macOS-latest'
+        name: Install dependencies
+        run: |
+          brew install nlopt
+
+      - if: matrix.os == 'windows-latest'
+        name: Install dependencies
+        uses: msys2/setup-msys2@v2
+        with:
+          install: pacman-mirrors pkg-config base-devel mingw-w64-x86_64-toolchain upx mingw-w64-x86_64-dlfcn git
+          update: false
+      - if: matrix.os == 'windows-latest'
+        name: Install nlopt
+        shell: msys2 {0}
+        run: |
+          pacman -Sy --noconfirm mingw-w64-x86_64-nlopt
+          mkdir lib
+          copy /mingw64/bin/libnlopt.dll lib 
+          copy /mingw64/lib/libnlopt.dll.a lib 
+          mkdir include 
+          copy /mingw64/include/nlopt.h include
+          copy /mingw64/include/nlopt.hpp include
+
+      - if: matrix.os == 'windows-latest'
+        name: Build windows binary
         run: |
           mkdir dist
-          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
-          cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
-          cabal install exe:srtools --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
-          cabal install exe:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
-          cabal install exe:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
+          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=lib --extra-include-dirs=include
+          cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=lib --extra-include-dirs=include
+          cabal install exe:srtools --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=lib --extra-include-dirs=include
+          cabal install exe:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=lib --extra-include-dirs=include
+          cabal install exe:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=lib --extra-include-dirs=include
+      - if: matrix.os != 'windows-latest'
+        name: Build binary
+        run: |
+          mkdir dist
+          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist
+          cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist
+          cabal install exe:srtools --install-method=copy --overwrite-policy=always --installdir=dist
+          cabal install exe:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist
+          cabal install exe:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist
+
+      - if: matrix.os == 'windows-latest'
+        name: Set extension to .exe on Windows
+        run: echo "EXT=.exe" >> $GITHUB_ENV
+
+      - name: Set binary path name
+        run: |
+          echo "BINARY_PATH1=./dist/srsimplify${{ env.EXT }}" >> $GITHUB_ENV
+          echo "BINARY_PATH2=./dist/srtools${{ env.EXT }}" >> $GITHUB_ENV
+          echo "BINARY_PATH2=./dist/egraphGP${{ env.EXT }}" >> $GITHUB_ENV
+          echo "BINARY_PATH2=./dist/egraphSearch${{ env.EXT }}" >> $GITHUB_ENV
+          echo "BINARY_PATH2=./dist/rEGGression${{ env.EXT }}" >> $GITHUB_ENV
+
+      - name: Upload Release Asset
+        id: upload-release-asset
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: |
+             ${{ env.BINARY_PATH1 }}/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
+             ${{ env.BINARY_PATH2 }}/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
+             ${{ env.BINARY_PATH2 }}/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
+             ${{ env.BINARY_PATH2 }}/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
+             ${{ env.BINARY_PATH2 }}/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
