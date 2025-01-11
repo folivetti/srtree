@@ -87,14 +87,13 @@ jobs:
 
       - if: matrix.os == 'windows-latest'
         name: Build windows binary
-        shell: msys2 {0}
         run: |
           mkdir dist
-          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist
-          cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist
-          cabal install exe:srtools --install-method=copy --overwrite-policy=always --installdir=dist
-          cabal install exe:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist
-          cabal install exe:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist
+          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
+          cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
+          cabal install exe:srtools --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
+          cabal install exe:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
+          cabal install exe:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
       - if: matrix.os != 'windows-latest'
         name: Build binary
         run: |
