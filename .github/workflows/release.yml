@@ -1,4 +1,4 @@
-name: srtols Release
+name: srtools Release
 
 on: 
   # Trigger the workflow on the new 'v*' tag created
@@ -9,7 +9,7 @@ on:
 jobs:
   create_release:
     name: Create Github Release
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
@@ -26,17 +26,15 @@ jobs:
 
   build_artifact:
     needs: [create_release]
-    name: ${{ matrix.os }}/GHC ${{ matrix.ghc }}/${{ github.ref }}
-    runs-on: ${{ matrix.os }}
+    name: windows-latest/GHC ${{ ghc }}/${{ github.ref }}
+    runs-on: windows-latest
     strategy:
-      matrix:
-        os: [windows-latest]
-        ghc:
-          - 9.10.1
-        cabal: ["3.14.1.1"]
+      ghc:
+         - 9.10.1
+      cabal: "3.14.1.1"
     defaults:
       run:
-        shell: bash
+        shell: msys2 {0}
 
     steps:
       - name: Check out code
@@ -50,37 +48,31 @@ jobs:
           tagRegexGroup: 1
 
 
-      - if: matrix.os == 'windows-latest'
-        name: Install dependencies
+      - name: Install dependencies
         uses: msys2/setup-msys2@v2
         with:
           install: pacman-mirrors pkg-config base-devel mingw-w64-x86_64-toolchain upx mingw-w64-x86_64-dlfcn git
           update: false
       - if: matrix.os == 'windows-latest'
         name: Install nlopt
-        shell: msys2 {0}
         run: |
           pacman -Sy --noconfirm mingw-w64-x86_64-nlopt
           pacman -Ql mingw-w64-x86_64-nlopt
 
       - name: Setup Haskell
-        shell: msys2 {0}
         uses: haskell-actions/setup@v2
         id: setup-haskell-cabal
         with:
-          ghc-version: ${{ matrix.ghc }}
-          cabal-version: ${{ matrix.cabal }}
+          ghc-version: ${{ ghc }}
+          cabal-version: ${{ cabal }}
 
       - name: Cache ~/.cabal/store
-        shell: msys2 {0}
         uses: actions/cache@v2
         with:
-          key: ${{ runner.os }}-ghc-${{ matrix.ghc }}-${{ github.sha }}
+          key: ${{ runner.os }}-ghc-${{ ghc }}-${{ github.sha }}
           path: ~/.cabal/store
 
-      - if: matrix.os == 'windows-latest'
-        name: Build windows binary
-        shell: msys2 {0}
+      - name: Build windows binary
         run: |
           mkdir dist
           cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/mingw64/lib --extra-lib-dirs=/mingw64/bin --extra-include-dirs=/mingw64/include
