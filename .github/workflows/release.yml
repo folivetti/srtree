@@ -106,11 +106,6 @@ jobs:
           echo "BINARY_PATH2=./dist/egraphSearch${{ env.EXT }}" >> $GITHUB_ENV
           echo "BINARY_PATH2=./dist/rEGGression${{ env.EXT }}" >> $GITHUB_ENV
 
-      - name: Compress binary
-        uses: svenstaro/upx-action@2.0.1
-        with:
-          file: ${{ env.BINARY_PATH }}
-
       - name: Upload Release Asset
         id: upload-release-asset
         uses: softprops/action-gh-release@v2
