@@ -29,10 +29,11 @@ jobs:
     name: windows-latest/GHC ${{ ghc }}/${{ github.ref }}
     runs-on: windows-latest
     strategy:
-      matrix: 
+      matrix:
+        os: [windows-latest]
         ghc:
-           - 9.10.1
-        cabal: "3.14.1.1"
+          - 9.10.1
+        cabal: ["3.14.1.1"]
     defaults:
       run:
         shell: msys2 {0}
