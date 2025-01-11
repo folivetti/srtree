@@ -50,7 +50,6 @@ jobs:
           tagRegexGroup: 1
 
       - name: Setup Haskell
-        uses: actions/checkout@v4
         uses: haskell-actions/setup@v2
         id: setup-haskell-cabal
         with:
