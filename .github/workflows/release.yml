@@ -73,9 +73,9 @@ jobs:
         shell: msys2 {0}
         run: |
           pacman -Sy --noconfirm mingw-w64-x86_64-nlopt
+          pacman -Ql nlopt
 
       - if: matrix.os == 'windows-latest'
         name: Build windows binary
         run: |
-          dir /mingw64/bin 
-          dir /mingw64/lib 
+          dir /msys64
