@@ -77,13 +77,12 @@ jobs:
         name: Install dependencies
         uses: msys2/setup-msys2@v2
         with:
-          msys2-root: C:\msys64
-          install: pacman
+          install: pacman-mirrors pkg-config base-devel mingw-w64-x86_64-toolchain upx mingw-w64-x86_64-dlfcn git
+          update: false
       - if: matrix.os == 'windows-latest'
-        name: Install nlopt on Windows
+        name: Install nlopt
+        shell: msys2 {0}
         run: |
-          echo "C:\msys64\usr\bin" >> $env:GITHUB_PATH
-          echo "C:\msys64\mingw64\bin" >> $env:GITHUB_PATH
           pacman -Sy --noconfirm mingw-w64-x86_64-nlopt
 
       - name: Build binary
