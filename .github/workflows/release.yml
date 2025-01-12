@@ -81,7 +81,7 @@ jobs:
           tar zxvf nlopt.tar.gz -C nlopt
           dir nlopt
           mkdir dist
-        # cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
+          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=./nlopt/lib --extra-lib-dirs=./nlopt/bin --extra-include-dirs=./nlopt/include
         #  cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
         #  cabal install exe:srtools --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
         #  cabal install exe:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
