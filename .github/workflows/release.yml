@@ -81,6 +81,7 @@ jobs:
           curl -L https://github.com/stevengj/NLoptBuilder/releases/download/v2.6.1/NLopt.v2.6.1.i686-w64-mingw32.tar.gz -o nlopt.tar.gz
           tar zxvf nlopt.tar.gz -C /d/a/nlopt
           dir /d/a/nlopt
+          echo "PATH=$PATH:/d/a/nlopt/bin:/d/a/nlopt/lib:/d/a/nlopt/include" >> $GITHUB_ENV
           mkdir dist
           cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/d/a/nlopt/lib --extra-lib-dirs=/d/a/nlopt/bin --extra-include-dirs=/d/a/nlopt/include
         #  cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
