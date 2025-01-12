@@ -75,6 +75,10 @@ jobs:
           ls $(brew --prefix)/Cellar/nlopt/2.9.1/lib/
           echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}"
           echo "PKG_CONFIG_PATH=$(brew --prefix)/Cellar/nlopt/2.9.1/lib/pkgconfig" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+          echo "LD_LIBRARY_PATH=$(brew --prefix)/Cellar/nlopt/2.9.1/lib" >> "${GITHUB_ENV}"
+          echo "DYLD_LIBRARY_PATH=${DYLD_LIBRARY_PATH}"
+          echo "DYLD_LIBRARY_PATH=$(brew --prefix)/Cellar/nlopt/2.9.1/lib" >> "${GITHUB_ENV}"
 
       - if: matrix.os == 'windows-latest'
         name: Build windows binary
@@ -92,11 +96,11 @@ jobs:
         name: Build binary
         run: |
           mkdir dist
-          stack build srtree:egraphGP --copy-bins --local-bin-path=dist --flag nlopt:use-pkg-config
-          stack build srtree:egraphSearch --copy-bins --local-bin-path=dist --flag nlopt:use-pkg-config
-          stack build srtree:srtools --copy-bins --local-bin-path=dist --flag nlopt:use-pkg-config
-          stack build srtree:rEGGression --copy-bins --local-bin-path=dist --flag nlopt:use-pkg-config
-          stack build srtree:srsimplify --copy-bins --local-bin-path=dist --flag nlopt:use-pkg-config
+          stack build srtree:egraphGP --copy-bins --local-bin-path=dist 
+          stack build srtree:egraphSearch --copy-bins --local-bin-path=dist 
+          stack build srtree:srtools --copy-bins --local-bin-path=dist 
+          stack build srtree:rEGGression --copy-bins --local-bin-path=dist 
+          stack build srtree:srsimplify --copy-bins --local-bin-path=dist 
 
       - if: matrix.os == 'windows-latest'
         name: Set extension to .exe on Windows
