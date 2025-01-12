@@ -76,11 +76,14 @@ jobs:
       - if: matrix.os == 'windows-latest'
         name: Build windows binary
         run: |
-          stack exec -- pacman --noconfirm -Sy msys2-keyring
-          stack exec -- pacman --noconfirm -S mingw-w64-x86_64-pkgconf
-          stack exec -- pacman --noconfirm -S mingw-w64-x86_64-nlopt
+          pwd
+          mkdir /d/a/nlopt 
+          curl -L https://github.com/stevengj/NLoptBuilder/releases/download/v2.6.1/NLopt.v2.6.1.i686-w64-mingw32.tar.gz -o nlopt.tar.gz
+          tar zxvf nlopt.tar.gz -C /d/a/nlopt
+          dir /d/a/nlopt
+          cp /d/a/nlopt/bin/* /usr/lib
           mkdir dist
-          stack build srtree:egraphGP --copy-bins --local-bin-path=dist
+          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/d/a/nlopt/lib --extra-lib-dirs=/d/a/nlopt/bin --extra-include-dirs=/d/a/nlopt/include
         #  cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
         #  cabal install exe:srtools --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
         #  cabal install exe:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
@@ -89,8 +92,8 @@ jobs:
         name: Build binary
         run: |
           mkdir dist
-          cabal install srtree:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist
-          cabal install srtree:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist
+          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist
+          cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist
           cabal install exe:srtools --install-method=copy --overwrite-policy=always --installdir=dist
           cabal install exe:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist
           cabal install exe:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist
