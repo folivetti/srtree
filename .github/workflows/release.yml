@@ -96,11 +96,7 @@ jobs:
         name: Build binary
         run: |
           mkdir dist
-          stack build srtree:egraphGP --copy-bins --local-bin-path=dist 
-          stack build srtree:egraphSearch --copy-bins --local-bin-path=dist 
-          stack build srtree:srtools --copy-bins --local-bin-path=dist 
-          stack build srtree:rEGGression --copy-bins --local-bin-path=dist 
-          stack build srtree:srsimplify --copy-bins --local-bin-path=dist 
+          cabal install srtree:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist
 
       - if: matrix.os == 'windows-latest'
         name: Set extension to .exe on Windows
