@@ -95,7 +95,7 @@ jobs:
           mv dist/egraphGP.exe dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/egraphSearch.exe dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srtools.exe dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
-          mv dist/rEGGression.exe dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/reggression.exe dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srsimplify.exe dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
 
       - if: matrix.os == 'macOS-latest'
@@ -110,7 +110,7 @@ jobs:
           mv dist/egraphGP dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/egraphSearch dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srtools dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
-          mv dist/rEGGression dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/reggression dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srsimplify dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
       
       - if: matrix.os == 'ubuntu-latest'
@@ -122,11 +122,10 @@ jobs:
           cabal install srtree:srtools --install-method=copy --overwrite-policy=always --installdir=dist 
           cabal install srtree:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist 
           cabal install srtree:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist 
-          ls dist
           mv dist/egraphGP dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/egraphSearch dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srtools dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
-          mv dist/rEGGression dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/reggression dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srsimplify dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
 
       - if: matrix.os == 'windows-latest'
