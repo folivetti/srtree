@@ -90,7 +90,7 @@ jobs:
           stack build srtree:egraphGP --copy-bins --local-bin-path=dist
           stack build srtree:egraphSearch --copy-bins --local-bin-path=dist
           stack build srtree:srtools --copy-bins --local-bin-path=dist
-          stack build srtree:rEGGression --copy-bins --local-bin-path=dist
+          stack build srtree:reggression --copy-bins --local-bin-path=dist
           stack build srtree:srsimplify --copy-bins --local-bin-path=dist
           mv dist/egraphGP.exe dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
           mv dist/egraphSearch.exe dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
