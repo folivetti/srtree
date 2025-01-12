@@ -30,7 +30,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macOS-latest]
+        os: [ubuntu-latest]
         ghc:
           - 9.10.1
         cabal: ["3.14.1.1"]
@@ -122,6 +122,7 @@ jobs:
           cabal install srtree:srtools --install-method=copy --overwrite-policy=always --installdir=dist 
           cabal install srtree:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist 
           cabal install srtree:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist 
+          ls dist
           mv dist/egraphGP dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/egraphSearch dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srtools dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
