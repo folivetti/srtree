@@ -74,7 +74,7 @@ jobs:
           brew install nlopt
           whereis libnlopt.so
           echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}"
-          echo "PKG_CONFIG_PATH=$(brew --prefix)/nlopt/lib/pkgconfig" >> "${GITHUB_ENV}"
+          echo "PKG_CONFIG_PATH=$(brew --prefix)/nlopt/2.9.1/lib/pkgconfig" >> "${GITHUB_ENV}"
 
       - if: matrix.os == 'windows-latest'
         name: Build windows binary
