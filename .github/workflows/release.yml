@@ -92,11 +92,11 @@ jobs:
           stack build srtree:srtools --copy-bins --local-bin-path=dist
           stack build srtree:rEGGression --copy-bins --local-bin-path=dist
           stack build srtree:srsimplify --copy-bins --local-bin-path=dist
-          mv dist/egraphGP.exe dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
-          mv dist/egraphSearch.exe dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
-          mv dist/srtools.exe dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
-          mv dist/reggression.exe dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
-          mv dist/srsimplify.exe dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/egraphGP.exe dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
+          mv dist/egraphSearch.exe dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
+          mv dist/srtools.exe dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
+          mv dist/reggression.exe dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
+          mv dist/srsimplify.exe dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
 
       - if: matrix.os == 'macOS-latest'
         name: Build binary on maxOS
@@ -127,6 +127,7 @@ jobs:
           mv dist/srtools dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/reggression dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srsimplify dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          ls dist
 
       - if: matrix.os == 'windows-latest'
         name: Set extension to .exe on Windows
@@ -134,11 +135,11 @@ jobs:
 
       - name: Set binary path name
         run: |
-          echo "BINARY_PATH1=./dist/srsimplify${{ env.EXT }}" >> $GITHUB_ENV
-          echo "BINARY_PATH2=./dist/srtools${{ env.EXT }}" >> $GITHUB_ENV
-          echo "BINARY_PATH2=./dist/egraphGP${{ env.EXT }}" >> $GITHUB_ENV
-          echo "BINARY_PATH2=./dist/egraphSearch${{ env.EXT }}" >> $GITHUB_ENV
-          echo "BINARY_PATH2=./dist/rEGGression${{ env.EXT }}" >> $GITHUB_ENV
+          echo "BINARY_PATH1=./dist" >> $GITHUB_ENV
+          echo "BINARY_PATH2=./dist" >> $GITHUB_ENV
+          echo "BINARY_PATH2=./dist" >> $GITHUB_ENV
+          echo "BINARY_PATH2=./dist" >> $GITHUB_ENV
+          echo "BINARY_PATH2=./dist" >> $GITHUB_ENV
 
       - name: Upload Release Asset
         id: upload-release-asset
