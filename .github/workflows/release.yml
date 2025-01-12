@@ -96,7 +96,7 @@ jobs:
         name: Build binary
         run: |
           mkdir dist
-          cabal install srtree:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist
+          cabal install srtree:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
 
       - if: matrix.os == 'windows-latest'
         name: Set extension to .exe on Windows
