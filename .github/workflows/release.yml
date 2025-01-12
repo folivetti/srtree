@@ -95,7 +95,7 @@ jobs:
           mv dist/egraphGP.exe dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
           mv dist/egraphSearch.exe dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
           mv dist/srtools.exe dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
-          mv dist/reggression.exe dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
+          mv dist/reggression.exe dist/reggression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
           mv dist/srsimplify.exe dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
 
       - if: matrix.os == 'macOS-latest'
@@ -110,7 +110,7 @@ jobs:
           mv dist/egraphGP dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/egraphSearch dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srtools dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
-          mv dist/reggression dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/reggression dist/reggression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srsimplify dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
       
       - if: matrix.os == 'ubuntu-latest'
@@ -120,12 +120,12 @@ jobs:
           cabal install srtree:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist 
           cabal install srtree:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist 
           cabal install srtree:srtools --install-method=copy --overwrite-policy=always --installdir=dist 
-          cabal install srtree:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist 
+          cabal install srtree:reggression --install-method=copy --overwrite-policy=always --installdir=dist 
           cabal install srtree:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist 
           mv dist/egraphGP dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/egraphSearch dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srtools dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
-          mv dist/reggression dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/reggression dist/reggression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srsimplify dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           ls dist
 
@@ -152,4 +152,4 @@ jobs:
              ${{ env.BINARY_PATH2 }}/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
              ${{ env.BINARY_PATH2 }}/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
              ${{ env.BINARY_PATH2 }}/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
-             ${{ env.BINARY_PATH2 }}/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
+             ${{ env.BINARY_PATH2 }}/reggression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
