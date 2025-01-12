@@ -76,12 +76,13 @@ jobs:
       - if: matrix.os == 'windows-latest'
         name: Build windows binary
         run: |
-          mkdir D:\nlopt 
+          pwd
+          mkdir D:\\nlopt 
           curl -L https://github.com/stevengj/NLoptBuilder/releases/download/v2.6.1/NLopt.v2.6.1.i686-w64-mingw32.tar.gz -o nlopt.tar.gz
-          tar zxvf nlopt.tar.gz -C D:\nlopt
-          dir D:\nlopt
+          tar zxvf nlopt.tar.gz -C D:\\nlopt
+          dir D:\\nlopt
           mkdir dist
-          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=D:\nlopt\lib --extra-lib-dirs=D:\nlopt\bin --extra-include-dirs=D:\nlopt\include
+          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=D:\\nlopt\\lib --extra-lib-dirs=D:\\nlopt\\bin --extra-include-dirs=D:\\nlopt\\include
         #  cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
         #  cabal install exe:srtools --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
         #  cabal install exe:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
