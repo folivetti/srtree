@@ -84,22 +84,19 @@ jobs:
         shell: msys2 {0}
         run: |
           pacman -Sy --noconfirm mingw-w64-x86_64-nlopt
-          mkdir lib
-          cp /mingw64/bin/libnlopt.dll lib 
-          cp /mingw64/lib/libnlopt.dll.a lib 
-          mkdir include 
-          cp /mingw64/include/nlopt.h include
-          cp /mingw64/include/nlopt.hpp include
 
       - if: matrix.os == 'windows-latest'
         name: Build windows binary
         run: |
+          mkdir nlopt 
+          curl -L https://github.com/stevengj/NLoptBuilder/releases/download/v2.6.1/NLopt.v2.6.1.i686-w64-mingw32.tar.gz -o nlopt.tar.gz
+          tar zxvf nlopt.tar.gz -C nlopt
           mkdir dist
-          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=lib --extra-include-dirs=include
-          cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=lib --extra-include-dirs=include
-          cabal install exe:srtools --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=lib --extra-include-dirs=include
-          cabal install exe:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=lib --extra-include-dirs=include
-          cabal install exe:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=lib --extra-include-dirs=include
+          cabal install exe:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
+          cabal install exe:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
+          cabal install exe:srtools --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
+          cabal install exe:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
+          cabal install exe:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=nlopt/lib --extra-lib-dirs=nlopt/bin --extra-include-dirs=nlopt/include
       - if: matrix.os != 'windows-latest'
         name: Build binary
         run: |
