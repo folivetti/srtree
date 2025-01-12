@@ -30,7 +30,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macOS-latest]
+        os: [ubuntu-latest, windows-latest, macOS-latest]
         ghc:
           - 9.10.1
         cabal: ["3.14.1.1"]
@@ -63,13 +63,13 @@ jobs:
           path: ~/.cabal/store
 
       - if: matrix.os == 'ubuntu-latest'
-        name: Install dependencies
+        name: Install ubuntu dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libnlopt-dev libnlopt0
 
       - if: matrix.os == 'macOS-latest'
-        name: Install dependencies
+        name: Install macOS dependencies
         run: |
           brew install nlopt
           ls $(brew --prefix)/Cellar/nlopt/2.9.1/lib/
@@ -92,11 +92,41 @@ jobs:
           stack build srtree:srtools --copy-bins --local-bin-path=dist
           stack build srtree:rEGGression --copy-bins --local-bin-path=dist
           stack build srtree:srsimplify --copy-bins --local-bin-path=dist
-      - if: matrix.os != 'windows-latest'
-        name: Build binary
+          mv dist/egraphGP.exe dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/egraphSearch.exe dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/srtools.exe dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/rEGGression.exe dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/srsimplify.exe dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+
+      - if: matrix.os == 'macOS-latest'
+        name: Build binary on maxOS
         run: |
           mkdir dist
           cabal install srtree:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
+          cabal install srtree:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
+          cabal install srtree:srtools --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
+          cabal install srtree:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
+          cabal install srtree:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
+          mv dist/egraphGP dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/egraphSearch dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/srtools dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/rEGGression dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/srsimplify dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+      
+      - if: matrix.os == 'ubuntu-latest'
+        name: Build binary on Ubuntu
+        run: |
+          mkdir dist
+          cabal install srtree:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist 
+          cabal install srtree:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist 
+          cabal install srtree:srtools --install-method=copy --overwrite-policy=always --installdir=dist 
+          cabal install srtree:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist 
+          cabal install srtree:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist 
+          mv dist/egraphGP dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/egraphSearch dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/srtools dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/rEGGression dist/rEGGression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/srsimplify dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
 
       - if: matrix.os == 'windows-latest'
         name: Set extension to .exe on Windows
