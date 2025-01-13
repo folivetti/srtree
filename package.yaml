@@ -1,5 +1,5 @@
 name:                srtree
-version:             2.0.0.4
+version:             2.0.0.5
 synopsis:            A general library to work with Symbolic Regression expression trees.
 github:              "folivetti/srtree"
 license:             BSD3
@@ -29,7 +29,7 @@ dependencies:
 - random >= 1.2 && < 1.4
 - vector >= 0.12 && < 0.14
 - dlist >= 1.0 && < 1.1
-- massiv >= 1.0.4.0 && < 1.1
+- massiv >= 1.0.4.1 && < 1.1
 - filepath >= 1.4.0.0 && < 1.6
 - split >= 0.2.5 && < 0.3
 - zlib >= 0.6.3 && < 0.8
