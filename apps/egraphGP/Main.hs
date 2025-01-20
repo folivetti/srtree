@@ -54,8 +54,8 @@ import Data.SRTree (convertProtectedOps)
 
 import Util
 
-egraphGP :: DataSet -> DataSet -> DataSet -> Args -> StateT EGraph (StateT StdGen IO) ()
-egraphGP dataTrain dataVal dataTest args = do
+egraphGP :: [(DataSet, DataSet)] -> [DataSet] -> Args -> StateT EGraph (StateT StdGen IO) ()
+egraphGP dataTrainVals dataTests args = do
   when ((not.null) (_loadFrom args)) $ (io $ BS.readFile (_loadFrom args)) >>= \eg -> put (decode eg)
 
   pop <- replicateM (_nPop args) $ do ec <- insertRndExpr (_maxSize args) rndTerm rndNonTerm >>= canonical
@@ -114,16 +114,19 @@ egraphGP dataTrain dataVal dataTest args = do
   where
     maxSize = (_maxSize args)
     maxMem = 10000 -- running 1 iter of eqsat for each new individual will consume ~3GB
-    fitFun = fitnessFunRep (_optRepeat args) (_optIter args) (_distribution args) dataTrain dataVal
+    fitFun = fitnessMV shouldReparam (_optRepeat args) (_optIter args) (_distribution args) dataTrainVals
     nonTerms   = parseNonTerms (_nonterminals args)
-    (Sz2 _ nFeats) = MA.size (getX dataTrain)
+    (Sz2 _ nFeats) = MA.size (getX .fst . head $ dataTrainVals)
+    params         = if _nParams args == -1 then [param 0] else Prelude.map param [0 .. _nParams args - 1]
+    shouldReparam  = _nParams args == -1
+    relabel        = if shouldReparam then relabelParams else relabelParamsOrder
     terms          = if _distribution args == ROXY
-                          then [var 0, param 0]
-                          else [var ix | ix <- [0 .. nFeats-1]] <> [param 0]
+                          then (var 0 : params)
+                          else [var ix | ix <- [0 .. nFeats-1]] <> params
     uniNonTerms = [t | t <- nonTerms, isUni t]
     binNonTerms = [t | t <- nonTerms, isBin t]
-    isUni (Uni _ _) = True
-    isUni _         = False
+    isUni (Uni _ _)   = True
+    isUni _           = False
     isBin (Bin _ _ _) = True
     isBin _           = False
 
@@ -134,9 +137,9 @@ egraphGP dataTrain dataVal dataTest args = do
                      infos  <- forM pareto (\c -> gets (_info . (IntMap.! c) . _eClass))
                      exprs  <- forM pareto getBestExpr
                      put emptyGraph
-                     newIds <- fromTrees myCost exprs
+                     newIds <- fromTrees myCost $ Prelude.map relabel exprs
                      forM_ (Prelude.zip newIds (Prelude.reverse infos)) $ \(eId, info) ->
-                         insertFitness eId (fromJust $ _fitness info) (fromJust $ _theta info)
+                         insertFitness eId (fromJust $ _fitness info) (_theta info)
 
     rndTerm    = Random.randomFrom terms
     rndNonTerm = Random.randomFrom nonTerms
@@ -178,7 +181,7 @@ egraphGP dataTrain dataVal dataTest args = do
                             else do pos <- rnd $ randomRange (1, sz-1)
                                     cands <- getAllSubClasses p2
                                     tree <- getSubtree pos 0 Nothing [] cands p1
-                                    fromTree myCost tree >>= canonical
+                                    fromTree myCost (relabel tree) >>= canonical
 
     getSubtree :: Int -> Int -> Maybe (EClassId -> ENode) -> [Maybe (EClassId -> ENode)] -> [EClassId] -> EClassId -> RndEGraph (Fix SRTree)
     getSubtree 0 sz (Just parent) mGrandParents cands p' = do
@@ -227,7 +230,7 @@ egraphGP dataTrain dataVal dataTest args = do
                   if coin
                      then do pos <- rnd $ randomRange (0, sz-1)
                              tree <- mutAt pos maxSize Nothing p
-                             fromTree myCost tree >>= canonical
+                             fromTree myCost (relabel tree) >>= canonical
                      else pure p
 
     peel :: Fix SRTree -> SRTree ()
@@ -303,48 +306,50 @@ egraphGP dataTrain dataVal dataTest args = do
 
     printExpr :: Int -> EClassId -> RndEGraph ()
     printExpr ix ec = do
-        theta' <- gets (fromJust . _theta . _info . (IM.! ec) . _eClass)
+        thetas' <- gets (_theta . _info . (IM.! ec) . _eClass)
         bestExpr <- getBestExpr ec
-        let nParams = countParams bestExpr
-            (MA.Sz nTheta)  = MA.size theta'
-        (_, theta) <- if (nParams /= nTheta)
+        let nParams = countParamsUniq bestExpr
+            fromSz (MA.Sz x) = x 
+            nThetas  = Prelude.map (fromSz . MA.size) thetas'
+        (_, thetas) <- if Prelude.any (/=nParams) nThetas 
                         then fitFun bestExpr
-                        else pure (1.0, theta')
+                        else pure (1.0, thetas')
 
-        let (x, y, mYErr) = dataTrain
-            (x_val, y_val, mYErr_val) = dataVal
-            (x_te, y_te, mYErr_te) = dataTest
-            distribution = _distribution args
-            best'     = relabelParams bestExpr
-            expr      = paramsToConst (MA.toList theta) best'
-            mse_train = mse x y best' theta
-            mse_val   = mse x_val y_val best' theta
-            mse_te    = mse x_te y_te best' theta
-            r2_train  = r2 x y best' theta
-            r2_val    = r2 x_val y_val best' theta
-            r2_te     = r2 x_te y_te best' theta
-            nll_train  = nll distribution mYErr x y best' theta
-            nll_val    = nll distribution mYErr_val x_val y_val best' theta
-            nll_te     = nll distribution mYErr_te x_te y_te best' theta
-            mdl_train  = mdl distribution mYErr x y theta best'
-            mdl_val    = mdl distribution mYErr_val x_val y_val theta best'
-            mdl_te     = mdl distribution mYErr_te x_te y_te theta best'
-            vals       = intercalate ","
-                       $ Prelude.map show [mse_train, mse_val, mse_te
-                                          , r2_train, r2_val, r2_te
-                                          , nll_train, nll_val, nll_te
-                                          , mdl_train, mdl_val, mdl_te]
-            thetaStr   = intercalate ";" $ Prelude.map show (MA.toList theta)
-        io . putStrLn $ show ix <> "," <> showExpr expr <> ","
-                      <> thetaStr <> "," <> show (countNodes $ convertProtectedOps expr)
-                      <> "," <> vals
+        forM_ (Prelude.zip3 dataTrainVals dataTests thetas) $ \((dataTrain, dataVal), dataTest, theta) -> do
+            let (x, y, mYErr) = dataTrain
+                (x_val, y_val, mYErr_val) = dataVal
+                (x_te, y_te, mYErr_te) = dataTest
+                distribution = _distribution args
+                best'     = if shouldReparam then relabelParams bestExpr else relabelParamsOrder bestExpr
+                expr      = paramsToConst (MA.toList theta) best'
+                mse_train = mse x y best' theta
+                mse_val   = mse x_val y_val best' theta
+                mse_te    = mse x_te y_te best' theta
+                r2_train  = r2 x y best' theta
+                r2_val    = r2 x_val y_val best' theta
+                r2_te     = r2 x_te y_te best' theta
+                nll_train  = nll distribution mYErr x y best' theta
+                nll_val    = nll distribution mYErr_val x_val y_val best' theta
+                nll_te     = nll distribution mYErr_te x_te y_te best' theta
+                mdl_train  = mdl distribution mYErr x y theta best'
+                mdl_val    = mdl distribution mYErr_val x_val y_val theta best'
+                mdl_te     = mdl distribution mYErr_te x_te y_te theta best'
+                vals       = intercalate ","
+                           $ Prelude.map show [mse_train, mse_val, mse_te
+                                              , r2_train, r2_val, r2_te
+                                              , nll_train, nll_val, nll_te
+                                              , mdl_train, mdl_val, mdl_te]
+                thetaStr   = intercalate ";" $ Prelude.map show (MA.toList theta)
+            io . putStrLn $ show ix <> "," <> showExpr expr <> ","
+                          <> thetaStr <> "," <> show (countNodes $ convertProtectedOps expr)
+                          <> "," <> vals
 
     printPop pop = forM_ pop $ \ecN'-> do
             ecN'' <- canonical ecN'
             _tree <- getBestExpr ecN''
             fi <- fromJust <$> getFitness ecN''
-            theta <- fromJust <$> getTheta ecN''
-            let thetaStr   = intercalate ";" $ Prelude.map show (MA.toList theta)
+            thetas <- getTheta ecN''
+            let thetaStr   = intercalate "_" $ Prelude.map (intercalate ";" . Prelude.map show . MA.toList) thetas
             io . putStrLn $ showExpr _tree <> "," <> thetaStr <> "," <> show fi
             pure ()
 
@@ -362,6 +367,7 @@ data Args = Args
     _distribution :: Distribution,
     _optIter      :: Int,
     _optRepeat    :: Int,
+    _nParams      :: Int,
     _nPop         :: Int,
     _nTournament  :: Int,
     _pc           :: Double,
@@ -426,6 +432,11 @@ opt = Args
        <> showDefault
        <> help "number of retries of parameter fitting.")
   <*> option auto
+       ( long "number-params"
+       <> value (-1)
+       <> showDefault
+       <> help "maximum number of parameters in the model. If this argument is absent, the number is bounded by the maximum size of the expression and there will be no repeated parameter.")
+  <*> option auto
        ( long "nPop"
        <> value 100
        <> showDefault
@@ -472,12 +483,14 @@ main :: IO ()
 main = do
   args <- execParser opts
   g    <- getStdGen
-  dataTrain' <- loadTrainingOnly (_dataset args) True
-  dataTest   <- if null (_testData args)
-                  then pure dataTrain'
-                  else loadTrainingOnly (_testData args) True
-  let ((dataTrain, dataVal), g') = runState (splitData dataTrain' $ _split args) g
-      alg = evalStateT (egraphGP dataTrain dataVal dataTest args) emptyGraph
+  let datasets = words (_dataset args)
+  dataTrains' <- Prelude.mapM (flip loadTrainingOnly True) datasets -- load all datasets 
+  dataTests   <- if null (_testData args)
+                  then pure dataTrains'
+                  else Prelude.mapM (flip loadTrainingOnly True) $ words (_testData args)
+
+  let (dataTrainVals, g') = runState (Prelude.mapM (`splitData` (_split args)) dataTrains') g
+      alg = evalStateT (egraphGP dataTrainVals dataTests args) emptyGraph
   evalStateT alg g'
   where
     opts = Opt.info (opt <**> helper)

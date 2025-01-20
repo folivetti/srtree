@@ -143,14 +143,14 @@ distCmd args = do
   let cmd = parseCmd parseDist (B.pack $ unwords args)
   runIfRight cmd
 
-reportCmd :: Distribution -> DataSet -> DataSet -> [String] -> Repl ()
+reportCmd :: Distribution -> [DataSet] -> [DataSet] -> [String] -> Repl ()
 reportCmd _ _ _ [] = helpCmd ["report"]
 reportCmd dist trainData testData args =
   case readMaybe @Int (head args) of
     Nothing -> io.putStrLn $ "The id must be an integer."
     Just n  -> run (Report n (dist, trainData, testData))
 
-optimizeCmd :: Distribution -> DataSet -> DataSet -> [String] -> Repl ()
+optimizeCmd :: Distribution -> [DataSet] -> [DataSet] -> [String] -> Repl ()
 optimizeCmd _ _ _ [] = helpCmd ["optimize"]
 optimizeCmd dist trainData testData args =
   case readMaybe @Int (head args) of
@@ -164,7 +164,7 @@ subtreesCmd (arg:_) = case readMaybe @Int arg of
                         Nothing -> io.putStrLn $ "The argument must be an integer."
                         Just n  -> run (Subtrees n)
 
-insertCmd :: Distribution -> DataSet -> DataSet -> [String] -> Repl ()
+insertCmd :: Distribution -> [DataSet] -> [DataSet] -> [String] -> Repl ()
 insertCmd dist trainData testData [] = helpCmd ["insert"]
 insertCmd dist trainData testData args = do
   let etree = parseSR TIR "" False $ B.pack (unwords args)
@@ -296,10 +296,14 @@ main :: IO ()
 main = do
   args <- execParser opts
   g <- getStdGen
-  (dataTrain, varnames) <- loadTrainingOnly (_dataset args) True
-  (dataTest, _)  <- if null (_testData args)
-                     then pure (dataTrain, "")
-                     else loadTrainingOnly (_testData args) True
+  let datasets = words (_dataset args)
+  dataTrainsWP <- Prelude.mapM (flip loadTrainingOnly True) datasets
+  let dataTrains = Prelude.map fst dataTrainsWP
+      varnames   = snd . head $ dataTrainsWP
+
+  dataTests  <- if null (_testData args)
+                  then pure dataTrains
+                  else Prelude.map fst <$> (Prelude.mapM (flip loadTrainingOnly True) $ words (_testData args))
   eg <- if (not.null) (_loadFrom args)
            then decode <$> BS.readFile (_loadFrom args)
            else if (not. null) (_parseCSV args)
@@ -309,10 +313,10 @@ main = do
       dist = _distribution args
       funs = [ helpCmd
              , topCmd
-             , reportCmd dist dataTrain dataTest
-             , optimizeCmd dist dataTrain dataTest
+             , reportCmd dist dataTrains dataTests
+             , optimizeCmd dist dataTrains dataTests
              , subtreesCmd
-             , insertCmd dist dataTrain dataTest
+             , insertCmd dist dataTrains dataTests
              , countPatCmd
              , distCmd
              , paretoCmd
@@ -323,7 +327,7 @@ main = do
       cmdMap = Map.fromList $ Prelude.zip commands funs
 
       repl = evalRepl (const $ pure ">>> ") (cmd cmdMap) [] Nothing Nothing (Word comp) ini final
-      crDB = if _calcDL args then (createDB >> fillDL dist dataTrain >> rebuildAllRanges) else (createDB >> rebuildAllRanges)
+      crDB = if _calcDL args then (createDB >> fillDL dist dataTrains >> rebuildAllRanges) else (createDB >> rebuildAllRanges)
   if (not.null) (_convertFromTo args)
      then convert (_convertFromTo args) (_to args) varnames
      else do when (_calcDL args) $ putStrLn "Calculating DL..."

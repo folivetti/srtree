@@ -16,6 +16,7 @@ import Algorithm.SRTree.NonlinearOpt
 import System.Random
 import Random
 import Algorithm.SRTree.Likelihoods
+import Data.SRTree.Print
 --import Algorithm.SRTree.ModelSelection
 --import Algorithm.SRTree.Opt
 import qualified Data.IntMap.Strict as IM
@@ -30,6 +31,8 @@ import Data.Char ( toLower )
 import qualified Data.IntSet as IntSet
 import Data.SRTree.Datasets
 import Algorithm.EqSat.Queries
+
+import Debug.Trace
 
 type RndEGraph a = EGraphST (StateT StdGen IO) a
 type DataSet = (SRMatrix, PVector, Maybe PVector)
@@ -62,7 +65,7 @@ fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) tree theta
     else (val, theta)
   where
     --tree          = relabelParams _tree
-    nParams       = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
+    nParams       = countParamsUniq tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
     (theta, _, _) = minimizeNLL' VAR1 distribution mYErr nIter x y tree thetaOrig
     evalF a b c   = negate $ nll distribution c a b tree $ if nParams == 0 then thetaOrig else theta
     --tr            = evalF x y mYErr
@@ -71,21 +74,26 @@ fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) tree theta
 --{-# INLINE fitnessFun #-}
 
 fitnessFunRep :: Int -> Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> RndEGraph (Double, PVector)
-fitnessFunRep nRep nIter distribution dataTrain dataVal _tree = do
-    let tree = relabelParams _tree
-        nParams = countParams tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
+fitnessFunRep nRep nIter distribution dataTrain dataVal tree = do
+    let nParams = countParamsUniq tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
     thetaOrigs <- replicateM nRep (rnd $ randomVec nParams)
     let fits = maximumBy (compare `on` fst) $ Prelude.map (fitnessFun nIter distribution dataTrain dataVal tree) thetaOrigs
     pure fits
 --{-# INLINE fitnessFunRep #-}
 
 
+fitnessMV :: Bool -> Int -> Int -> Distribution -> [(DataSet, DataSet)] -> Fix SRTree -> RndEGraph (Double, [PVector])
+fitnessMV shouldReparam nRep nIter distribution dataTrainsVals _tree = do
+  let tree = if shouldReparam then relabelParams _tree else relabelParamsOrder _tree
+  response <- forM dataTrainsVals $ \(dt, dv) -> fitnessFunRep nRep nIter distribution dt dv tree
+  pure (minimum (Prelude.map fst response), Prelude.map snd response)
+
 -- helper query functions
 -- TODO: move to egraph lib
 getFitness :: EClassId -> RndEGraph (Maybe Double)
 getFitness c = gets (_fitness . _info . (IM.! c) . _eClass)
 {-# INLINE getFitness #-}
-getTheta :: EClassId -> RndEGraph (Maybe PVector)
+getTheta :: EClassId -> RndEGraph ([PVector])
 getTheta c = gets (_theta . _info . (IM.! c) . _eClass)
 {-# INLINE getTheta #-}
 getSize :: EClassId -> RndEGraph Int
@@ -166,7 +174,7 @@ parseNonTerms = Prelude.map toNonTerm . splitOn ","
 
 -- RndEGraph utils
 -- fitFun fitnessFunRep rep iter distribution x y mYErr x_val y_val mYErr_val
-insertExpr :: Fix SRTree -> (Fix SRTree -> RndEGraph (Double, PVector)) -> RndEGraph EClassId
+insertExpr :: Fix SRTree -> (Fix SRTree -> RndEGraph (Double, [PVector])) -> RndEGraph EClassId
 insertExpr t fitFun = do
     ecId <- fromTree myCost t >>= canonical
     (f, p) <- fitFun t

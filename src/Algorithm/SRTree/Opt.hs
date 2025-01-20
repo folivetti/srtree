@@ -35,7 +35,7 @@ minimizeNLL' alg dist mYerr niter xss ys tree t0
   | n == 0     = (t0, f, 0)
   | otherwise  = (t_opt', nll dist mYerr xss ys tree t_opt', nEvs)
   where
-    tree'      = buildNLL dist (fromIntegral m) $ relabelParams $ tree -- convertProtectedOps
+    tree'      = buildNLL dist (fromIntegral m) tree -- convertProtectedOps
     t0'        = toStorableVector t0
     treeArr    = IntMap.toAscList $ tree2arr tree'
     j2ix       = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]
@@ -70,7 +70,7 @@ minimizeNLLWithFixedParam' alg dist mYerr niter xss ys tree ix t0
   | n == 0     = t0
   | otherwise  = t_opt'
   where
-    tree'      = buildNLL dist (fromIntegral m) $ relabelParams tree
+    tree'      = buildNLL dist (fromIntegral m) tree -- relabelParams
     t0'        = toStorableVector t0
     treeArr    = IntMap.toAscList $ tree2arr tree'
     j2ix       = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]

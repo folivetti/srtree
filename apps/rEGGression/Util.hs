@@ -88,13 +88,18 @@ fitnessFunRep nIter distribution dataTrain _tree = do
     pure (fitnessFun nIter distribution dataTrain tree thetaOrigs)
 {-# INLINE fitnessFunRep #-}
 
+fitnessMV :: Int -> Distribution -> [DataSet] -> Fix SRTree -> RndEGraph (Double, [PVector])
+fitnessMV nIter distribution dataTrainsVals _tree = do
+  response <- forM dataTrainsVals $ \dt -> fitnessFunRep nIter distribution dt _tree
+  pure (minimum (Prelude.map fst response), Prelude.map snd response)
+
 
 -- helper query functions
 -- TODO: move to egraph lib
 getFitness :: EClassId -> RndEGraph (Maybe Double)
 getFitness c = gets (_fitness . _info . (IM.! c) . _eClass)
 {-# INLINE getFitness #-}
-getTheta :: EClassId -> RndEGraph (Maybe PVector)
+getTheta :: EClassId -> RndEGraph ([PVector])
 getTheta c = gets (_theta . _info . (IM.! c) . _eClass)
 {-# INLINE getTheta #-}
 getSize :: EClassId -> RndEGraph Int
@@ -126,35 +131,45 @@ getError (_, _, c) = c
 
 loadTrainingOnly fname b = getTrain <$> loadDataset fname b
 
-printExpr :: DataSet -> DataSet -> Distribution -> EClassId -> RndEGraph ()
+mvFun fun thetas datasets = Prelude.map (\(theta, (x,y,e)) -> fun x y e theta)
+                          $ Prelude.zip thetas datasets
+
+printExpr :: [DataSet] -> [DataSet] -> Distribution -> EClassId -> RndEGraph ()
 printExpr dataTrain dataTest distribution ec = do
-        theta <- fromJust <$> getTheta ec
+        thetas <- getTheta ec
 
         bestExpr <- getBestExpr ec
-        let (x, y, mYErr) = dataTrain
-            (x_te, y_te, mYErr_te) = dataTest
-            best'     = relabelParams bestExpr
-            expr      = paramsToConst (MA.toList theta) best'
-            mse_train = mse x y best' theta
-            mse_te    = mse x_te y_te best' theta
-            r2_train  = r2 x y best' theta
-            r2_te     = r2 x_te y_te best' theta
-            nll_train  = nll distribution mYErr x y best' theta
-            nll_te     = nll distribution mYErr_te x_te y_te best' theta
-            mdl_train  = mdl distribution mYErr x y theta best'
-            mdl_te     = mdl distribution mYErr_te x_te y_te theta best'
-            thetaStr   = intercalate ", " $ Prelude.map show (MA.toList theta)
+        let --(x, y, mYErr) = dataTrain
+            --(x_te, y_te, mYErr_te) = dataTest
+            best'       = relabelParams bestExpr
+
+            mseMV x y e theta = printf "%.4e" $ mse x y best' theta
+            r2MV  x y e theta = printf "%.4e" $ r2 x y best' theta
+            nllMV x y e theta = printf "%.4e" $ nll distribution e x y best' theta
+            mdlMV x y e theta = printf "%.4e" $ mdl distribution e x y theta best'
+
+            -- expr        = paramsToConst (MA.toList theta) best'
+            mse_trains  = intercalate "; " $ mvFun mseMV thetas dataTrain
+            mse_tes     = intercalate "; " $ mvFun mseMV thetas dataTest
+            r2_trains   = intercalate "; " $ mvFun r2MV thetas dataTrain
+            r2_tes      = intercalate "; " $ mvFun r2MV thetas dataTest
+            nll_trains  = intercalate "; " $ mvFun nllMV thetas dataTrain
+            nll_tes     = intercalate "; " $ mvFun nllMV thetas dataTest
+            mdl_trains  = intercalate "; " $ mvFun mdlMV thetas dataTrain
+            mdl_tes     = intercalate "; " $ mvFun mdlMV thetas dataTest
+            thetaStr    = intercalate "; " $ Prelude.map (intercalate ", " . Prelude.map show . MA.toList) thetas
+        insertDL ec $ Prelude.maximum $ Prelude.map (\(theta, (x, y, mYerr)) -> mdl distribution mYerr x y theta best') $ Prelude.zip thetas dataTrain 
         lift . putStr $ "Evaluation metrics for expression (" <> (show ec) <> "): "
         lift . putStr $ setSGRCode [SetConsoleIntensity BoldIntensity]
         lift . putStrLn $ showExpr best'
         lift . putStr $ setSGRCode [Reset]
-        lift . putStrLn $ "# of nodes\t" <> show (countNodes $ convertProtectedOps expr)
+        lift . putStrLn $ "# of nodes\t" <> show (countNodes $ convertProtectedOps best')
         lift . putStrLn $ "params:\t[" <> thetaStr <> "]"
 
-        let rows = [ rowG ["MSE", printf "%.4f" mse_train, printf "%.4f" mse_te]
-                   , rowG ["R^2", printf "%.4f" r2_train, printf "%.4f" r2_te]
-                   , rowG ["nll", printf "%.4f" nll_train, printf "%.4f" nll_te]
-                   , rowG ["DL", printf "%.4f" mdl_train, printf "%.4f" mdl_te]
+        let rows = [ rowG ["MSE", mse_trains, mse_tes]
+                   , rowG ["R^2", r2_trains, r2_tes]
+                   , rowG ["nll", nll_trains, nll_tes]
+                   , rowG ["DL",  mdl_trains, mdl_tes]
                    ]
             columnsReport = [def, numCol, numCol]
             headerReport = titlesH $ Prelude.map bold ["Metric", "Training", "Test"]
@@ -167,19 +182,19 @@ printsimpleExpr eid = do t   <- egraph $ relabelParams <$> getBestExpr eid
                          dl  <- egraph $ getDL eid
                          let fit' = case fit of
                                       Nothing -> "--"
-                                      Just f  -> printf "%.4f" f
+                                      Just f  -> printf "%.4e" f
                              p' = case p of
-                                    Nothing -> "--"
-                                    Just ps -> "[" <> intercalate ", " (Prelude.map (printf "%.4f") (MA.toList ps)) <> "]"
+                                    [] -> "--"
+                                    pss -> intercalate ";" $ Prelude.map (\ps -> "[" <> intercalate ", " (Prelude.map (printf "%.4e") (MA.toList ps)) <> "]") pss
                              dl' = case dl of
                                     Nothing -> "--"
-                                    Just d  -> printf "%.4f" d
+                                    Just d  -> printf "%.4e" d
 
                          pure $ colsAllG center [[show eid], justifyText 50 $ showExpr t, [fit'], justifyText 50 p', [show sz], [dl']]
 
-printCounts (pat, cnt) = do
+printCounts (pat, (cnt, avgfit)) = do
   let spat = showPat pat
-  pure $ colsAllG center [justifyText 50 spat, [show cnt]]
+  pure $ colsAllG center [justifyText 50 spat, [show cnt], [printf "%.4e" avgfit]]
   where
     showPat (Fixed (Var ix)) = 'x' : show ix
     showPat (Fixed (Param ix)) = 't' : show ix
@@ -192,7 +207,7 @@ printSimpleMultiExprs eids = do rows <- forM (nub eids) printsimpleExpr
                                 io.putStrLn $ tableString (columnHeaderTableS columns unicodeS headerSimple rows)
 
 printMultiCounts cnts = do rows <- forM cnts printCounts
-                           io.putStrLn $ tableString (columnHeaderTableS [fixedLeftCol 50, numCol] unicodeS headerCount rows)
+                           io.putStrLn $ tableString (columnHeaderTableS [fixedLeftCol 50, numCol, numCol] unicodeS headerCount rows)
 
 bold s = formatted (setSGRCode [SetConsoleIntensity BoldIntensity]) (plain s) (setSGRCode [Reset])
 
@@ -200,11 +215,11 @@ headerSimple :: HeaderSpec LineStyle (Formatted String)
 headerSimple = titlesH $ Prelude.map (bold) ["Id", "Expression", "Fitness", "Parameters", "Size", "DL"]
 columns = [numCol, fixedLeftCol 50, numCol, fixedLeftCol 50, numCol, numCol]
 headerCount :: HeaderSpec LineStyle (Formatted String)
-headerCount = titlesH $ Prelude.map bold ["Pattern", "Count"]
+headerCount = titlesH $ Prelude.map bold ["Pattern", "Count", "Avg. Fitness"]
 
 -- RndEGraph utils
 -- fitFun fitnessFunRep rep iter distribution x y mYErr x_val y_val mYErr_val
-insertExpr :: Fix SRTree -> (Fix SRTree -> RndEGraph (Double, PVector)) -> RndEGraph EClassId
+insertExpr :: Fix SRTree -> (Fix SRTree -> RndEGraph (Double, [PVector])) -> RndEGraph EClassId
 insertExpr t fitFun = do
     ecId <- fromTree myCost t >>= canonical
     (f, p) <- fitFun t
@@ -261,12 +276,12 @@ evaluateUnevaluated fitFun = do
               (f, p) <- fitFun t
               insertFitness c f p
 
-fillDL dist (x, y, mYErr) = do
+fillDL dist datasets = do
   ecs <- getAllEvaluatedEClasses
   forM_ ecs $ \ec -> do
-    theta <- fromJust <$> getTheta ec
+    thetas <- getTheta ec
     bestExpr <- relabelParams <$> getBestExpr ec
-    if MA.size theta /= countParams bestExpr
-       then (lift . putStrLn) $ "Wrong number of parameters in " <> showExpr bestExpr <> ": " <> show theta <> "   " <> show ec
-       else do let mdl_train  = mdl dist mYErr x y theta bestExpr
-               insertDL ec mdl_train
+    if MA.size (head thetas) /= countParams bestExpr
+       then (lift . putStrLn) $ "Wrong number of parameters in " <> showExpr bestExpr <> ": " <> show (head thetas) <> "   " <> show ec
+       else do let mdl_trains = Prelude.map (\(theta, (x, y, mYerr)) -> mdl dist mYerr x y theta bestExpr) $ Prelude.zip thetas datasets
+               insertDL ec $ Prelude.maximum mdl_trains

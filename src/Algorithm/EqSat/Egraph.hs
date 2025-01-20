@@ -201,7 +201,7 @@ data EClassData = EData { _cost    :: Cost
                         , _consts  :: Consts
                         , _fitness :: Maybe Double    -- NOTE: this cannot be NaN
                         , _dl      :: Maybe Double
-                        , _theta   :: Maybe PVector
+                        , _theta   :: [PVector]
                         , _size    :: Int
                         -- , _properties :: Property
                         -- TODO: include evaluation of expression from this e-class

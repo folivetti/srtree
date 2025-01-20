@@ -90,7 +90,7 @@ makeAnalysis costFun enode =
      enode' <- canonize enode
      cost   <- calculateCost costFun enode'
      sz <- sum <$> mapM (\ecId -> gets (_size . _info . (IntMap.! ecId) . _eClass)) (childrenOf enode')
-     pure $ EData cost enode' consts Nothing Nothing Nothing (sz+1)
+     pure $ EData cost enode' consts Nothing Nothing [] (sz+1)
 
 getChildrenMinHeight :: Monad m => ENode -> EGraphST m Int
 getChildrenMinHeight enode = do
@@ -167,13 +167,13 @@ combineConsts (Bin op l r) = evalOp' l r
     evalOp' (ConstVal x) (ConstVal y) = ConstVal $ evalOp op x y
     evalOp' _            _            = NotConst
 
-insertFitness :: Monad m => EClassId -> Double -> PVector -> EGraphST m ()
+insertFitness :: Monad m => EClassId -> Double -> [PVector] -> EGraphST m ()
 insertFitness eId' fit params = do
   eId <- canonical eId'
   ec <- gets ((IntMap.! eId) . _eClass)
   let oldFit  = _fitness . _info $ ec
   --when (oldFit < Just fit) $ do
-  let newInfo = (_info ec){_fitness = Just fit, _theta = Just params}
+  let newInfo = (_info ec){_fitness = Just fit, _theta = params}
       newEc   = ec{_info = newInfo}
       sz = _size newInfo
   modify' $ over eClass (IntMap.insert eId newEc)

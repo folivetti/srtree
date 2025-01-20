@@ -79,17 +79,17 @@ fitnessFunRep nRep nIter distribution dataTrain dataVal _tree = do
     pure (maximumBy (compare `on` fst) fits)
 {-# INLINE fitnessFunRep #-}
 
---fitnessMV :: Int -> Int -> Distribution -> [DataSet] -> [DataSet] -> Fix SRTree -> RndEGraph (Double, [PVector])
---fitnessMV nRep nIter distribution dataTrains dataVals _tree = do
---  response <- forM (zip dataTrains dataVals) $ \(dt, dv) -> fitnessFunRep nRep nIter distribution dt dv _tree
---  pure (minimum (map fst response), map snd response)
+fitnessMV :: Int -> Int -> Distribution -> [(DataSet, DataSet)] -> Fix SRTree -> RndEGraph (Double, [PVector])
+fitnessMV nRep nIter distribution dataTrainsVals _tree = do
+  response <- forM dataTrainsVals $ \(dt, dv) -> fitnessFunRep nRep nIter distribution dt dv _tree
+  pure (minimum (Prelude.map fst response), Prelude.map snd response)
 
 -- helper query functions
 -- TODO: move to egraph lib
 getFitness :: EClassId -> RndEGraph (Maybe Double)
 getFitness c = gets (_fitness . _info . (IM.! c) . _eClass)
 {-# INLINE getFitness #-}
-getTheta :: EClassId -> RndEGraph (Maybe PVector)
+getTheta :: EClassId -> RndEGraph [PVector]
 getTheta c = gets (_theta . _info . (IM.! c) . _eClass)
 {-# INLINE getTheta #-}
 getSize :: EClassId -> RndEGraph Int
@@ -170,7 +170,7 @@ parseNonTerms = Prelude.map toNonTerm . splitOn ","
 
 -- RndEGraph utils
 -- fitFun fitnessFunRep rep iter distribution x y mYErr x_val y_val mYErr_val
-insertExpr :: Fix SRTree -> (Fix SRTree -> RndEGraph (Double, PVector)) -> RndEGraph EClassId
+insertExpr :: Fix SRTree -> (Fix SRTree -> RndEGraph (Double, [PVector])) -> RndEGraph EClassId
 insertExpr t fitFun = do
     ecId <- fromTree myCost t >>= canonical
     (f, p) <- fitFun t
