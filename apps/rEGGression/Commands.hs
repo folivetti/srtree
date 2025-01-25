@@ -44,12 +44,12 @@ import Data.Binary ( encode, decode )
 import qualified Data.ByteString.Lazy as BS
 
 import Util
-
+import Debug.Trace 
 -- * Parsing
 
 -- top 5 by fitness|mdl [less than 5 params, less than 10 nodes]
 data Command  = Top Int Filter Criteria PatStr
-              | Distribution FilterDist (Maybe Limit)
+              | Distribution FilterDist (Maybe Limit) CriteriaDist Int Int
               -- below these will not be a parsable command
               | Report EClassId ArgOpt
               | Optimize EClassId Int ArgOpt
@@ -64,9 +64,10 @@ data Command  = Top Int Filter Criteria PatStr
 type Filter = EClass -> Bool -- pattern?
 type FilterDist = Int -> Bool
 data Criteria = ByFitness | ByDL deriving Eq
+data CriteriaDist = ByCount | ByAvgFit
 data Limit = Limit Int Bool deriving Show
 data PatStr = PatStr String Bool | AntiPatStr String Bool | NoPat
-type ArgOpt = (Distribution, DataSet, DataSet)
+type ArgOpt = (Distribution, [DataSet], [DataSet])
 
 -- top 10 with <=10|=10 size with <=4 parameters by fitness|dl matching pat
 -- report id
@@ -99,7 +100,27 @@ parseDist = do filters' <- many' parseFilterDist
                                else filters'
                stripSp
                limit   <- listToMaybe <$> many' parseLimit
-               pure $ Distribution (getAll . mconcat filters) limit
+               stripSp
+               by'     <- listToMaybe <$> many' parseCriteriaDL
+               stripSp 
+               least' <- listToMaybe <$> many' parseLeast
+               stripSp 
+               top'   <- listToMaybe <$> many' parseTopDist
+               let by = case by' of 
+                          Nothing -> ByCount
+                          Just b  -> b
+                   least = case least' of 
+                             Nothing -> 1 
+                             Just l  -> l 
+                   top   = case top' of 
+                             Nothing -> 1000
+                             Just t  -> t
+               pure $ Distribution (getAll . mconcat filters) limit by least top 
+
+parseLeast = stringCI "with at least " >> decimal 
+parseTopDist = stringCI "from top " >> decimal 
+parseCriteriaDL = (stringCI "by count" >> pure ByCount)
+              <|> (stringCI "by fitness" >> pure ByAvgFit)
 
 parseFilter = do stringCI "with"
                  stripSp
@@ -120,8 +141,8 @@ parseSz = stringCI "size" >> pure (_size . _info)
 parseCost = stringCI "cost" >> pure (_cost . _info)
 parseParams = stringCI "parameters" >> pure (mbLen . _theta . _info)
    where
-      mbLen Nothing = 0
-      mbLen (Just ps) = MA.unSz $ MA.size ps
+      mbLen [] = 0
+      mbLen ps = MA.unSz $ MA.size $ Prelude.head ps
 parseCmp = do op <- parseLEQ <|> parseLT <|> parseEQ <|> parseGEQ <|> parseGT
               stripSp
               n <- decimal
@@ -185,25 +206,29 @@ run (Top n filters criteria withPat) = do
         ids  <- egraph $ getFun n filters ecs
         printSimpleMultiExprs (reverse $ nub ids)
 
-run (Distribution pSz mLimit) = do
-  ee <- egraph $ IntSet.toList . IntSet.fromList <$> getAllEvaluatedEClasses
+run (Distribution pSz mLimit by least top) = do
+  ee <- egraph $ IntSet.toList . IntSet.fromList <$> getTopFitEClassThat top (const True) -- getAllEvaluatedEClasses
   allPats <- egraph $ getAllPatternsFrom pSz Map.empty ee
   let (n, isAsc) = case mLimit of
                      Nothing -> (Map.size allPats, True)
                      Just (Limit sz asc) -> (sz, asc)
+      predCount = (if isAsc then fst else negate . fst) . snd
+      predAvgFit = (if isAsc then snd else negate . snd) . snd
   printMultiCounts (Prelude.take n
-                   $ sortOn (if isAsc then snd else negate . snd)
+                   $ case by of 
+                       ByCount -> sortOn predCount
+                       ByAvgFit -> sortOn predAvgFit
                    $ Map.toList
-                   $ Map.filterWithKey (\k v -> k /= VarPat 'A' && pSz (lenPat k))
+                   $ Map.filterWithKey (\k (v,_) -> v >= least && k /= VarPat 'A' && pSz (lenPat k))
                    allPats)
 
 run (Report eid (dist, trainData, testData)) = egraph $ printExpr trainData testData dist eid
 
-run (Optimize eid nIters (dist, trainData@(x, y, mYErr), testData)) = do -- dist trainData testData
+run (Optimize eid nIters (dist, trainDatas, testData)) = do -- dist trainData testData
    t <- egraph $ relabelParams <$> getBestExpr eid
-   (f, theta) <- egraph $ fitnessFunRep nIters dist trainData t
-   egraph $ insertFitness eid f theta
-   let mdl_train  = mdl dist mYErr x y theta t
+   (f, thetas) <- egraph $ fitnessMV nIters dist trainDatas t
+   egraph $ insertFitness eid f thetas
+   let mdl_train  = Prelude.maximum $ Prelude.map (\(theta, (x, y, mYErr)) -> mdl dist mYErr x y theta t) $ Prelude.zip thetas trainDatas
    egraph $ insertDL eid mdl_train
    printSimpleMultiExprs [eid]
 
@@ -217,7 +242,7 @@ run (Insert expr argOpt) = do
 run (Subtrees eid) = do
    isValid <- egraph $ gets ((IntMap.member eid) . _eClass)
    if isValid
-     then do ids <- egraph $ getAllChildEClasses eid
+     then do ids <- egraph $ getAllChildBestEClasses eid
              printSimpleMultiExprs ids
      else io.putStrLn $ "Invalid id."
 
@@ -265,7 +290,8 @@ importCSV dist fname hdr convertParam = cleanDB >> parseEqs >> createDB >> rebui
                            let (tree, ps) = if convertParam then floatConstsToParam tree' else (tree', theta)
                                theta      = if convertParam then if dist==MSE then ps <> params else ps else params
                            eid <- fromTree myCost tree >>= canonical
-                           insertFitness eid f $ MA.fromList MA.Seq theta
+                           -- TODO: how to import MvSR?
+                           insertFitness eid f $ [MA.fromList MA.Seq theta]
                            runEqSat myCost rewritesParams 1
                            cleanDB
 
@@ -288,7 +314,8 @@ parseCSV dist fname hdr convertParam = execStateT parseEqs emptyGraph
                            let (tree, ps) = if convertParam then floatConstsToParam tree' else (tree', theta)
                                theta      = if convertParam then if dist==MSE then ps <> params else ps else params
                            eid <- fromTree myCost tree >>= canonical
-                           insertFitness eid f $ MA.fromList MA.Seq theta
+                           -- TODO: how to import MvSR?
+                           insertFitness eid f $ [MA.fromList MA.Seq theta]
                            runEqSat myCost rewritesParams 1
                            cleanDB
 getFormat :: String -> SRAlgs
@@ -346,11 +373,16 @@ isLeft _          = False
 fromLeft (Left x) = x
 fromLeft _        = undefined
 
-getAllPatternsFrom :: Monad m => (Int -> Bool) -> Map.Map Pattern Int -> [EClassId] -> EGraphST m (Map.Map Pattern Int)
-getAllPatternsFrom pSz counts []     = pure counts
-getAllPatternsFrom pSz counts (x:xs) = do pats <- Map.fromListWith (+) . Prelude.map (,1) . Prelude.filter (pSz . lenPat) <$> getAllPatterns (<=max_pat) x
-                                          getAllPatternsFrom pSz (Map.unionWith (+) pats counts) xs
-  where max_pat = 10
+addTuple (a, b) (c, d) = (a+c, b+d)
+
+getAllPatternsFrom :: (Int -> Bool) -> Map.Map Pattern (Int, Double) -> [EClassId] -> EGraphST IO (Map.Map Pattern (Int, Double))
+getAllPatternsFrom pSz counts []     = pure $ Map.map (\(v1, v2) -> (v1, v2/fromIntegral v1)) counts
+getAllPatternsFrom pSz counts (x:xs) = do fit' <- getFitness x 
+                                          case fit' of 
+                                            Nothing -> getAllPatternsFrom pSz counts xs
+                                            Just fit -> do
+                                                         pats <- Map.map (,fit) <$> getAllPatterns pSz x
+                                                         getAllPatternsFrom pSz (Map.unionWith addTuple pats counts) xs
 
 relabelVarPat :: Pattern -> Pattern
 relabelVarPat t = alg t `evalState` 65
@@ -374,20 +406,19 @@ countPattern pat = do
 
 getEvaluated ecs = getParentsOf (IntSet.fromList ecs) 500000 (IntSet.fromList ecs)
 
-getAllPatterns :: Monad m => (Int -> Bool) -> EClassId -> EGraphST m [Pattern]
+getAllPatterns :: Monad m => (Int -> Bool) -> EClassId -> EGraphST m (Map.Map Pattern Int)
 getAllPatterns pSz eid = do
    eid' <- canonical eid
    best <- gets (_best . _info . (IntMap.! eid') . _eClass)
    case best of
-      Var ix     -> pure [VarPat 'A', Fixed (Var ix)]
-      Param ix   -> pure [VarPat 'A', Fixed (Param ix)]
-      Const x    -> pure [VarPat 'A', Fixed (Const x)]
-      Uni f t    -> do pats <- Prelude.filter (pSz . lenPat) <$> getAllPatterns pSz t
-                       pure (VarPat 'A' : [relabelVarPat $ Fixed (Uni f t') | t' <- pats])
-      Bin op l r | l==r -> do pats <- Prelude.filter (pSz . lenPat) <$> getAllPatterns pSz l
-                              pure (VarPat 'A' : [relabelVarPat $ Fixed (Bin op l' l') | l' <- pats])
-                  | otherwise -> do patsL <- Prelude.filter (pSz . lenPat) <$> getAllPatterns pSz l
-                                    patsR <- Prelude.filter (pSz . lenPat) <$> getAllPatterns pSz r
-                                    pure (VarPat 'A' : [relabelVarPat $ Fixed (Bin op l' r') | l' <- patsL, r' <- patsR])
-
-
+      Var ix     -> pure $ Map.fromList [(VarPat 'A', 1), (Fixed (Var ix), 1)]
+      Param ix   -> pure $ Map.fromList [(VarPat 'A', 1), (Fixed (Param ix), 1)]
+      Const x    -> pure $ Map.fromList [(VarPat 'A', 1), (Fixed (Const x), 1)]
+      Uni f t    -> do pats <- Map.filterWithKey (\k _ -> (pSz . lenPat) k) <$> getAllPatterns pSz t
+                       pure $ Map.insertWith (+) (VarPat 'A') 1 
+                            $ Map.mapKeysWith (+) (\t' -> Fixed (Uni f t')) pats
+      Bin op l r | l==r -> do pats <- Map.filterWithKey (\k _ -> (pSz . lenPat) k) <$> getAllPatterns pSz l
+                              pure $ Map.insertWith (+) (VarPat 'A') 1 $ Map.mapKeysWith (+) (\t' -> Fixed (Bin op t' t')) pats
+                  | otherwise -> do patsL <- Map.filterWithKey (\k _ -> (pSz . lenPat) k) <$> getAllPatterns pSz l
+                                    patsR <- Map.filterWithKey (\k _ -> (pSz . lenPat) k) <$> getAllPatterns pSz r
+                                    pure $ Map.fromList $ (VarPat 'A', 1) : [(relabelVarPat $ Fixed (Bin op l' r'), min vl vr) | (l', vl) <- Map.toList patsL, (r', vr) <- Map.toList patsR]

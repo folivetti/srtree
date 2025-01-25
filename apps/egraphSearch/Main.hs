@@ -38,9 +38,9 @@ import Util
 
 data Alg = OnlyRandom | BestFirst deriving (Show, Read, Eq)
 
-egraphSearch :: DataSet -> DataSet -> DataSet -> Args -> StateT EGraph (StateT StdGen IO) ()
+egraphSearch :: [(DataSet, DataSet)] -> [DataSet] -> Args -> StateT EGraph (StateT StdGen IO) ()
 -- terms nEvals maxSize printPareto printTrace slowIter slowRep =
-egraphSearch dataTrain dataVal dataTest args = do
+egraphSearch dataTrainVals dataTests args = do
   if null (_loadFrom args)
     then do ecFst <- insertRndExpr (_maxSize args) rndTerm rndNonTerm2
             --ecFst <- insertBestExpr -- use only to debug
@@ -99,8 +99,8 @@ egraphSearch dataTrain dataVal dataTest args = do
             ecN'' <- canonical ecN'
             _tree <- getBestExpr ecN''
             fi <- negate . fromJust <$> getFitness ecN''
-            theta <- fromJust <$> getTheta ecN''
-            let thetaStr   = intercalate ";" $ Prelude.map show (MA.toList theta)
+            thetas <- getTheta ecN''
+            let thetaStr   = intercalate "_" $ Prelude.map (intercalate ";" . Prelude.map show . MA.toList) thetas
             io . putStrLn $ showExpr _tree <> "," <> thetaStr <> "," <> show fi
             pure ()
        let radius' = if (not upd) then (max 10 $ min (500 `div` (_maxSize args)) (radius+1)) else (max 10 $ radius-1)
@@ -112,7 +112,7 @@ egraphSearch dataTrain dataVal dataTest args = do
     else printBest printExpr
   when ((not.null) (_dumpTo args)) $ get >>= (io . BS.writeFile (_dumpTo args) . encode )
   where
-    fitFun = fitnessFunRep (_optRepeat args) (_optIter args) (_distribution args) dataTrain dataVal
+    fitFun = fitnessMV (_optRepeat args) (_optIter args) (_distribution args) dataTrainVals
 
     refitChanged = do ids <- gets (_refits . _eDB) >>= Prelude.mapM canonical . Set.toList
                       modify' $ over (eDB . refits) (const Set.empty)
@@ -159,7 +159,7 @@ egraphSearch dataTrain dataVal dataTest args = do
 
     nonTerms   = parseNonTerms (_nonterminals args)
     --[ Bin Add () (), Bin Sub () (), Bin Mul () (), Bin Div () (), Bin PowerAbs () (),  Uni Recip ()]
-    (Sz2 _ nFeats) = MA.size (getX dataTrain)
+    (Sz2 _ nFeats) = MA.size (getX . fst . head $ dataTrainVals)
     terms          = if _distribution args == ROXY
                           then [var 0, param 0]
                           else [var ix | ix <- [0 .. nFeats-1]] <> [param 0]
@@ -173,41 +173,43 @@ egraphSearch dataTrain dataVal dataTest args = do
 
     printExpr :: Int -> EClassId -> RndEGraph ()
     printExpr ix ec = do 
-        theta' <- gets (fromJust . _theta . _info . (IM.! ec) . _eClass)
+        thetas' <- gets (_theta . _info . (IM.! ec) . _eClass)
         bestExpr <- getBestExpr ec
         let nParams = countParams bestExpr
-            (MA.Sz nTheta)  = MA.size theta'
-        (_, theta) <- if (nParams /= nTheta)
+            fromSz (MA.Sz x) = x 
+            nThetas = Prelude.map (fromSz . MA.size) thetas'
+        (_, thetas) <- if Prelude.any (/=nParams) nThetas
                         then fitFun bestExpr
-                        else pure (1.0, theta')
+                        else pure (1.0, thetas')
 
-        let (x, y, mYErr) = dataTrain
-            (x_val, y_val, mYErr_val) = dataVal
-            (x_te, y_te, mYErr_te) = dataTest
-            distribution = _distribution args
-            best'     = relabelParams bestExpr
-            expr      = paramsToConst (MA.toList theta) best'
-            mse_train = mse x y best' theta
-            mse_val   = mse x_val y_val best' theta
-            mse_te    = mse x_te y_te best' theta
-            r2_train  = r2 x y best' theta
-            r2_val    = r2 x_val y_val best' theta
-            r2_te     = r2 x_te y_te best' theta
-            nll_train  = nll distribution mYErr x y best' theta
-            nll_val    = nll distribution mYErr_val x_val y_val best' theta
-            nll_te     = nll distribution mYErr_te x_te y_te best' theta
-            mdl_train  = mdl distribution mYErr x y theta best'
-            mdl_val    = mdl distribution mYErr_val x_val y_val theta best'
-            mdl_te     = mdl distribution mYErr_te x_te y_te theta best'
-            vals       = intercalate ","
-                       $ Prelude.map show [mse_train, mse_val, mse_te
-                                          , r2_train, r2_val, r2_te
-                                          , nll_train, nll_val, nll_te
-                                          , mdl_train, mdl_val, mdl_te]
-            thetaStr   = intercalate ";" $ Prelude.map show (MA.toList theta)
-        io . putStrLn $ show ix <> "," <> showExpr expr <> ","
-                      <> thetaStr <> "," <> show (countNodes $ convertProtectedOps expr)
-                      <> "," <> vals
+        forM_ (Prelude.zip3 dataTrainVals dataTests thetas) $ \((dataTrain, dataVal), dataTest, theta) -> do
+            let (x, y, mYErr) = dataTrain
+                (x_val, y_val, mYErr_val) = dataVal
+                (x_te, y_te, mYErr_te) = dataTest
+                distribution = _distribution args
+                best'     = relabelParams bestExpr
+                expr      = paramsToConst (MA.toList theta) best'
+                mse_train = mse x y best' theta
+                mse_val   = mse x_val y_val best' theta
+                mse_te    = mse x_te y_te best' theta
+                r2_train  = r2 x y best' theta
+                r2_val    = r2 x_val y_val best' theta
+                r2_te     = r2 x_te y_te best' theta
+                nll_train  = nll distribution mYErr x y best' theta
+                nll_val    = nll distribution mYErr_val x_val y_val best' theta
+                nll_te     = nll distribution mYErr_te x_te y_te best' theta
+                mdl_train  = mdl distribution mYErr x y theta best'
+                mdl_val    = mdl distribution mYErr_val x_val y_val theta best'
+                mdl_te     = mdl distribution mYErr_te x_te y_te theta best'
+                vals       = intercalate ","
+                           $ Prelude.map show [mse_train, mse_val, mse_te
+                                              , r2_train, r2_val, r2_te
+                                              , nll_train, nll_val, nll_te
+                                              , mdl_train, mdl_val, mdl_te]
+                thetaStr   = intercalate ";" $ Prelude.map show (MA.toList theta)
+            io . putStrLn $ show ix <> "," <> showExpr expr <> ","
+                          <> thetaStr <> "," <> show (countNodes $ convertProtectedOps expr)
+                          <> "," <> vals
 
 
 data Args = Args
@@ -308,12 +310,14 @@ main :: IO ()
 main = do
   args <- execParser opts
   g    <- getStdGen
-  dataTrain' <- loadTrainingOnly (_dataset args) True
-  dataTest   <- if null (_testData args)
-                  then pure dataTrain'
-                  else loadTrainingOnly (_testData args) True
-  let ((dataTrain, dataVal), g') = runState (splitData dataTrain' $ _split args) g
-      alg = evalStateT (egraphSearch dataTrain dataVal dataTest args) emptyGraph
+  let datasets = words (_dataset args)
+  dataTrains' <- Prelude.mapM (flip loadTrainingOnly True) datasets -- load all datasets 
+  dataTests   <- if null (_testData args)
+                  then pure dataTrains'
+                  else Prelude.mapM (flip loadTrainingOnly True) $ words (_testData args)
+
+  let (dataTrainVals, g') = runState (Prelude.mapM (`splitData` (_split args)) dataTrains') g
+      alg = evalStateT (egraphSearch dataTrainVals dataTests args) emptyGraph
   evalStateT alg g'
 
   where

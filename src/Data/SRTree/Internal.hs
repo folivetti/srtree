@@ -32,11 +32,13 @@ module Data.SRTree.Internal
          , countVarNodes
          , countConsts
          , countParams
+         , countParamsUniq
          , countOccurrences
          , countUniqueTokens
          , numberOfVars
          , getIntConsts
          , relabelParams
+         , relabelParamsOrder
          , relabelVars
          , constsToParam
          , floatConstsToParam
@@ -47,11 +49,13 @@ module Data.SRTree.Internal
          )
          where
 
-import Control.Monad.State (MonadState (get), State, evalState, modify)
+import Control.Monad.State (MonadState (get), State, evalState, modify, put)
 import Data.SRTree.Recursion (Fix (..), cata, cataM)
 import qualified Data.Set as S
 import Data.String (IsString (..))
 import Text.Read (readMaybe)
+import qualified Data.IntMap as IntMap
+import Data.List ( nub )
 
 -- | Tree structure to be used with Symbolic Regression algorithms.
 -- This structure is a fixed point of a n-ary tree. 
@@ -356,6 +360,20 @@ countParams = cata alg
       alg (Bin _ l r) = 0 + l + r
 {-# INLINE countParams #-}
 
+-- | Count the unique occurrences of `Param` nodes
+--
+-- >>> countParams $ "x0" + "t0" * sin ("t1" + "x1") - "t0"
+-- 2
+countParamsUniq :: Fix SRTree -> Int
+countParamsUniq t = length . nub $ cata alg t
+  where
+      alg Var {} = []
+      alg (Param ix) = [ix]
+      alg Const {} = []
+      alg (Uni _ t) = t
+      alg (Bin _ l r) = l <> r
+{-# INLINE countParamsUniq #-}
+
 -- | Count the number of const nodes
 --
 -- >>> countConsts $ "x0"* 2 + 3 * sin "x0"
@@ -446,6 +464,34 @@ relabelParams t = cataM leftToRight alg t `evalState` 0
       alg :: SRTree (Fix SRTree) -> State Int (Fix SRTree)
       alg (Var ix)    = pure $ var ix
       alg (Param ix)  = do iy <- get; modify (+1); pure (param iy)
+      alg (Const c)   = pure $ Fix $ Const c
+      alg (Uni f t)   = pure $ Fix (Uni f t)
+      alg (Bin f l r) = pure $ Fix (Bin f l r)
+
+-- | Reorder the labels of the parameters indices
+--
+-- >>> showExpr . relabelParamsOrder $ "x0" + "t1" * sin ("t3" + "x1") - "t1"
+-- "x0" + "t0" * sin ("t1" + "x1") - "t0"
+relabelParamsOrder :: Fix SRTree -> Fix SRTree
+relabelParamsOrder t = cataM leftToRight alg t `evalState` (IntMap.empty, 0)
+  where
+      -- | leftToRight (left to right) defines the sequence of processing
+      leftToRight (Uni f mt)    = Uni f <$> mt;
+      leftToRight (Bin f ml mr) = Bin f <$> ml <*> mr
+      leftToRight (Var ix)      = pure (Var ix)
+      leftToRight (Param ix)    = pure (Param ix)
+      leftToRight (Const c)     = pure (Const c)
+
+      -- | any time we reach a Param ix, it replaces ix with current state
+      -- and increments one to the state.
+      alg :: SRTree (Fix SRTree) -> State (IntMap.IntMap Int, Int) (Fix SRTree)
+      alg (Var ix)    = pure $ var ix
+      alg (Param ix)  = do (m, iy) <- get
+                           if IntMap.member ix m
+                              then pure (param $ m IntMap.! ix)
+                              else do let m' = IntMap.insert ix iy m
+                                      put (m', iy+1)
+                                      pure (param iy)
       alg (Const c)   = pure $ Fix $ Const c
       alg (Uni f t)   = pure $ Fix (Uni f t)
       alg (Bin f l r) = pure $ Fix (Bin f l r)

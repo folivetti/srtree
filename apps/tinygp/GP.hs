@@ -17,7 +17,7 @@ import Control.Monad (when)
 import Data.Massiv.Array qualified as M
 import Debug.Trace ( traceShow, trace )
 import Util
-import Data.List ( intercalate )
+import Data.List ( intercalate, maximumBy )
 import qualified Data.Vector.Mutable as MV
 
 data Method = Grow | Full | BTC
@@ -27,7 +27,7 @@ type GenUni = Fix SRTree -> Fix SRTree
 type GenBin = Fix SRTree -> Fix SRTree -> Fix SRTree
 type FitFun = Individual -> Rng Individual
 
-data Individual = Individual { _tree :: Fix SRTree, _fit :: Double, _params :: PVector }
+data Individual = Individual { _tree :: Fix SRTree, _fit :: Double, _params :: [PVector] }
 
 instance Show Individual where 
     show (Individual t f p) = showExpr t <> "," <> show f <> "," <> show p 
@@ -111,8 +111,8 @@ randomIndividual :: HyperParams -> FitFun -> Bool -> Rng Individual
 randomIndividual hyperparams fitFun grow = do
     t <- randomTree hyperparams grow 
     let p = countParams t
-    theta' <- replicateM p (randomRange (-1,1))
-    fitFun $ Individual t 0.0 (M.fromList compMode theta' :: PVector)
+    --theta' <- replicateM p (randomRange (-1,1))
+    fitFun $ Individual t 0.0 [] -- (M.fromList compMode theta' :: PVector)
     --pure ind
     --if isInfinite (_fit ind)
     --   then randomIndividual hyperparams fitFun grow 
@@ -127,19 +127,25 @@ initialPop hyperparams fitFun = do
               mapM (randomIndividual hyperparams{ _maxDepth = md} fitFun) g
    pure (V.concat pop)
 
-fitness :: SRMatrix -> PVector -> Individual -> Rng Individual
-fitness x y ind = do
+fitnessMV :: Distribution -> [(SRMatrix, PVector, Maybe PVector)] -> Individual -> Rng Individual
+fitnessMV dist datas ind = do
+  fs <- forM datas (fitness dist ind)
+  let fitOpt = minimum $ map fst fs
+  pure ind{_fit = fitOpt, _params = map snd fs}
+
+fitness :: Distribution -> Individual ->  (SRMatrix, PVector, Maybe PVector) -> Rng (Double, PVector)
+fitness dist ind (x, y, e) = do
     let tree = relabelParams $ _tree ind
         p    = countParams tree
     theta1' <- M.fromList M.Seq <$> replicateM p (randomRange (-1,1))
     theta2' <- M.fromList M.Seq <$> replicateM p (randomRange (-1,1))
-    let (theta1, f1, _) = minimizeNLL MSE Nothing 50 x y tree theta1'
-        (theta2, f2, _) = minimizeNLL MSE Nothing 50 x y tree theta2'
-        fit1 = negate f1
-        fit2 = negate f2
+    let (theta1, f1, _) = minimizeNLL dist e 50 x y tree theta1'
+        (theta2, f2, _) = minimizeNLL dist e 50 x y tree theta2'
+        fit1 = if isNaN f1 then (-1.0/0.0) else negate f1
+        fit2 = if isNaN f1 then (-1.0/0.0) else negate f2
         thetaOpt = if fit1 > fit2 then theta1 else theta2
         fitOpt   = max fit1 fit2
-    pure ind{_fit = fitOpt, _params = thetaOpt}
+    pure (fitOpt, thetaOpt)
 
 
 mutate :: HyperParams -> Individual -> Rng (Maybe Individual)
@@ -150,7 +156,7 @@ mutate hp ind = do
   t <- go p (_maxSize hp) (_tree ind)
   --(t, b) <- go sz (_pm hp) (_tree ind)
   if b <= _pm hp && countNodes t <= _maxSize hp
-     then pure . Just $ Individual t 0.0 M.empty
+     then pure . Just $ Individual t 0.0 []
      else pure Nothing
       where
         go 0 msz t = randomTree hp{_maxSize = msz-1} True
@@ -210,14 +216,14 @@ evolve hp fitFun pop = do
         Nothing -> pure parent1
         Just c  -> fitFun c
 
-printFinal ind x y x_test y_test = do
+printFinal dist ind dataTrains dataTests = do
   let tree     = relabelParams $ _tree ind
-      theta    = _params ind
-      mseTrain = mse x y tree theta
-      mseTest  = mse x_test y_test tree theta
-      r2Train  = r2 x y tree theta
-      r2Test   = r2 x_test y_test tree theta
-      thetaStr = intercalate ";" $ map show $ M.toList theta
+      thetas   = _params ind
+      mseTrain = maximum $ map (\(theta, (x,y,e)) -> nll dist e x y tree theta) $ zip thetas dataTrains
+      mseTest  = maximum $ map (\(theta, (x,y,e)) -> nll dist e x y tree theta) $ zip thetas dataTests
+      r2Train  = minimum $ map (\(theta, (x,y,e)) -> r2 x y tree theta) $ zip thetas dataTrains
+      r2Test   = minimum $ map (\(theta, (x,y,e)) -> r2 x y tree theta) $ zip thetas dataTests
+      thetaStr = intercalate "_" $ map (intercalate ";" . map show . M.toList) thetas
   putStrLn "id,Expression,theta,size,MSE_train,MSE_test,R2_train,R2_test"
   putStr $ "0," <> showExpr tree <> "," <> thetaStr <> "," <> show (countNodes tree) <> "," <> show mseTrain <> "," <> show mseTest <> "," <> show r2Train <> "," <> show r2Test
 
@@ -229,7 +235,7 @@ report gen = mapM_ reportOne
                            putStr " - " 
                            putStr (show (_fit ind))
                            putStr " "
-                           print (M.toList $ _params ind)
+                           print (map M.toList $ _params ind)
 {-# INLINE report #-}
 
 evolution :: Int -> HyperParams -> FitFun -> Rng (Individual)

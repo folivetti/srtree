@@ -457,11 +457,21 @@ getAllExpressionsFrom eId' = do
 getAllChildEClasses :: Monad m => EClassId -> EGraphST m [EClassId]
 getAllChildEClasses eId' = do
   eId <- canonical eId'
-  nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! eId) . _eClass)
-  nub <$> go eId
+  IntSet.toList <$> go [eId] IntSet.empty
 
   where
-    go :: Monad m => Int -> EGraphST m [Int]
+    hasNoTerminal :: [ENode] -> Bool
+    hasNoTerminal = all (not . null . childrenOf) 
+    getNodes :: Monad m => EClassId -> EGraphST m [ENode]
+    getNodes n = gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! n) . _eClass)
+
+    go :: Monad m => [Int] -> IntSet.IntSet -> EGraphST m IntSet.IntSet
+    go [] visited = pure visited
+    go queue visited = do 
+        nodes <- concatMap childrenOf . concat . filter hasNoTerminal <$> mapM getNodes queue
+        eids <- filter (\e -> e `IntSet.notMember` visited) <$> (mapM canonical nodes)
+        go eids (visited `IntSet.union` IntSet.fromList queue)
+            {-
     go n = do nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! n) . _eClass)
               let hasTerminal = any (null . childrenOf) nodes
               eids <- mapM canonical $ concatMap childrenOf nodes
@@ -469,7 +479,23 @@ getAllChildEClasses eId' = do
                 then pure [n]
                 else do eids' <- mapM go eids
                         pure ((n : eids) <> concat eids')
+                        -}
 {-# INLINE getAllChildEClasses #-}
+
+getAllChildBestEClasses :: Monad m => EClassId -> EGraphST m [EClassId]
+getAllChildBestEClasses eId' = do
+  eId <- canonical eId'
+  nub <$> go eId
+
+  where
+    go :: Monad m => Int -> EGraphST m [Int]
+    go n = do node <- gets (_best . _info . (IntMap.! n) . _eClass)
+              let hasTerminal = (null . childrenOf) node
+              eids <- mapM canonical $ childrenOf node
+              if hasTerminal
+                then pure [n]
+                else do eids' <- mapM go eids
+                        pure ((n : eids) <> concat eids')
 
 -- | returns a random expression rooted at e-class `eId`
 getRndExpressionFrom :: EClassId -> EGraphST (State StdGen) (Fix SRTree)
