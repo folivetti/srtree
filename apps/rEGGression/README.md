@@ -1,0 +1,128 @@
+# rEGGression (r🥚ression) - Nonlinear regression models exploration and query system withe-graphs (egg).
+
+Exploration and query system for a database of regression models using
+e-graphs.
+
+
+## How to use 
+
+```bash
+r🥚ression - Nonlinear regression models exploration and query system with
+e-graphs (egg).
+
+Usage: reggression (-d|--dataset INPUT-FILE) [-t|--test ARG] 
+                   [--distribution ARG] [--dump-to ARG] [--load-from ARG] 
+                   [--parse-csv ARG] [--convert ARG] [--parse-parameters] 
+                   [--to ARG] [--calculate-dl]
+
+  Exploration and query system for a database of regression models using
+  e-graphs.
+
+Available options:
+  -d,--dataset INPUT-FILE  CSV dataset.
+  -t,--test ARG            test data (default: "")
+  --distribution ARG       distribution of the data. (default: Gaussian)
+  --dump-to ARG            dump final e-graph to a file. (default: "")
+  --load-from ARG          load initial e-graph from a file. (default: "")
+  --parse-csv ARG          parse-csv CSV file with the format
+                           expression,parameters,fitness. The fitness value
+                           should be maximization and the parameters a ;
+                           separated list (there must be an additional parameter
+                           for sigma in the Gaussian distribution). The format
+                           of the equation is determined by the extension of the
+                           file, supported extensions are operon, pysr, tir,
+                           itea, hl (heuristiclab), gomea, feat, etc.
+                           (default: "")
+  --convert ARG            convert FROM TO, converts equation format from a
+                           given format (see 'parse-csv') to either 'math' or
+                           'numpy'. The 'math' format is compatible with the tir
+                           format, so you can use this to standardize the
+                           equations from multiple sources into a single file.
+                           The output will be written to stdout. (default: "")
+  --parse-parameters       Extract the numerical parameters from the expression.
+                           In this case the csv file should be formatted as
+                           "equation,error,fitness, where 'error' is the error
+                           term used in Gaussia likelihood, it can be empty if
+                           using other distributions."
+  --to ARG                 Format to convert to. (default: MATH)
+  --calculate-dl           (re)calculate DL.
+  -h,--help                Show this help text
+```
+
+The dataset file must contain a header with each features name, and the `--dataset` and `--test` arguments can be accompanied by arguments separated by ':' following the format:
+
+`filename.ext:start_row:end_row:target:features`
+
+where each ':' field is optional. The fields are:
+
+- **start_row:end_row** is the range of the training rows (default 0:nrows-1).
+   every other row not included in this range will be used as validation
+- **target** is either the name of the  (if the datafile has headers) or the index
+   of the target variable
+- **features** is a comma separated list of names or indices to be used as
+  input variables of the regression model.
+
+Example of valid names: `dataset.csv`, `mydata.tsv`, `dataset.csv:20:100`, `dataset.tsv:20:100:price:m2,rooms,neighborhood`, `dataset.csv:::5:0,1,2`.
+
+The format of the file will be determined by the extension (e.g., csv, tsv,...). 
+
+## Installation
+
+To install rEGGression you'll need:
+
+- `libz`
+- `libnlopt`
+- `libgmp`
+- `ghc-9.6.6`
+- `cabal` or `stack`
+
+### Method 1: Pre-compile binaries
+
+Go to the [releases](https://github.com/folivetti/srtree/tags) page, download the eggp binary corresponding to your OS and rename it to `reggresion`.
+
+Note: Windows and OSX releases are untested, for Windows Mingw with libnlopt are required.
+
+### Recommended step-by-step 
+
+After installing the dependencies (e.g., `apt install libz libnlopt libgmp`), install [`ghcup`](https://www.haskell.org/ghcup/#)
+
+For Linux, macOS, FreeBSD or WSL2:
+
+```bash 
+curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh
+```
+
+For Windows, run the following in a PowerShell:
+
+```bash
+Set-ExecutionPolicy Bypass -Scope Process -Force;[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; try { & ([ScriptBlock]::Create((Invoke-WebRequest https://www.haskell.org/ghcup/sh/bootstrap-haskell.ps1 -UseBasicParsing))) -Interactive -DisableCurl } catch { Write-Error $_ }
+```
+
+After the installation, run `ghcup tui` and install the latest `stack` or `cabal` together with `ghc-9.6.6` (select the items and press `i`).
+To install `srsimplify` simply run:
+
+```bash 
+cabal build srtree:reggression
+```
+
+or 
+
+```bash 
+stack build srtree:reggression
+```
+
+## Citing this work
+
+If you use eggp for your research, please cite:
+
+```
+@misc{defranca2025reggressioninteractiveagnostictool,
+      title={rEGGression: an Interactive and Agnostic Tool for the Exploration of Symbolic Regression Models}, 
+      author={Fabricio Olivetti de Franca and Gabriel Kronberger},
+      year={2025},
+      eprint={2501.17859},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2501.17859}, 
+}
+```

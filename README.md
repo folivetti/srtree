@@ -1,6 +1,17 @@
 # srtree: A supporting library for tree-based symbolic regression 
 
-`srtree` is a Haskell library that implements a tree-based structure for expressions and supporting functions to be used in the context of **symbolic regression**.
+`srtree` is a Haskell library that implements a tree-based structure for expressions and supporting functions to be used in the context of **symbolic regression** (SR).
+
+This repository is also the home for different algorithm implementations for SR and software tools to support the post-processing of SR models (please refer to their corresponding README files):
+
+- [srsimplify](apps/srsimplify/README.md): a parser and simplification tool supporting the output of many popular SR algorithms.
+- [srtools](apps/srtools/README.md): a tool that can be used to evaluate symbolic regression expressions and create nice reports with confidence intervals. 
+- [tinygp](apps/tinygp/README.md): a simple GP implementation based on tinyGP.
+- [rEGGression](apps/rEGGression/README.md): nonlinear regression models exploration and query system with e-graphs (egg).
+- [easter](apps/easter/README.md): Equality graph Assisted Search Technique for Equation Recovery.
+- [eggp](apps/eggp/README.md): E-graph Genetic Programming.
+
+## SRTree
 
 The expression structure is defined as a fixed-point of a mix of unary and binary tree. This makes it easier to implement supporting functions that requires the traversal of the trees. Also, since it is a parameterized structure, we can creating partial trees to pattern math structures of interest.
 This structure may contain four types of nodes:
@@ -33,11 +44,6 @@ Additionally, the library provides supporting function to work with datasets, ev
 calculating the derivatives, printing, generating random trees, simplifying the expression, calculating overall statistics,
 optimizing parameters, and model selection metrics. 
 
-Together with this library, we provide example applications (please refer to their corresponding README files):
-
-- [srsimplify](apps/srsimplify/README.md): a parser and simplification tool supporting the output of many popular SR algorithms.
-- [srtools](apps/srtools/README.md): a tool that can be used to evaluate symbolic regression expressions and create nice reports with confidence intervals. 
-- [tinygp](apps/tinygp/README.md): a simple GP implementation based on tinyGP.
 
 ## Organization
 

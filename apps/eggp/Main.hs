@@ -158,7 +158,9 @@ egraphGP dataTrainVals dataTests args = do
                     parents <- tournament xs
                     offspring <- combine parents
                     --applySingleMergeOnlyEqSat myCost rewritesParams >> cleanDB
-                    runEqSat myCost rewritesParams 1 >> cleanDB >> refitChanged
+                    if _nParams args == 0
+                       then runEqSat myCost rewritesWithConstant 1 >> cleanDB >> refitChanged
+                       else runEqSat myCost rewritesParams 1 >> cleanDB >> refitChanged
                     canonical offspring >>= updateIfNothing fitFun
                     canonical offspring
                     --pure offspring
@@ -495,5 +497,6 @@ main = do
   where
     opts = Opt.info (opt <**> helper)
             ( fullDesc <> progDesc "An implementation of GP with modified crossover and mutation\
-                                   \ operators designed to exploit equality saturation and e-graphs."
-           <> header "GPEgg - Genetic Programming for Symbolic Regression using e-graphs." )
+                                   \ operators designed to exploit equality saturation and e-graphs.\
+                                   \ https://arxiv.org/abs/2501.17848\n"
+           <> header "eggp - E-graph Genetic Programming for Symbolic Regression." )

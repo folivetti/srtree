@@ -2,16 +2,16 @@
 
 ## 2.0.1.1
 
-- MSE loss is the default
-- Renamed `--distribution` argument to `--loss` in eggp and easter
-- Fixed bug with Gaussian distribution and fixed number of parameters 
-- Fixed bug in which `--number-params 0` would create parameters
-- Fixed bug in `rEGGression` that pattern matched equivalent expressions
+- MSE loss is now the default
+- Renamed `--distribution` argument to `--loss` in eggp and easter.
+- Fixed bug with Gaussian distribution and fixed number of parameters.
+- Fixed bug in which `--number-params 0` would create parameters.
+- Fixed bug in `rEGGression` that pattern matched equivalent expressions.
 
 ## 2.0.1.0
 
-- Support to Multiview Symbolic Regression in egraphGP and egraphSearch 
-- Support to `--number-params` argument that limits the maximum number of parameters and allow repated parameters in an expression
+- Support to Multiview Symbolic Regression in eggp and EASTER.
+- Support to `--number-params` argument that limits the maximum number of parameters and allow repated parameters in an expression.
 
 ## 2.0.0.4
 
