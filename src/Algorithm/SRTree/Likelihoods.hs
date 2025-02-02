@@ -128,7 +128,7 @@ nll Gaussian mYerr xss ys t theta
     s       = theta M.! (p' - 1)
     (Sz m') = M.size ys 
     (Sz p') = M.size theta
-    nParams = countParams t
+    nParams = countParamsUniq t
     m       = fromIntegral m'
     p       = fromIntegral p'
 
@@ -171,7 +171,7 @@ nll ROXY mYerr xss ys tree theta
     (Sz p')      = M.size theta
     (Sz2 m n)    = M.size xss
     p            = fromIntegral p'
-    num_params   = countParams tree
+    num_params   = countParamsUniq tree
 
     x0           = xss <! 0
     logX         = xss <! 1
@@ -224,13 +224,13 @@ buildNLL MSE m tree = ((tree - var (-1)) ** 2) / constv m
 buildNLL Gaussian m tree =  (square(tree - var (-1)) / square (param p)) + log ((square (param p)))
   where
     square = Fix . Uni Square
-    p = countParams tree
+    p = countParamsUniq tree
 buildNLL HGaussian m tree = (tree - var (-1)) ** 2 / var (-2) + constv m * log (2*pi* var (-2))
 buildNLL Poisson m tree = var (-1) * log (var (-1)) + exp tree - var (-1) * tree
 buildNLL Bernoulli m tree = log (1 + exp (negate tree)) + (1 - var (-1)) * tree
 buildNLL ROXY m tree = neglogP
   where
-    p = countParams tree
+    p = countParamsUniq tree
     f = log (abs tree) / log 10
     fprime = deriveByVar 0 tree / (log 10 * tree) * var 0 * log 10
     logX         = var 1

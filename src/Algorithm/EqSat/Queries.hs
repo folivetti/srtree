@@ -28,6 +28,7 @@ import Data.Maybe
 import Data.Sequence ( Seq(..) )
 import qualified Data.Sequence as FingerTree
 import qualified Data.Foldable as Foldable
+import Data.SRTree (childrenOf)
 
 import Debug.Trace
 
@@ -98,6 +99,7 @@ getTopECLassIn b n p ecs' = do
                                        else if ecId `Set.member` ecs && p ec
                                               then go (m-1) (ecId:bests) t
                                               else go m bests t
+
 getTopECLassNotIn :: Monad m => Bool -> Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
 getTopECLassNotIn b n p ecs' = do
   let f = if b then _fitRangeDB else _dlRangeDB
@@ -151,7 +153,7 @@ getTopFitEClassThat :: Monad m => Int -> (EClass -> Bool) -> EGraphST m [EClassI
 getTopFitEClassThat  = getTopECLassThat True
 getTopDLEClassThat :: Monad m => Int -> (EClass -> Bool) -> EGraphST m [EClassId]
 getTopDLEClassThat   = getTopECLassThat False
-getTopFitEClassIn :: Monad m => Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
+getTopFitEClassIn :: Monad m =>  Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
 getTopFitEClassIn    = getTopECLassIn True
 getTopDLEClassIn :: Monad m => Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
 getTopDLEClassIn     = getTopECLassIn False
@@ -188,3 +190,4 @@ rebuildRange rt = go Set.empty Empty <$> canonizeRange rt
                                           then root
                                           else (x, eid) :<| root)
                                         xs -- (Prelude.filter ((/= eid) . snd) xs)
+

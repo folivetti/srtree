@@ -263,6 +263,12 @@ createDB = do modify' $ over (eDB . patDB) (const Map.empty)
               gets (_patDB . _eDB)
 {-# INLINE createDB #-}
 
+createDBBest :: Monad m => EGraphST m DB
+createDBBest = do modify' $ over (eDB . patDB) (const Map.empty)
+                  ecls <- gets (Prelude.map (\(eId, ec) -> (_best (_info ec), eId)) . IntMap.toList . _eClass)
+                  mapM_ (uncurry addToDB) ecls
+                  gets (_patDB . _eDB)
+
 -- | `addToDB` adds an e-node and e-class id to the database
 addToDB :: Monad m => ENode -> EClassId -> EGraphST m () -- State DB ()
 addToDB enode eid = do

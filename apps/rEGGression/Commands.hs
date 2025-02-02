@@ -12,7 +12,7 @@ import Data.Monoid (All(..))
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Control.Monad.State.Strict
-import Control.Monad ( forM_ )
+import Control.Monad ( forM_, filterM )
 import Data.Char ( toUpper )
 import qualified Data.Map as Map
 import qualified Data.HashSet as Set
@@ -193,7 +193,7 @@ run (Top n filters criteria NoPat) = do
 run (Top n filters criteria withPat) = do
    let (pat', getFun, isParents) =
           case withPat of
-            PatStr p parent     -> (p, if criteria == ByFitness then getTopFitEClassIn    else getTopDLEClassIn, parent)
+            PatStr p parent     -> (p, if criteria == ByFitness then getTopFitEClassIn else getTopDLEClassIn, parent)
             AntiPatStr p parent -> (p, if criteria == ByFitness then getTopFitEClassNotIn else getTopDLEClassNotIn, parent)
 
    let etree = parsePat $ B.pack pat'
@@ -202,7 +202,9 @@ run (Top n filters criteria withPat) = do
      Right pat -> do
         ecs' <- egraph $ (Prelude.map fromLeft . Prelude.filter isLeft . Prelude.map snd) <$> match pat
         ecs  <- egraph $ Prelude.mapM canonical ecs'
-                           >>= getParents isParents
+                          >>= removeNotTrivial (lenPat pat)
+                          >>= getParents isParents filters
+
         ids  <- egraph $ getFun n filters ecs
         printSimpleMultiExprs (reverse $ nub ids)
 
@@ -341,32 +343,28 @@ convert fname out hdr = do
     toTuple [eq, t, f] = (eq, t, f)
     toTuple xss = error $ show xss
 
-getParents False ecs = pure ecs
-getParents True  ecs = IntSet.toList <$> getParentsOf (IntSet.fromList ecs) 500000 (IntSet.fromList ecs)
+getParents False _ ecs = pure ecs
+getParents True  p ecs = IntSet.toList <$> getParentsOf p (IntSet.fromList ecs) 300000 ecs
 
 isBest (e', en') = do e <- canonical e'
                       best <- gets (_best . _info . (IntMap.! e) . _eClass) >>= canonize
                       en <- canonize en'
                       pure (en == best)
 
-getParentsOf :: IntSet.IntSet -> Int -> IntSet.IntSet -> RndEGraph IntSet.IntSet
-getParentsOf visited n queue | IntSet.size queue >= n = pure queue
-getParentsOf visited n queue =
-   do ecs          <- Prelude.mapM canonical (IntSet.toList queue)
-      parents'     <- IntSet.unions <$> Prelude.mapM canonizeParents ecs
-      uneval       <- gets (_unevaluated . _eDB)
-      grandParents <- getParentsOf (IntSet.union visited parents') (n-1) parents'
-      pure (IntSet.filter (not . (`IntSet.member` uneval)) $ (queue <> grandParents))
+getParentsOf :: (EClass -> Bool) -> IntSet.IntSet -> Int -> [EClassId] -> RndEGraph IntSet.IntSet
+getParentsOf p visited n queue | IntSet.size visited >= n || null queue = pure visited
+getParentsOf p visited n queue =
+   do parents'     <- IntSet.unions <$> Prelude.mapM (\e -> canonical e >>= canonizeParents) queue
+
+      grandParents <- getParentsOf p ((visited <> parents')) n (IntSet.toList parents')
+      pure (visited <> grandParents)
    where
-      canonizeParents ec = do parents <- gets (_parents . (IntMap.! ec) . _eClass)
-                                          >>= Prelude.mapM (\(e, en) -> isBest (e, en) >>= \b -> pure (e, en, b)) . Set.toList
-                                          >>= pure . Set.fromList
-
-                              pure $ IntSet.fromList . Prelude.map (\(e, _, _) -> e) . Set.toList $
-                                    Set.filter (\(e, en, b) -> b && ec `Prelude.elem` (childrenOf en)
-                                                   && not (e `IntSet.member` visited)
-                                                ) parents
-
+      filterUneval uneval = IntSet.filter (`IntSet.notMember` uneval)
+      isNew ec (e, en) = ec `Prelude.elem` (childrenOf en) && (e `IntSet.notMember` visited)
+      canonizeParents ec = do ecl <- gets ((IntMap.! ec) . _eClass)
+                              let parents' = Set.toList . Set.filter (isNew ec) $ _parents ecl
+                              parents <- Prelude.map fst <$> filterM isBest parents'
+                              pure (IntSet.fromList parents)
 
 isLeft (Left _)   = True
 isLeft _          = False
@@ -404,7 +402,7 @@ countPattern pat = do
                     >>= getEvaluated
   pure (pat, IntSet.size ecs)
 
-getEvaluated ecs = getParentsOf (IntSet.fromList ecs) 500000 (IntSet.fromList ecs)
+getEvaluated ecs = getParentsOf (const True) (IntSet.fromList ecs) 500000 ecs
 
 getAllPatterns :: Monad m => (Int -> Bool) -> EClassId -> EGraphST m (Map.Map Pattern Int)
 getAllPatterns pSz eid = do
@@ -422,3 +420,15 @@ getAllPatterns pSz eid = do
                   | otherwise -> do patsL <- Map.filterWithKey (\k _ -> (pSz . lenPat) k) <$> getAllPatterns pSz l
                                     patsR <- Map.filterWithKey (\k _ -> (pSz . lenPat) k) <$> getAllPatterns pSz r
                                     pure $ Map.fromList $ (VarPat 'A', 1) : [(relabelVarPat $ Fixed (Bin op l' r'), min vl vr) | (l', vl) <- Map.toList patsL, (r', vr) <- Map.toList patsR]
+
+isNotTrivial :: Monad m => Int -> EClassId -> EGraphST m Bool
+isNotTrivial n ec = do
+  c <- gets (_consts . _info . (IntMap.! ec) . _eClass)
+  m <- gets (_size . _info . (IntMap.! ec) . _eClass)
+  pure (c == NotConst && m >= n)
+removeNotTrivial :: Monad m => Int -> [EClassId] -> EGraphST m [EClassId]
+removeNotTrivial n [] = pure []
+removeNotTrivial n (ec:ecs) = do
+  b <- isNotTrivial n ec
+  ecs' <- removeNotTrivial n ecs
+  pure $ if b then (ec:ecs') else ecs'

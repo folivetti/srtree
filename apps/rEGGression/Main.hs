@@ -327,7 +327,7 @@ main = do
       cmdMap = Map.fromList $ Prelude.zip commands funs
 
       repl = evalRepl (const $ pure ">>> ") (cmd cmdMap) [] Nothing Nothing (Word comp) ini final
-      crDB = if _calcDL args then (createDB >> fillDL dist dataTrains >> rebuildAllRanges) else (createDB >> rebuildAllRanges)
+      crDB = if _calcDL args then (createDBBest >> fillDL dist dataTrains >> rebuildAllRanges) else (createDBBest >> rebuildAllRanges)
   if (not.null) (_convertFromTo args)
      then convert (_convertFromTo args) (_to args) varnames
      else do when (_calcDL args) $ putStrLn "Calculating DL..."

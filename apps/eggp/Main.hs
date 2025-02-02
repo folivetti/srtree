@@ -417,10 +417,10 @@ opt = Args
        ( long "trace"
        <> help "print all evaluated expressions.")
   <*> option auto
-       ( long "distribution"
-       <> value Gaussian
+       ( long "loss"
+       <> value MSE
        <> showDefault
-       <> help "distribution of the data.")
+       <> help "loss function: MSE, Gaussian, Poisson, Bernoulli.")
   <*> option auto
        ( long "opt-iter"
        <> value 30
