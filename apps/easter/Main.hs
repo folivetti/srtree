@@ -125,12 +125,12 @@ egraphSearch dataTrainVals dataTests args = do
 
     combineFrom [] = pure 0
     combineFrom ecs = do
-      p1  <- rnd (randomFrom ecs)
-      p2  <- rnd (randomFrom ecs)
+      p1  <- rnd (randomFrom ecs) >>= canonical
+      p2  <- rnd (randomFrom ecs) >>= canonical
       coin <- rnd toss
       if coin
-         then crossover p1 p2
-         else mutate p1
+         then crossover p1 p2 >>= canonical
+         else mutate p1 >>= canonical
 
     combineFrom' [] = pure 0 -- this is the first terminal and it will always be already evaluated
     combineFrom' ecs = do
