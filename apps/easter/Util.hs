@@ -20,7 +20,7 @@ import Algorithm.SRTree.Likelihoods
 --import Algorithm.SRTree.Opt
 import qualified Data.IntMap.Strict as IM
 import Control.Monad.State.Strict
-import Control.Monad ( when, replicateM, forM, forM_ )
+import Control.Monad ( when, replicateM, forM, forM_, filterM )
 import Data.Maybe ( fromJust )
 import Data.List ( maximumBy )
 import Data.Function ( on )
@@ -252,3 +252,4 @@ evaluateRndUnevaluated fitFun = do
           (f, p) <- fitFun t
           insertFitness c f p
           pure c
+

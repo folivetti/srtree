@@ -15,7 +15,7 @@ import Algorithm.EqSat.Info
 import Algorithm.EqSat.DB
 import Algorithm.SRTree.Likelihoods
 import Algorithm.SRTree.ModelSelection
-import Control.Monad ( forM_, forM, when )
+import Control.Monad ( forM_, forM, when, filterM )
 import Control.Monad.State.Strict
 import qualified Data.IntMap.Strict as IM
 import Data.Massiv.Array as MA hiding (forM_, forM)
@@ -33,6 +33,7 @@ import qualified Data.ByteString.Lazy as BS
 import Debug.Trace
 import qualified Data.HashSet as Set
 import Control.Lens (over)
+import qualified Data.Map.Strict as Map
 
 import Util
 
@@ -112,6 +113,8 @@ egraphSearch dataTrainVals dataTests args = do
     else printBest printExpr
   when ((not.null) (_dumpTo args)) $ get >>= (io . BS.writeFile (_dumpTo args) . encode )
   where
+    maxSize = _maxSize args
+    relabel        = if (_nParams args == -1) then relabelParams else relabelParamsOrder
     fitFun = fitnessMV (_optRepeat args) (_optIter args) (_distribution args) dataTrainVals
 
     refitChanged = do ids <- gets (_refits . _eDB) >>= Prelude.mapM canonical . Set.toList
@@ -120,8 +123,17 @@ egraphSearch dataTrainVals dataTests args = do
                                             (f, p) <- fitFun t
                                             insertFitness ec f p
 
-    combineFrom [] = pure 0 -- this is the first terminal and it will always be already evaluated
+    combineFrom [] = pure 0
     combineFrom ecs = do
+      p1  <- rnd (randomFrom ecs)
+      p2  <- rnd (randomFrom ecs)
+      coin <- rnd toss
+      if coin
+         then crossover p1 p2
+         else mutate p1
+
+    combineFrom' [] = pure 0 -- this is the first terminal and it will always be already evaluated
+    combineFrom' ecs = do
         nt  <- rnd rndNonTerm
         p1  <- rnd (randomFrom ecs)
         p2  <- rnd (randomFrom ecs)
@@ -169,6 +181,12 @@ egraphSearch dataTrainVals dataTests args = do
     rndTerm    = Random.randomFrom terms
     rndNonTerm = Random.randomFrom $ (Uni Id ()) : nonTerms
     rndNonTerm2 = Random.randomFrom nonTerms
+    uniNonTerms = Prelude.filter isUni nonTerms
+    binNonTerms = Prelude.filter isBin nonTerms
+    isUni (Uni _ _) = True
+    isUni _         = False
+    isBin (Bin _ _ _) = True
+    isBin _           = False
 
     insertTerms =
         forM terms $ \t -> do fromTree myCost t >>= canonical
@@ -213,6 +231,132 @@ egraphSearch dataTrainVals dataTests args = do
                           <> thetaStr <> "," <> show (countNodes $ convertProtectedOps expr)
                           <> "," <> vals
 
+    -- From eggp
+    crossover p1 p2 = do sz <- getSize p1
+                         if sz == 1
+                          then rnd (randomFrom [p1, p2])
+                          else do pos <- rnd $ randomRange (1, sz-1)
+                                  cands <- getAllSubClasses p2
+                                  tree <- getSubtree pos 0 Nothing [] cands p1
+                                  fromTree myCost (relabel tree) >>= canonical
+
+    getSubtree :: Int -> Int -> Maybe (EClassId -> ENode) -> [Maybe (EClassId -> ENode)] -> [EClassId] -> EClassId -> RndEGraph (Fix SRTree)
+    getSubtree 0 sz (Just parent) mGrandParents cands p' = do
+      p <- canonical p'
+      candidates' <- filterM (\c -> (<maxSize-sz) <$> getSize c) cands
+      candidates  <- filterM (\c -> doesNotExistGens mGrandParents (parent c)) candidates'
+                        >>= traverse canonical
+      if null candidates
+          then getBestExpr p
+          else do subtree <- rnd (randomFrom candidates)
+                  getBestExpr subtree
+    getSubtree pos sz parent mGrandParents cands p' = do
+      p <- canonical p'
+      root <- getBestENode p >>= canonize
+      case root of
+        Param ix -> pure . Fix $ Param ix
+        Const x  -> pure . Fix $ Const x
+        Var   ix -> pure . Fix $ Var ix
+        Uni f t' -> do t <- canonical t'
+                       (Fix . Uni f) <$> getSubtree (pos-1) (sz+1) (Just $ Uni f) (parent:mGrandParents) cands t
+        Bin op l'' r'' ->
+                      do  l <- canonical l''
+                          r <- canonical r''
+                          szLft <- getSize l
+                          szRgt <- getSize r
+                          if szLft < pos
+                            then do l' <- getBestExpr l
+                                    r' <- getSubtree (pos-szLft-1) (sz+szLft+1) (Just $ Bin op l) (parent:mGrandParents) cands r
+                                    pure . Fix $ Bin op l' r'
+                            else do l' <- getSubtree (pos-1) (sz+szRgt+1) (Just (\t -> Bin op t r)) (parent:mGrandParents) cands l
+                                    r' <- getBestExpr r
+                                    pure . Fix $ Bin op l' r'
+
+    getAllSubClasses p' = do
+      p  <- canonical p'
+      en <- getBestENode p
+      case en of
+        Bin _ l r -> do ls <- getAllSubClasses l
+                        rs <- getAllSubClasses r
+                        pure (p : (ls <> rs))
+        Uni _ t   -> (p:) <$> getAllSubClasses t
+        _         -> pure [p]
+
+    mutate p = do sz <- getSize p
+                  pos <- rnd $ randomRange (0, sz-1)
+                  tree <- mutAt pos maxSize Nothing p
+                  fromTree myCost (relabel tree) >>= canonical
+
+    peel :: Fix SRTree -> SRTree ()
+    peel (Fix (Bin op l r)) = Bin op () ()
+    peel (Fix (Uni f t)) = Uni f ()
+    peel (Fix (Param ix)) = Param ix
+    peel (Fix (Var ix)) = Var ix
+    peel (Fix (Const x)) = Const x
+
+    mutAt :: Int -> Int -> Maybe (EClassId -> ENode) -> EClassId -> RndEGraph (Fix SRTree)
+    mutAt 0 sizeLeft Nothing       _ = (insertRndExpr sizeLeft rndTerm rndNonTerm >>= canonical) >>= getBestExpr -- we chose to mutate the root
+    mutAt 0 1        _             _ = rnd $ randomFrom terms -- we don't have size left
+    mutAt 0 sizeLeft (Just parent) _ = do -- we reached the mutation place
+      ec    <- insertRndExpr sizeLeft rndTerm rndNonTerm >>= canonical -- create a random expression with the size limit
+      (Fix tree) <- getBestExpr ec           --
+      root  <- getBestENode ec
+      exist <- canonize (parent ec) >>= doesExist
+      if exist
+          -- the expression `parent ec` already exists, try to fix
+          then do let children = childrenOf root
+                  candidates <- case length children of
+                                0  -> filterM (checkToken parent . (replaceChildren children)) (Prelude.map peel terms)
+                                1 -> filterM (checkToken parent . (replaceChildren children)) uniNonTerms
+                                2 -> filterM (checkToken parent . (replaceChildren children)) binNonTerms
+                  if null candidates
+                      then pure $ Fix tree -- there's no candidate, so we failed and admit defeat
+                      else do newToken <- rnd (randomFrom candidates)
+                              pure . Fix $ replaceChildren (childrenOf tree) newToken
+
+          else pure . Fix $ tree
+
+    mutAt pos sizeLeft parent p' = do
+        p <- canonical p'
+        root <- getBestENode p >>= canonize
+        case root of
+          Param ix -> pure . Fix $ Param ix
+          Const x  -> pure . Fix $ Const x
+          Var   ix -> pure . Fix $ Var ix
+          Uni f t'  -> canonical t' >>= \t -> (Fix . Uni f) <$> mutAt (pos-1) (sizeLeft-1) (Just $ Uni f) t
+          Bin op ln rn -> do  l <- canonical ln
+                              r <- canonical rn
+                              szLft <- getSize l
+                              szRgt <- getSize r
+                              if szLft < pos
+                                then do l' <- getBestExpr l
+                                        r' <- mutAt (pos-szLft-1) (sizeLeft-szLft-1) (Just $ Bin op l) r
+                                        pure . Fix $ Bin op l' r'
+                                else do l' <- mutAt (pos-1) (sizeLeft-szRgt-1) (Just (\t -> Bin op t r)) l
+                                        r' <- getBestExpr r
+                                        pure . Fix $ Bin op l' r'
+
+    checkToken parent en' = do  en <- canonize en'
+                                mEc <- gets ((Map.!? en) . _eNodeToEClass)
+                                case mEc of
+                                    Nothing -> pure True
+                                    Just ec -> do ec' <- canonical ec
+                                                  ec'' <- canonize (parent ec')
+                                                  not <$> doesExist ec''
+    doesExist, doesNotExist :: ENode -> RndEGraph Bool
+    doesExist en = gets ((Map.member en) . _eNodeToEClass)
+    doesNotExist en = gets ((Map.notMember en) . _eNodeToEClass)
+
+    doesNotExistGens :: [Maybe (EClassId -> ENode)] -> ENode -> RndEGraph Bool
+    doesNotExistGens []              en = gets ((Map.notMember en) . _eNodeToEClass)
+    doesNotExistGens (mGrand:grands) en = do  b <- gets ((Map.notMember en) . _eNodeToEClass)
+                                              if b
+                                                then pure True
+                                                else case mGrand of
+                                                    Nothing -> pure False
+                                                    Just gf -> do ec  <- gets ((Map.! en) . _eNodeToEClass)
+                                                                  en' <- canonize (gf ec)
+                                                                  doesNotExistGens grands en'
 
 data Args = Args
   { _dataset      :: String,
