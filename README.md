@@ -8,7 +8,7 @@ This repository is also the home for different algorithm implementations for SR 
 - [srtools](apps/srtools/README.md): a tool that can be used to evaluate symbolic regression expressions and create nice reports with confidence intervals. 
 - [tinygp](apps/tinygp/README.md): a simple GP implementation based on tinyGP.
 - [rEGGression](apps/rEGGression/README.md): nonlinear regression models exploration and query system with e-graphs (egg).
-- [easter](apps/easter/README.md): Equality graph Assisted Search Technique for Equation Recovery.
+- [symregg](apps/symregg/README.md): Equality graph Assisted Search Technique for Equation Recovery.
 - [eggp](apps/eggp/README.md): E-graph Genetic Programming.
 
 ## SRTree

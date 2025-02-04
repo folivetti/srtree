@@ -1,4 +1,4 @@
-# EASTER - Equality graph Assisted Search Technique for Equation Recovery
+# SymRegg - Equality graph Assisted Search Technique for Equation Recovery
 
 Exploration and query system for a database of regression models using
 e-graphs.
@@ -7,7 +7,7 @@ e-graphs.
 ## How to use 
 
 ```bash
-SymREgg - symbolic regression with e-graphs.
+SymRegg - symbolic regression with e-graphs.
 
 Usage: egraphSearch (-d|--dataset INPUT-FILE) [-t|--test ARG] 
                     [-g|--generations GENS] (-a|--algorithm ALG)
@@ -68,7 +68,7 @@ To install rEGGression you'll need:
 
 ### Method 1: Pre-compile binaries
 
-Go to the [releases](https://github.com/folivetti/srtree/tags) page, download the eggp binary corresponding to your OS and rename it to `easter`.
+Go to the [releases](https://github.com/folivetti/srtree/tags) page, download the eggp binary corresponding to your OS and rename it to `symregg`.
 
 Note: Windows and OSX releases are untested, for Windows Mingw with libnlopt are required.
 
@@ -92,13 +92,13 @@ After the installation, run `ghcup tui` and install the latest `stack` or `cabal
 To install `srsimplify` simply run:
 
 ```bash 
-cabal build srtree:easter
+cabal build srtree:symregg
 ```
 
 or 
 
 ```bash 
-stack build srtree:easter
+stack build srtree:symregg
 ```
 
 ## Citing this work

@@ -477,5 +477,5 @@ main = do
             ( fullDesc <> progDesc "Symbolic Regression search algorithm\
                                    \ exploiting the potentials of equality saturation\
                                    \ and e-graphs."
-           <> header "SymREgg - symbolic regression with e-graphs."
+           <> header "SymRegg - symbolic regression with e-graphs."
             )

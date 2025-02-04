@@ -96,9 +96,9 @@ executables:
     dependencies:
     - optparse-applicative >= 0.17 && < 0.19
     - srtree
-  easter:
+  symregg:
     main:                Main.hs
-    source-dirs:         apps/easter
+    source-dirs:         apps/symregg
     ghc-options:
     - -threaded
     - -rtsopts
