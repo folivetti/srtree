@@ -1,11 +1,13 @@
 # eggp - E-graph GP
 
-A very basic implementation of a simple GP using SRTree based on https://github.com/moshesipper/tiny_gp .
+*eggp* (**e**-**g**raph **g**enetic **p**rogramming), follows the same structure as the traditional GP. The initial population is created using ramped half-and-half respecting a maximum size and maximum depth parameter and, for a number of generations, it will choose two parents using tournament selection, apply the subtree crossover with probability $pc$ followed by the subtree mutation with probability $pm$, when the offsprings replace the current population following a dominance criteria.
 
-tinyGP is a minimalistic GP algorithm for symbolic regression implementing subtree crossover, subtree mutation,
-and tournament selection.
-This implementation supports parameter optimization, and multi-view symbolic regression (https://arxiv.org/abs/2402.04298).
+The key differences of *eggp* are:
 
+    - new solutions are inserted into the e-graph followed by one step of equality saturation to find and store some of the  equivalent expressions of the new offspring.
+    - the current population is replaced by the set of individuals formed by: the Pareto front, the next front after excluding the first Pareto-front, and a selection of the last offspring at random until it reaches the desired population size.
+    - the subtree crossover and mutation are modified to try to generate an unvisited exp
+    
 ## How to use 
 
 ```bash

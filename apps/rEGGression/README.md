@@ -1,7 +1,7 @@
 # rEGGression (r🥚ression) - Nonlinear regression models exploration and query system withe-graphs (egg).
 
-Exploration and query system for a database of regression models using
-e-graphs.
+*r🥚ression* an interactive tool that can help SR users to explore alternative models generated from different sources. These sources can be: the final population of a single run, the Pareto front, the entire history of visited expressions during the search, or a combination of those sources from multiple runs of the same or different algorithms. This can provide a rich library of alternative expressions generated from different biases, induced by different hyper-parameters or algorithms, that can bring invaluable information about the data.
+This tool supports simple queries such as querying for the top-N models filtered by size, complexity, and number of numerical parameters; insert and evaluate new expressions; list and evaluate sub-expressions of the already visited expressions, and also, more advanced queries such as calculate the frequency of common patterns (i.e., building blocks) observed in the set of models; and filter the expressions by patterns with a natural syntax.
 
 
 ## How to use 
