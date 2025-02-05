@@ -7,6 +7,8 @@
 - Fixed bug with Gaussian distribution and fixed number of parameters.
 - Fixed bug in which `--number-params 0` would create parameters.
 - Fixed bug in `rEGGression` that pattern matched equivalent expressions.
+- Support to `--numpy` flag that prints the output as a numpy expression (experimental, eggp only).
+- Support to `--simplify` flag that simplifies the expressions before displaying (experimental, eggp only).
 
 ## 2.0.1.0
 

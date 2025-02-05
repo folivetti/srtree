@@ -309,11 +309,11 @@ egraphGP dataTrainVals dataTests args = do
     printExpr :: Int -> EClassId -> RndEGraph ()
     printExpr ix ec = do
         thetas' <- gets (_theta . _info . (IM.! ec) . _eClass)
-        bestExpr <- getBestExpr ec
+        bestExpr <- (if _simplify args then simplifyEqSatDefault else id) <$> getBestExpr ec
         let nParams = countParamsUniq bestExpr
             fromSz (MA.Sz x) = x 
             nThetas  = Prelude.map (fromSz . MA.size) thetas'
-        (_, thetas) <- if Prelude.any (/=nParams) nThetas 
+        (_, thetas) <- if Prelude.any (/=nParams) nThetas || _simplify args
                         then fitFun bestExpr
                         else pure (1.0, thetas')
 
@@ -342,7 +342,8 @@ egraphGP dataTrainVals dataTests args = do
                                               , nll_train, nll_val, nll_te
                                               , mdl_train, mdl_val, mdl_te]
                 thetaStr   = intercalate ";" $ Prelude.map show (MA.toList theta)
-            io . putStrLn $ show ix <> "," <> showExpr expr <> ","
+                showFun    = if _numpy args then showPython best' else showExpr expr
+            io . putStrLn $ show ix <> "," <> showFun <> ","
                           <> thetaStr <> "," <> show (countNodes $ convertProtectedOps expr)
                           <> "," <> vals
 
@@ -352,7 +353,9 @@ egraphGP dataTrainVals dataTests args = do
             fi <- fromJust <$> getFitness ecN''
             thetas <- getTheta ecN''
             let thetaStr   = intercalate "_" $ Prelude.map (intercalate ";" . Prelude.map show . MA.toList) thetas
-            io . putStrLn $ showExpr _tree <> "," <> thetaStr <> "," <> show fi
+                tree = if _simplify args then simplifyEqSatDefault _tree else _tree
+                showFun = if _numpy args then showPython else showExpr
+            io . putStrLn $ showFun tree <> "," <> thetaStr <> "," <> show fi
             pure ()
 
     insertTerms =
@@ -377,7 +380,9 @@ data Args = Args
     _nonterminals :: String,
     _dumpTo       :: String,
     _loadFrom     :: String,
-    _moo          :: Bool
+    _moo          :: Bool,
+    _numpy        :: Bool,
+    _simplify     :: Bool
   }
   deriving (Show)
 
@@ -480,7 +485,14 @@ opt = Args
        ( long "moo"
        <> help "replace the current population with the pareto front instead of replacing it with the generated children."
        )
-
+  <*> switch
+       ( long "to-numpy"
+       <> help "outputs the expressions using a numpy format."
+       )
+  <*> switch
+       ( long "simplify"
+       <> help "simplify the expressions before displaying them."
+       )
 main :: IO ()
 main = do
   args <- execParser opts
