@@ -87,13 +87,13 @@ jobs:
           stack exec -- pacman --noconfirm -S mingw-w64-x86_64-pkgconf
           stack exec -- pacman --noconfirm -S mingw-w64-x86_64-nlopt
           mkdir dist
-          stack build srtree:egraphGP --copy-bins --local-bin-path=dist
-          stack build srtree:egraphSearch --copy-bins --local-bin-path=dist
+          stack build srtree:eggp --copy-bins --local-bin-path=dist
+          stack build srtree:symregg --copy-bins --local-bin-path=dist
           stack build srtree:srtools --copy-bins --local-bin-path=dist
           stack build srtree:reggression --copy-bins --local-bin-path=dist
           stack build srtree:srsimplify --copy-bins --local-bin-path=dist
-          mv dist/egraphGP.exe dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
-          mv dist/egraphSearch.exe dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
+          mv dist/eggp.exe dist/eggp-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
+          mv dist/symregg.exe dist/symregg-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
           mv dist/srtools.exe dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
           mv dist/reggression.exe dist/reggression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
           mv dist/srsimplify.exe dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
@@ -102,13 +102,13 @@ jobs:
         name: Build binary on maxOS
         run: |
           mkdir dist
-          cabal install srtree:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
-          cabal install srtree:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
+          cabal install srtree:eggp --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
+          cabal install srtree:symregg --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
           cabal install srtree:srtools --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
           cabal install srtree:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
           cabal install srtree:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
-          mv dist/egraphGP dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
-          mv dist/egraphSearch dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/eggp dist/eggp-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/symregg dist/symregg-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srtools dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/reggression dist/reggression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srsimplify dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
@@ -117,13 +117,13 @@ jobs:
         name: Build binary on Ubuntu
         run: |
           mkdir dist
-          cabal install srtree:egraphGP --install-method=copy --overwrite-policy=always --installdir=dist 
-          cabal install srtree:egraphSearch --install-method=copy --overwrite-policy=always --installdir=dist 
+          cabal install srtree:eggp --install-method=copy --overwrite-policy=always --installdir=dist 
+          cabal install srtree:symregg --install-method=copy --overwrite-policy=always --installdir=dist 
           cabal install srtree:srtools --install-method=copy --overwrite-policy=always --installdir=dist 
           cabal install srtree:reggression --install-method=copy --overwrite-policy=always --installdir=dist 
           cabal install srtree:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist 
-          mv dist/egraphGP dist/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
-          mv dist/egraphSearch dist/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/eggp dist/eggp-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/symregg dist/symregg-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srtools dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/reggression dist/reggression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
           mv dist/srsimplify dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
@@ -150,6 +150,6 @@ jobs:
           files: |
              ${{ env.BINARY_PATH1 }}/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
              ${{ env.BINARY_PATH2 }}/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
-             ${{ env.BINARY_PATH2 }}/egraphSearch-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
-             ${{ env.BINARY_PATH2 }}/egraphGP-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
+             ${{ env.BINARY_PATH2 }}/symregg-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
+             ${{ env.BINARY_PATH2 }}/eggp-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
              ${{ env.BINARY_PATH2 }}/reggression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
