@@ -103,7 +103,7 @@ showPython = cata alg . removeProtection
   where
     alg = \case
       Var ix        -> concat ["x[:, ", show ix, "]"]
-      Param ix      -> concat ["t[:, ", show ix, "]"]
+      Param ix      -> concat ["t[", show ix, "]"]
       Const c       -> show c
       Bin Power l r -> concat [l, " ** ", r]
       Bin op l r    -> concat ["(", l, " ", showOp op, " ", r, ")"]
