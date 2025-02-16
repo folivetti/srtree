@@ -85,7 +85,7 @@ egraphGP dataTrainVals dataTests args = do
     --newPop' <- Prelude.mapM (\eId -> canonical eId >>= \eId' -> (updateIfNothing fitFun eId' >> pure eId')) newPop''
     --Prelude.mapM_ (updateIfNothing fitFun) newPop'
 
-    totSz <- gets (Map.size . _eNodes) -- (IntMap.size . _eClass)
+    totSz <- gets (Map.size . _eNodeToEClass) -- (IntMap.size . _eClass)
     let full = totSz > max maxMem (_nPop args)
     when full (cleanEGraph >> cleanDB)
 
