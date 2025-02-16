@@ -130,7 +130,7 @@ egraphGP dataTrainVals dataTests args = do
     isBin _           = False
 
     -- TODO: merge two or more egraphs
-    cleanEGraph = do let nParetos = (maxMem `div` 5) `div` _maxSize args
+    cleanEGraph = do let nParetos = 10 -- (maxMem `div` 5) `div` _maxSize args
                      io . putStrLn $ "cleaning"
                      pareto <- (concat <$> (forM [1 .. _maxSize args] $ \n -> getTopFitEClassWithSize n nParetos))
                                  >>= Prelude.mapM canonical
