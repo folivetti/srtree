@@ -87,6 +87,7 @@ egraphGP dataTrainVals dataTests args = do
 
     totSz <- gets (Map.size . _eNodeToEClass) -- (IntMap.size . _eClass)
     let full = totSz > max maxMem (_nPop args)
+    io . print $ totSz
     when full (cleanEGraph >> cleanDB)
 
     newPop <- if (_moo args)
