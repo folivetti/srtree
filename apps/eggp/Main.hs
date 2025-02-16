@@ -85,7 +85,7 @@ egraphGP dataTrainVals dataTests args = do
     --newPop' <- Prelude.mapM (\eId -> canonical eId >>= \eId' -> (updateIfNothing fitFun eId' >> pure eId')) newPop''
     --Prelude.mapM_ (updateIfNothing fitFun) newPop'
 
-    totSz <- gets (IntMap.size . _eClass)
+    totSz <- gets (Map.size . _eNodes) -- (IntMap.size . _eClass)
     let full = totSz > max maxMem (_nPop args)
     when full (cleanEGraph >> cleanDB)
 
@@ -114,7 +114,7 @@ egraphGP dataTrainVals dataTests args = do
   when ((not.null) (_dumpTo args)) $ get >>= (io . BS.writeFile (_dumpTo args) . encode )
   where
     maxSize = (_maxSize args)
-    maxMem = 300000 -- running 1 iter of eqsat for each new individual will consume ~3GB
+    maxMem = 5000000 -- running 1 iter of eqsat for each new individual will consume ~3GB
     fitFun = fitnessMV shouldReparam (_optRepeat args) (_optIter args) (_distribution args) dataTrainVals
     nonTerms   = parseNonTerms (_nonterminals args)
     (Sz2 _ nFeats) = MA.size (getX .fst . head $ dataTrainVals)
