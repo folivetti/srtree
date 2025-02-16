@@ -102,9 +102,6 @@ egraphGP dataTrainVals dataTests args = do
                        then getTopFitEClassThat (_nPop args) (const True)
                        else Prelude.mapM canonical newPop'
     when (_trace args) $ printPop newPop
-    io . print $ length newPop
-
-
     pure newPop
 
   io $ putStrLn "id,Expression,theta,size,MSE_train,MSE_val,MSE_test,R2_train,R2_val,R2_test,nll_train,nll_val,nll_test,mdl_train,mdl_val,mdl_test"
