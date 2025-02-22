@@ -342,7 +342,7 @@ egraphGP dataTrainVals dataTests args = do
                                               , nll_train, nll_val, nll_te
                                               , mdl_train, mdl_val, mdl_te]
                 thetaStr   = intercalate ";" $ Prelude.map show (MA.toList theta)
-                showFun    = if _numpy args then showPython best' else showExpr expr
+                showFun    = if _numpy args then "\"" <> showPython best' <> "\"" else showExpr expr
             io . putStrLn $ show ix <> "," <> showFun <> ","
                           <> thetaStr <> "," <> show (countNodes $ convertProtectedOps expr)
                           <> "," <> vals

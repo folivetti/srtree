@@ -147,7 +147,7 @@ nll HGaussian mYerr xss ys t theta =
 -- y log phi + (1-y) log (1 - phi), assuming y \in {0,1}
 nll Bernoulli _ xss ys tree theta
   | notValid ys = error "For Bernoulli distribution the output must be either 0 or 1."
-  | otherwise   = negate . M.sum $ delay ys * yhat - log (M.map (1+) $ exp yhat)
+  | otherwise   = M.sum $ (M.map (1-) (delay ys)) * yhat + log (M.map (1+) $ exp (M.map negate yhat))
   where
     (Sz m)   = M.size ys
     yhat     = evalTree xss theta tree
