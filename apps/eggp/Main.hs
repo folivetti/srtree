@@ -121,7 +121,7 @@ egraphGP dataTrainVals dataTests args = do
     relabel        = if shouldReparam then relabelParams else relabelParamsOrder
     terms          = if _distribution args == ROXY
                           then (var 0 : params)
-                          else [var ix | ix <- [0 .. nFeats-1]] <> params
+                          else [var ix | ix <- [0 .. nFeats-1]] -- <> params
     uniNonTerms = [t | t <- nonTerms, isUni t]
     binNonTerms = [t | t <- nonTerms, isBin t]
     isUni (Uni _ _)   = True
@@ -141,7 +141,8 @@ egraphGP dataTrainVals dataTests args = do
                      forM_ (Prelude.zip newIds (Prelude.reverse infos)) $ \(eId, info) ->
                          insertFitness eId (fromJust $ _fitness info) (_theta info)
 
-    rndTerm    = Random.randomFrom terms
+    rndTerm    = do coin <- toss
+                    if coin then Random.randomFrom terms else Random.randomFrom params
     rndNonTerm = Random.randomFrom nonTerms
 
     refitChanged = do ids <- gets (_refits . _eDB) >>= Prelude.mapM canonical . Set.toList >>= pure . nub
