@@ -66,6 +66,10 @@ Example of valid names: `dataset.csv`, `mydata.tsv`, `dataset.csv:20:100`, `data
 
 The format of the file will be determined by the extension (e.g., csv, tsv,...). 
 
+## Demo
+
+[![asciicast](https://asciinema.org/a/713509.svg)](https://asciinema.org/a/713509)
+
 ## Installation
 
 To install rEGGression you'll need:
