@@ -82,7 +82,7 @@ skip = [
 
 [tool.mypy]
 mypy_path = "src"
-python_version = "3.7"
+python_version = "3.9"
 strict = true
 implicit_reexport = false
 
@@ -93,9 +93,9 @@ where = ["src"]
 legacy_tox_ini = """
 [tox]
 min_version = 4
-env_list = py{37,38,39,310,311,312}-{lin,mac,win}
+env_list = py{39,310,311,312}-{lin,mac,win}
 
-[testenv:py{37,38,39,310,311,312}-{lin,mac,win}]
+[testenv:py{39,310,311,312}-{lin,mac,win}]
 package = external
 package_env = build-{env_name}
 platform =
@@ -109,7 +109,7 @@ extras =
 commands =
   {env_python} -m pytest {posargs}
 
-[testenv:build-py{37,38,39,310,311,312}-{lin,mac,win}]
+[testenv:build-py{39,310,311,312}-{lin,mac,win}]
 deps =
   build
   auditwheel; sys_platform == 'linux'
