@@ -85,7 +85,7 @@ class cabal_build_ext(build_ext):
 
     def cabal_build_ext(self, ext: Extension) -> None:
         self.mkpath(self.build_temp)
-        self.cabal(["build"], env={"INSTALLDIR": self.build_temp, **os.environ})
+        self.cabal(["build srtree:eggp"], env={"INSTALLDIR": self.build_temp, **os.environ})
         lib_filename = self.get_cabal_foreign_library_filename(ext)
         ext_fullpath = self.get_ext_fullpath(ext.name)
         self.mkpath(os.path.dirname(ext_fullpath))
@@ -129,7 +129,7 @@ class cabal_build_ext(build_ext):
 
 def main() -> None:
     setup(
-        ext_modules=[ext_module],
+        ext_modules=[], #ext_module],
         cmdclass={"build_ext": cabal_build_ext},
     )
 

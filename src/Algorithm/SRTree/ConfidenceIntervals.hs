@@ -115,7 +115,7 @@ predictionCI (Laplace stats) _ predFun jacFun _ xss tree theta alpha _ = zipWith
     getResStdError row = sqrt $ (A.!.!) row $ A.fromList compMode $ map (row A.!.!) covs
     resStdErr          = map getResStdError jac
 
-predictionCI (Profile _ _) dist predFun _ profFun xss tree theta alpha estPIs = zipWith3 f estPIs yhat $ take 10 xss'
+predictionCI (Profile _ _) dist predFun _ profFun xss tree theta alpha estPIs = zipWith3 f estPIs yhat xss' -- $ take 10 xss'
   where
     yhat     = A.toList $ predFun xss
     theta'   = A.toStorableVector theta
@@ -134,6 +134,7 @@ predictionCI (Profile _ _) dist predFun _ profFun xss tree theta alpha estPIs = 
 
 -- inverse function of the distributions 
 inverseDist :: Floating p => Distribution -> p -> p
+inverseDist MSE y = y
 inverseDist Gaussian y  = y
 inverseDist Bernoulli y = log (y/(1-y))
 inverseDist Poisson y   = log y

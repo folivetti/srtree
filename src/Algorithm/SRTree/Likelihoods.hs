@@ -458,6 +458,7 @@ hessianNLL dist mYerr xss ys tree theta = makeArray cmp (Sz (p :. p)) build
     res    = delay ys - phi
 
     (phi, phi') = case dist of
+                    MSE       -> (yhat, M.replicate cmp (Sz m) 1)
                     Gaussian  -> (yhat, M.replicate cmp (Sz m) 1)
                     Bernoulli -> (logistic yhat, phi*(M.replicate cmp (Sz m) 1 - phi))
                     Poisson   -> (exp yhat, phi)

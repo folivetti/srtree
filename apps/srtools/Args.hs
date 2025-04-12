@@ -174,4 +174,4 @@ distRead =
   str >>= \s -> mkReader ("unsupported distribution " <> s) id (capitalize s)
   where
     capitalize ""     = ""
-    capitalize (c:cs) = toUpper c : map toLower cs
+    capitalize (c:cs) = toUpper c : if length cs == 2 then map toUpper cs else map toLower cs

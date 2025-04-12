@@ -180,7 +180,7 @@ jobs:
 
     environment:
       name: pypi
-      url: https://pypi.org/p/example-haskell-wheel
+      url: https://pypi.org/p/eggp
 
     permissions:
       id-token: write # IMPORTANT: this permission is mandatory for trusted publishing
