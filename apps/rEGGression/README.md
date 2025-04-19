@@ -120,13 +120,23 @@ stack build srtree:reggression
 If you use eggp for your research, please cite:
 
 ```
-@misc{defranca2025reggressioninteractiveagnostictool,
-      title={rEGGression: an Interactive and Agnostic Tool for the Exploration of Symbolic Regression Models}, 
-      author={Fabricio Olivetti de Franca and Gabriel Kronberger},
-      year={2025},
-      eprint={2501.17859},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2501.17859}, 
+@inproceedings{rEGGression,
+author = {de Franca, Fabricio Olivetti and Kronberger, Gabriel},
+title = {rEGGression: an Interactive and Agnostic Tool for the Exploration of Symbolic Regression Models},
+year = {2025},
+isbn = {9798400714658},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/3712256.3726385},
+doi = {10.1145/3712256.3726385},
+booktitle = {Proceedings of the Genetic and Evolutionary Computation Conference},
+pages = {},
+numpages = {9},
+keywords = {Genetic programming, Symbolic regression, Equality saturation, e-graphs},
+location = {Malaga, Spain},
+series = {GECCO '25},
+archivePrefix = {arXiv},
+       eprint = {2501.17859},
+ primaryClass = {cs.LG},
 }
 ```
