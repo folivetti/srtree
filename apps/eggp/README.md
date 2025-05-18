@@ -125,13 +125,23 @@ stack build srtree:eggp
 If you use eggp for your research, please cite:
 
 ```
-@misc{defranca2025improvinggeneticprogrammingsymbolic,
-      title={Improving Genetic Programming for Symbolic Regression with Equality Graphs}, 
-      author={Fabricio Olivetti de Franca and Gabriel Kronberger},
-      year={2025},
-      eprint={2501.17848},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2501.17848}, 
+@inproceedings{eggp,
+author = {de Franca, Fabricio Olivetti and Kronberger, Gabriel},
+title = {Improving Genetic Programming for Symbolic Regression with Equality Graphs},
+year = {2025},
+isbn = {9798400714658},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/3712256.3726383},
+doi = {10.1145/3712256.3726383},
+booktitle = {Proceedings of the Genetic and Evolutionary Computation Conference},
+pages = {},
+numpages = {9},
+keywords = {Symbolic regression, Genetic programming, Equality saturation, Equality graphs},
+location = {Malaga, Spain},
+series = {GECCO '25},
+archivePrefix = {arXiv},
+       eprint = {2501.17848},
+ primaryClass = {cs.LG}, 
 }
 ```
