@@ -19,22 +19,37 @@ packages:
   original:
     hackage: ieee-0.7@sha256:4f444419a7861f04fb64502d14688c80e8293a86a608f6d14c3010c9bd96b6d1,1327
 - completed:
-    hackage: table-layout-1.0.0.1@sha256:deb84b273141fccd6313be13d76b08cdf32a0b9af969c6432580fec75c28193e,7889
+    hackage: random-1.3.1@sha256:0b4f649c3e78713b2ccad1535251ee34b148237fb2229d7058c2b1d9ccc324b8,6004
     pantry-tree:
-      sha256: 8378ad591c1bf566e9444c52ae0e10f11faea7366565b6997d57c43044d4f89e
-      size: 2547
+      sha256: 9e92209c00b0c00b7d1c503e15a27b67b74ac2e3b48269a9255893b06de6836c
+      size: 1667
   original:
-    hackage: table-layout-1.0.0.1
+    hackage: random-1.3.1@sha256:0b4f649c3e78713b2ccad1535251ee34b148237fb2229d7058c2b1d9ccc324b8,6004
 - completed:
-    hackage: repline-0.4.2.0@sha256:3d863dedf6d840d0578b597bb3b85c95e400c895c67e77a0c286b184d8be51b2,2179
+    commit: 6b384a156c9bb57175611acba7ba058aca3bb16d
+    git: https://github.com/sdiehl/repline.git
+    name: repline
     pantry-tree:
-      sha256: 000a079f17a76e103311c262e907d3624c73efcfdeafdd2aabc2d2160e0523cf
-      size: 564
+      sha256: ed648a96a2a1dcf5669a2874918b8d7141d598395cc177f5df69a8a76aac5433
+      size: 1037
+    version: 0.4.2.0
   original:
-    hackage: repline-0.4.2.0@sha256:3d863dedf6d840d0578b597bb3b85c95e400c895c67e77a0c286b184d8be51b2,2179
+    commit: 6b384a156c9bb57175611acba7ba058aca3bb16d
+    git: https://github.com/sdiehl/repline.git
+- completed:
+    commit: 476f3cb77654075183e3b79828f473070eddcae0
+    git: https://github.com/muesli4/table-layout.git
+    name: table-layout
+    pantry-tree:
+      sha256: bb2ca0f96318de47f42ee0274b157a8b323b62a89bb550147aa37ebd6a4bdfac
+      size: 2625
+    version: 1.0.0.2
+  original:
+    commit: 476f3cb77654075183e3b79828f473070eddcae0
+    git: https://github.com/muesli4/table-layout.git
 snapshots:
 - completed:
-    sha256: 776b860cca4e9106b51f401ddbc6d8d95ba417ec326d9c869013fef1086a9a17
-    size: 621385
-    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/nightly/2025/1/11.yaml
-  original: nightly-2025-01-11
+    sha256: 0d0e0969dda2916e4b3744e6c72fd7a193c7d57a05610b3df5227c8618e298e8
+    size: 692221
+    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/nightly/2025/5/18.yaml
+  original: nightly-2025-05-18

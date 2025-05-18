@@ -1,5 +1,5 @@
 name:                srtree
-version:             2.0.1.2
+version:             2.0.1.3
 synopsis:            A general library to work with Symbolic Regression expression trees.
 github:              "folivetti/srtree"
 license:             BSD3
@@ -140,7 +140,7 @@ executables:
     - optparse-applicative >= 0.17 && < 0.19
     - repline >= 0.4.2.0 && < 0.5
     - ansi-terminal >= 1.1.2 && < 1.2
-    - table-layout >= 1.0.0.1 && < 1.1
+    - table-layout >= 1.0.0.2 && < 1.1
 
 tests:
   srtree-test:

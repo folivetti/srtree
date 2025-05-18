@@ -1,0 +1,6 @@
+
+[:python_version < "3.8"]
+typing_extensions<5,>=4.6
+
+[mypy]
+types_setuptools>=45

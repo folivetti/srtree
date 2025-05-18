@@ -1,5 +1,9 @@
 # Changelog for srtree
 
+## 2.0.1.3
+
+- Fix compatibility with stackage nightly 
+
 ## 2.0.1.2
 
 - Fix bug where the parameters were printed as `t[:,ix]` instead of `t[ix]` in `showPython`

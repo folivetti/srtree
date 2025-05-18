@@ -1,199 +1,155 @@
-name: CI
+name: srtools Release
 
-on:
+on: 
+  # Trigger the workflow on the new 'v*' tag created
   push:
-    branches:
-      - main
     tags:
       - "v*"
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-  merge_group:
-  workflow_dispatch:
-
-defaults:
-  run:
-    shell: sh
-
-env:
-  # 04-08-2023:
-  # cibuildwheel builds linux wheels in a manylinux_ghc container, which
-  # hardcodes the GHC and Cabal version. To change the GHC and Cabal versions,
-  # you must update the containers in pyproject.toml under tool.cibuildwheel.
-  #
-  # See: https://github.com/wenkokke/manylinux_ghc
-  DEFAULT_GHC_VERSION: "9.4.8"
-  DEFAULT_CABAL_VERSION: "3.10.2.1"
-  DEFAULT_PYTHON_VERSION: "3.11"
 
 jobs:
-  ################################################################################
-  # Build package with cibuildwheel
-  ################################################################################
+  create_release:
+    name: Create Github Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1.1.4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: true
+          prerelease: false
 
-  build:
-    name: "Build / ${{ matrix.job.os.name }} / ${{ matrix.job.os.plat}}-${{ matrix.job.os.arch }}"
-    runs-on: ${{ matrix.job.os.runner }}
-
+  build_artifact:
+    needs: [create_release]
+    name: ${{ matrix.os }}/GHC ${{ matrix.ghc }}/${{ github.ref }}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        job:
-          - os:
-              name: "Linux"
-              runner: "ubuntu-latest"
-              arch: "aarch64"
-              plat: "manylinux"
-          - os:
-              name: "Linux"
-              runner: "ubuntu-latest"
-              arch: "i686"
-              plat: "manylinux"
-          - os:
-              name: "Linux"
-              runner: "ubuntu-latest"
-              arch: "x86_64"
-              plat: "manylinux"
-          - os:
-              name: "Linux"
-              runner: "ubuntu-latest"
-              arch: "x86_64"
-              plat: "musllinux"
-          - os:
-              name: "macOS"
-              runner: "macos-12"
-              arch: "x86_64"
-              plat: "macosx"
-          - os:
-              name: "macOS"
-              runner: "macos-14"
-              arch: "arm64"
-              plat: "macosx"
-          - os:
-              name: "Windows"
-              runner: "windows-latest"
-              arch: "AMD64"
-              plat: "win"
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+        ghc:
+          - 9.10.1
+        cabal: ["3.14.1.1"]
+    defaults:
+      run:
+        shell: bash
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out code
+        uses: actions/checkout@v3
 
-      - # 12-02-2024:
-        # Print the macOS architecture.
-        if: matrix.job.os.name == 'macOS'
-        run: echo "::debug::$(uname -a)"
-
-      - # Required to run job via act: https://github.com/nektos/act
-        uses: actions/setup-python@v5
+      - name: Set tag name
+        uses: olegtarasov/get-tag@v2.1
+        id: tag
         with:
-          cache: "pip"
-          cache-dependency-path: "./requirements-ci.txt"
-          python-version: ${{ env.DEFAULT_PYTHON_VERSION }}
+          tagRegex: "v(.*)"
+          tagRegexGroup: 1
 
-      - # Required to run job via act: https://github.com/nektos/act
-        run: pip install -r "./requirements-ci.txt"
-
-      - # 19-05-2023:
-        # Required to build the wheels on macOS and Windows, but not on Linux,
-        # as Linux builds are run in containers, where GHC and Cabal are built
-        # by the `./scripts/before-all.sh` scripts.
-        if: matrix.job.os.name == 'macOS' || matrix.job.os.name == 'Windows'
+      - name: Setup Haskell
         uses: haskell-actions/setup@v2
+        id: setup-haskell-cabal
         with:
-          ghc-version: ${{ env.DEFAULT_GHC_VERSION }}
-          cabal-version: ${{ env.DEFAULT_CABAL_VERSION }}
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: ${{ matrix.cabal }}
 
-      - # 12-02-2024:
-        # Print the GHC architecture.
-        if: matrix.job.os.name == 'macOS' || matrix.job.os.name == 'Windows'
-        run: echo "::debug::$(ghc --info)"
-
-      - # 19-06-2023:
-        # Required to build aarch64 wheels.
-        if: matrix.job.os.name == 'Linux' && matrix.job.os.arch == 'aarch64'
-        name: Set up QEMU (linux/aarch64)
-        uses: docker/setup-qemu-action@v3
+      - name: Cache ~/.cabal/store
+        uses: actions/cache@v2
         with:
-          platforms: "arm64"
+          key: ${{ runner.os }}-ghc-${{ matrix.ghc }}-${{ github.sha }}
+          path: ~/.cabal/store
 
-      - # 19-06-2023:
-        # Required to build i686 wheels.
-        if: matrix.job.os.name == 'Linux' && matrix.job.os.arch == 'i686'
-        name: Set up QEMU (linux/i686)
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: "386"
+      - if: matrix.os == 'ubuntu-latest'
+        name: Install ubuntu dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnlopt-dev libnlopt0
 
-      - uses: pypa/cibuildwheel@v2.21.3
-        with:
-          output-dir: "./wheelhouse"
-          config-file: "{package}/pyproject.toml"
-        env:
-          CIBW_ARCHS: "${{ matrix.job.os.arch }}"
-          CIBW_BUILD: "*${{ matrix.job.os.plat }}*"
-          MACOSX_DEPLOYMENT_TARGET: "10.10"
+      - if: matrix.os == 'macOS-latest'
+        name: Install macOS dependencies
+        run: |
+          brew install nlopt
+          ls $(brew --prefix)/Cellar/nlopt/2.9.1/lib/
+          echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}"
+          echo "PKG_CONFIG_PATH=$(brew --prefix)/Cellar/nlopt/2.9.1/lib/pkgconfig" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+          echo "LD_LIBRARY_PATH=$(brew --prefix)/Cellar/nlopt/2.9.1/lib" >> "${GITHUB_ENV}"
+          echo "DYLD_LIBRARY_PATH=${DYLD_LIBRARY_PATH}"
+          echo "DYLD_LIBRARY_PATH=$(brew --prefix)/Cellar/nlopt/2.9.1/lib" >> "${GITHUB_ENV}"
 
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: "wheelhouse-${{ matrix.job.os.plat }}-${{ matrix.job.os.arch }}"
-          path: ./wheelhouse/*.whl
+      - if: matrix.os == 'windows-latest'
+        name: Build windows binary
+        run: |
+          stack exec -- pacman --noconfirm -Sy msys2-keyring
+          stack exec -- pacman --noconfirm -S mingw-w64-x86_64-pkgconf
+          stack exec -- pacman --noconfirm -S mingw-w64-x86_64-nlopt
+          mkdir dist
+          stack build srtree:eggp --copy-bins --local-bin-path=dist
+          stack build srtree:symregg --copy-bins --local-bin-path=dist
+          stack build srtree:srtools --copy-bins --local-bin-path=dist
+          stack build srtree:reggression --copy-bins --local-bin-path=dist
+          stack build srtree:srsimplify --copy-bins --local-bin-path=dist
+          mv dist/eggp.exe dist/eggp-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
+          mv dist/symregg.exe dist/symregg-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
+          mv dist/srtools.exe dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
+          mv dist/reggression.exe dist/reggression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
+          mv dist/srsimplify.exe dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe
 
-  ################################################################################
-  # Publish package to GitHub Releases
-  ################################################################################
+      - if: matrix.os == 'macOS-latest'
+        name: Build binary on maxOS
+        run: |
+          mkdir dist
+          cabal install srtree:eggp --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
+          cabal install srtree:symregg --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
+          cabal install srtree:srtools --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
+          cabal install srtree:rEGGression --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
+          cabal install srtree:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist --extra-lib-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/lib --extra-include-dirs=/opt/homebrew/Cellar/nlopt/2.9.1/include
+          mv dist/eggp dist/eggp-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/symregg dist/symregg-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/srtools dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/reggression dist/reggression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/srsimplify dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+      
+      - if: matrix.os == 'ubuntu-latest'
+        name: Build binary on Ubuntu
+        run: |
+          mkdir dist
+          cabal install srtree:eggp --install-method=copy --overwrite-policy=always --installdir=dist 
+          cabal install srtree:symregg --install-method=copy --overwrite-policy=always --installdir=dist 
+          cabal install srtree:srtools --install-method=copy --overwrite-policy=always --installdir=dist 
+          cabal install srtree:reggression --install-method=copy --overwrite-policy=always --installdir=dist 
+          cabal install srtree:srsimplify --install-method=copy --overwrite-policy=always --installdir=dist 
+          mv dist/eggp dist/eggp-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/symregg dist/symregg-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/srtools dist/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/reggression dist/reggression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          mv dist/srsimplify dist/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}
+          ls dist
 
-  publish-to-github-releases:
-    name: Publish to GitHub Releases
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: [build]
+      - if: matrix.os == 'windows-latest'
+        name: Set extension to .exe on Windows
+        run: echo "EXT=.exe" >> $GITHUB_ENV
 
-    permissions:
-      contents: write
+      - name: Set binary path name
+        run: |
+          echo "BINARY_PATH1=./dist" >> $GITHUB_ENV
+          echo "BINARY_PATH2=./dist" >> $GITHUB_ENV
+          echo "BINARY_PATH2=./dist" >> $GITHUB_ENV
+          echo "BINARY_PATH2=./dist" >> $GITHUB_ENV
+          echo "BINARY_PATH2=./dist" >> $GITHUB_ENV
 
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: "wheelhouse-*-*"
-          path: "./wheelhouse"
-          merge-multiple: true
-
-      - name: Publish to GitHub Releases
+      - name: Upload Release Asset
+        id: upload-release-asset
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          files: "./wheelhouse/*.whl"
-          fail_on_unmatched_files: true
-
-  ################################################################################
-  # Publish package to PyPI
-  ################################################################################
-
-  publish-to-pypi:
-    name: Publish to PyPI
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: [build]
-
-    environment:
-      name: pypi
-      url: https://pypi.org/p/eggp
-
-    permissions:
-      id-token: write # IMPORTANT: this permission is mandatory for trusted publishing
-
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: "wheelhouse-*-*"
-          path: "./wheelhouse"
-          merge-multiple: true
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: "./wheelhouse"
+          files: |
+             ${{ env.BINARY_PATH1 }}/srsimplify-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
+             ${{ env.BINARY_PATH2 }}/srtools-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
+             ${{ env.BINARY_PATH2 }}/symregg-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
+             ${{ env.BINARY_PATH2 }}/eggp-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
+             ${{ env.BINARY_PATH2 }}/reggression-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
