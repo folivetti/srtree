@@ -34,6 +34,7 @@ import Data.Maybe ( fromJust )
 import Data.SRTree.Random
 import Algorithm.EqSat.Queries
 import Data.List ( maximumBy )
+import qualified Data.Map.Strict as Map
 
 -- Environment of an e-graph with support to random generator and IO
 type RndEGraph a = EGraphST (StateT StdGen IO) a
@@ -188,3 +189,31 @@ evaluateRndUnevaluated fitFun = do
           (f, p) <- fitFun t
           insertFitness c f p
           pure c
+
+-- | check whether an e-node exists or does not exist in the e-graph
+doesExist, doesNotExist :: ENode -> RndEGraph Bool
+doesExist en = gets ((Map.member en) . _eNodeToEClass)
+doesNotExist en = gets ((Map.notMember en) . _eNodeToEClass)
+
+-- | check whether the partial tree defined by a list of ancestors will create
+-- a non-existent expression when combined with a certain e-node.
+doesNotExistGens :: [Maybe (EClassId -> ENode)] -> ENode -> RndEGraph Bool
+doesNotExistGens []              en = gets ((Map.notMember en) . _eNodeToEClass)
+doesNotExistGens (mGrand:grands) en = do  b <- gets ((Map.notMember en) . _eNodeToEClass)
+                                          if b
+                                            then pure True
+                                            else case mGrand of
+                                                Nothing -> pure False
+                                                Just gf -> do ec  <- gets ((Map.! en) . _eNodeToEClass)
+                                                              en' <- canonize (gf ec)
+                                                              doesNotExistGens grands en'
+
+-- | check whether combining a partial tree `parent` with the e-node `en'`
+-- will create a new expression
+checkToken parent en' = do  en <- canonize en'
+                            mEc <- gets ((Map.!? en) . _eNodeToEClass)
+                            case mEc of
+                                Nothing -> pure True
+                                Just ec -> do ec' <- canonical ec
+                                              ec'' <- canonize (parent ec')
+                                              not <$> doesExist ec''
