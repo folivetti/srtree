@@ -9,6 +9,7 @@ import Options.Applicative
 import Data.Massiv.Array 
 import Util
 import Algorithm.SRTree.Likelihoods
+import Data.SRTree.Datasets
 
 -- Data type to store command line arguments
 data Args = Args

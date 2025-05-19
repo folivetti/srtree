@@ -14,7 +14,7 @@
 -- this module exports only the `loadDataset` function.
 --
 -----------------------------------------------------------------------------
-module Data.SRTree.Datasets ( loadDataset )
+module Data.SRTree.Datasets ( loadDataset, loadTrainingOnly, getX, splitData, DataSet(..) )
     where
 
 import Codec.Compression.GZip (decompress)
@@ -35,6 +35,14 @@ import Data.SRTree.Eval (PVector, SRMatrix, compMode)
 import Data.Vector qualified as V
 import System.FilePath (takeExtension)
 import Text.Read (readMaybe)
+import Data.Massiv.Array as MA hiding (forM_, forM, map, take, tail, zip, replicate, all, read)
+import Control.Monad.State.Strict
+import System.Random
+import List.Shuffle ( shuffle )
+
+
+-- a dataset is a triple (X, y, y_error)
+type DataSet = (SRMatrix, PVector, Maybe PVector)
 
 -- | Loads a list of list of bytestrings to a matrix of double
 loadMtx :: [[B.ByteString]] -> Array S Ix2 Double
@@ -221,3 +229,53 @@ processData csv params hasHeader = ((x_train, y_train, x_val, y_val) , (y_err_tr
     y_err_val   = if iy_err == -1 then Nothing else Just $ M.computeAs S $ M.throwEither $ M.deleteColumnsM st (Sz1 $ end - st + 1) y_err
 {-# inline processData #-}
 
+chunksOf :: Int -> [e] -> [[e]]
+chunksOf i ls = Prelude.map (Prelude.take i) (build (splitter ls))
+ where
+  splitter :: [e] -> ([e] -> a -> a) -> a -> a
+  splitter [] _ n = n
+  splitter l c n = l `c` splitter (Prelude.drop i l) c n
+  build :: ((a -> [a] -> [a]) -> [a] -> [a]) -> [a]
+  build g = g (:) []
+
+splitData :: DataSet ->Int -> State StdGen (DataSet, DataSet)
+splitData (x, y, mYErr) k = do
+  if k == 1
+    then pure ((x, y, mYErr), (x, y, mYErr))
+    else do
+      ixs' <- (state . shuffle) [0 .. sz-1]
+      let ixs = chunksOf k ixs'
+
+      let (x_tr, x_te) = getX ixs x
+          (y_tr, y_te) = getY ixs y
+          mY = fmap (getY ixs) mYErr
+          (y_err_tr, y_err_te) = (fmap fst mY, fmap snd mY)
+      pure ((x_tr, y_tr, y_err_tr), (x_te, y_te, y_err_te))
+  where
+    (MA.Sz sz) = MA.size y
+    comp_x     = MA.getComp x
+    comp_y     = MA.getComp y
+
+    getX :: [[Int]] -> SRMatrix -> (SRMatrix, SRMatrix)
+    getX ixs xs' = let xs = MA.toLists xs' :: [MA.ListItem MA.Ix2 Double]
+                    in ( MA.fromLists' comp_x [xs !! ix | ixs_i <- ixs, ix <- Prelude.tail ixs_i]
+                       , MA.fromLists' comp_x [xs !! ix | ixs_i <- ixs, let ix = Prelude.head ixs_i]
+                       )
+    getY :: [[Int]] -> PVector -> (PVector, PVector)
+    getY ixs ys  = ( MA.fromList comp_y [ys MA.! ix | ixs_i <- ixs, ix <- Prelude.tail ixs_i]
+                   , MA.fromList comp_y [ys MA.! ix | ixs_i <- ixs, let ix = Prelude.head ixs_i]
+                   )
+
+getTrain :: ((a, b1, c1, d1), (c2, b2), c3, d2) -> (a, b1, c2)
+getTrain ((a, b, _, _), (c, _), _, _) = (a,b,c)
+
+getX :: DataSet -> SRMatrix
+getX (a, _, _) = a
+
+getTarget :: DataSet -> PVector
+getTarget (_, b, _) = b
+
+getError :: DataSet -> Maybe PVector
+getError (_, _, c) = c
+
+loadTrainingOnly fname b = getTrain <$> loadDataset fname b

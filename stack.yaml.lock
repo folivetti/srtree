@@ -19,13 +19,6 @@ packages:
   original:
     hackage: ieee-0.7@sha256:4f444419a7861f04fb64502d14688c80e8293a86a608f6d14c3010c9bd96b6d1,1327
 - completed:
-    hackage: random-1.3.1@sha256:0b4f649c3e78713b2ccad1535251ee34b148237fb2229d7058c2b1d9ccc324b8,6004
-    pantry-tree:
-      sha256: 9e92209c00b0c00b7d1c503e15a27b67b74ac2e3b48269a9255893b06de6836c
-      size: 1667
-  original:
-    hackage: random-1.3.1@sha256:0b4f649c3e78713b2ccad1535251ee34b148237fb2229d7058c2b1d9ccc324b8,6004
-- completed:
     commit: 6b384a156c9bb57175611acba7ba058aca3bb16d
     git: https://github.com/sdiehl/repline.git
     name: repline

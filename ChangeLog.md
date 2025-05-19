@@ -1,5 +1,12 @@
 # Changelog for srtree
 
+## 2.0.1.4
+
+- Added `loadTrainingOnly`, `splitData`, and `loadX` to `Data.SRTree.Datasets`
+- Added `getFitness`, `getTheta`, `getSize`, `isSizeOf`, `getBestFitness` to `Algorithm.EqSat.Egraph`
+- Added `parseNonTerms` to `Text.ParseSR` 
+- Added module `Algorithm.EqSat.SearchSR` with support functions for SR algorithms with EqSat
+
 ## 2.0.1.3
 
 - Fix compatibility with stackage nightly 
@@ -20,7 +27,7 @@
 
 ## 2.0.1.0
 
-- Support to Multiview Symbolic Regression in eggp and EASTER.
+- Support to Multiview Symbolic Regression in eggp and symregg.
 - Support to `--number-params` argument that limits the maximum number of parameters and allow repated parameters in an expression.
 
 ## 2.0.0.4

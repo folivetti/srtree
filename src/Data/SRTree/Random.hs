@@ -18,14 +18,21 @@ module Data.SRTree.Random
          , HasEverything
          , FullParams(..)
          , RndTree
+         , Rng(..)
          , randomVar
          , randomConst
          , randomPow
          , randomFunction
          , randomNode
          , randomNonTerminal
+         , randomTreeTemplate
          , randomTree
          , randomTreeBalanced
+         , toss
+         , tossBiased
+         , randomVal
+         , randomVec
+         , randomFrom
          )
          where
 
@@ -34,6 +41,10 @@ import Control.Monad.State.Strict ( MonadState(state), MonadTrans(lift), StateT 
 import Data.Maybe (fromJust)
 import Data.SRTree.Internal
 import System.Random (Random (random, randomR), StdGen, mkStdGen)
+import Data.Massiv.Array as MA hiding (forM_, forM, P)
+import Data.SRTree.Eval
+import Control.Monad
+
 
 -- * Class definition of properties that a certain parameter type has.
 --
@@ -65,10 +76,19 @@ instance HasExps FullParams where
 instance HasFuns FullParams where
   _funs (P _ _ _ fs) = fs
 
+type Rng a = StateT StdGen IO a
+
 -- auxiliary function to sample between False and True
 toss :: StateT StdGen IO Bool
 toss = state random
 {-# INLINE toss #-}
+
+tossBiased :: Double -> Rng Bool
+tossBiased p = do r <- state random
+                  pure (r < p)
+
+randomVal :: Rng Double
+randomVal = state random
 
 -- returns a random element of a list
 randomFrom :: [a] -> StateT StdGen IO a
@@ -152,18 +172,18 @@ randomNonTerminal = do
 -- >>> tree <- evalStateT treeGen (mkStdGen 52)
 -- >>> showExpr tree
 -- "(-2.7631152121655838 / Exp((x0 / ((x0 * -7.681722660704317) - Log(3.378309080134594)))))"
-randomTree :: HasEverything p => Int -> RndTree p
-randomTree 0      = do
+randomTreeTemplate :: HasEverything p => Int -> RndTree p
+randomTreeTemplate 0      = do
   coin <- lift toss
   if coin
     then randomVar
     else randomConst
-randomTree budget = do 
+randomTreeTemplate budget = do
   node  <- randomNode
   fromJust <$> case arity node of
     0 -> pure $ Just node
-    1 -> replaceChild node <$> randomTree (budget - 1)
-    2 -> replaceFixChildren node <$> randomTree (budget `div` 2) <*> randomTree (budget `div` 2)
+    1 -> replaceChild node <$> randomTreeTemplate (budget - 1)
+    2 -> replaceFixChildren node <$> randomTreeTemplate (budget `div` 2) <*> randomTreeTemplate (budget `div` 2)
     
 -- | Returns a random tree with a approximately a number `n` of nodes, the parameter `p` must have every property.
 --
@@ -182,3 +202,28 @@ randomTreeBalanced n = do
   fromJust <$> case arity node of
     1 -> replaceChild node <$> randomTreeBalanced (n - 1)
     2 -> replaceFixChildren node <$> randomTreeBalanced (n `div` 2) <*> randomTreeBalanced (n `div` 2)    
+
+
+randomVec :: Int -> Rng PVector
+randomVec n = MA.fromList compMode <$> replicateM n (randomRange (-1, 1))
+
+randomTree :: Int -> Int -> Int -> Rng (Fix SRTree) -> Rng (SRTree ()) -> Bool -> Rng (Fix SRTree)
+randomTree minDepth maxDepth maxSize genTerm genNonTerm grow
+  | noSpaceLeft = genTerm
+  | needNonTerm = genRecursion
+  | otherwise   = do r <- toss
+                     if r
+                       then genTerm
+                       else genRecursion
+  where
+    noSpaceLeft = maxDepth <= 1 || maxSize <= 2
+    needNonTerm = (minDepth >= 0 || (maxDepth > 2 && not grow)) -- && maxSize > 2
+
+    genRecursion = do
+        node <- genNonTerm
+        case node of
+          Uni f _    -> Fix . Uni f <$> randomTree (minDepth - 1) (maxDepth - 1) (maxSize - 1) genTerm genNonTerm grow
+          Bin op _ _ -> do l <- randomTree (minDepth - 1) (maxDepth - 1) (if grow then maxSize - 2 else maxSize `div` 2) genTerm genNonTerm grow
+                           r <- randomTree (minDepth - 1) (maxDepth - 1) (maxSize - 1 - countNodes l) genTerm genNonTerm grow
+                           pure . Fix  $ Bin op l r
+{-# INLINE randomTree #-}

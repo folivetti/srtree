@@ -335,3 +335,20 @@ isConst eid = do ec <- gets ((IntMap.! eid) . _eClass)
                    ConstVal _ -> pure True
                    _          -> pure False
 {-# INLINE isConst #-}
+
+getFitness :: Monad m => EClassId -> EGraphST m (Maybe Double)
+getFitness c = gets (_fitness . _info . (IntMap.! c) . _eClass)
+{-# INLINE getFitness #-}
+getTheta :: Monad m => EClassId -> EGraphST m ([PVector])
+getTheta c = gets (_theta . _info . (IntMap.! c) . _eClass)
+{-# INLINE getTheta #-}
+getSize :: Monad m => EClassId -> EGraphST m Int
+getSize c = gets (_size . _info . (IntMap.! c) . _eClass)
+{-# INLINE getSize #-}
+isSizeOf :: (Int -> Bool) -> EClass -> Bool
+isSizeOf p = p . _size . _info
+{-# INLINE isSizeOf #-}
+getBestFitness :: Monad m => EGraphST m (Maybe Double)
+getBestFitness = do
+    bec <- (gets (snd . getGreatest . _fitRangeDB . _eDB) >>= canonical)
+    gets (_fitness . _info . (IntMap.! bec) . _eClass)

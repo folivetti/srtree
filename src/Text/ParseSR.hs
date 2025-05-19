@@ -11,7 +11,7 @@
 -- Functions to parse a string representing an expression
 --
 -----------------------------------------------------------------------------
-module Text.ParseSR ( parseSR, parsePat, showOutput, SRAlgs(..), Output(..) )
+module Text.ParseSR ( parseSR, parsePat, parseNonTerms, showOutput, SRAlgs(..), Output(..) )
     where
 
 import Control.Applicative ((<|>))
@@ -23,6 +23,9 @@ import Data.List (sortOn)
 import Data.SRTree
 import Algorithm.EqSat.DB
 import qualified Data.SRTree.Print as P
+import qualified Data.Map.Strict as Map
+import Data.List.Split ( splitOn )
+
 import Debug.Trace (trace)
 
 -- * Data types
@@ -383,3 +386,17 @@ parsePattern table binFuns var =
 
     getParserVar k v = (string k <|> enveloped k) >> pure (Fix $ Var v)
     enveloped s      = (char ' ' <|> char '(') >> string s >> (char ' ' <|> char ')') >> pure ""
+
+
+-- * Parse the non-terminal nodes into a SRTree () value
+parseNonTerms :: String -> [SRTree ()]
+parseNonTerms = Prelude.map toNonTerm . splitOn ","
+  where
+    binTerms = Map.fromList [ (Prelude.map toLower (show op), op) | op <- [Add .. AQ]]
+    uniTerms = Map.fromList [ (Prelude.map toLower (show f), f) | f <- [Abs .. Cube]]
+    toNonTerm xs' = let xs = Prelude.map toLower xs'
+                    in case binTerms Map.!? xs of
+                          Just op -> Bin op () ()
+                          Nothing -> case uniTerms Map.!? xs of
+                                          Just f -> Uni f ()
+                                          Nothing -> error $ "invalid non-terminal " <> show xs

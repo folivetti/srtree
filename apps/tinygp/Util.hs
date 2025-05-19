@@ -31,6 +31,7 @@ import Data.SRTree.Datasets
 import Algorithm.EqSat.Queries
 
 
+    {-
 type DataSet = (SRMatrix, PVector, Maybe PVector)
 
 
@@ -47,7 +48,7 @@ getError :: DataSet -> Maybe PVector
 getError (_, _, c) = c
 
 loadTrainingOnly fname b = getTrain <$> loadDataset fname b
-
+-}
 
 parseNonTerms = Prelude.map toNonTerm . splitOn ","
   where
