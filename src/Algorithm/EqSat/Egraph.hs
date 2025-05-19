@@ -352,3 +352,6 @@ getBestFitness :: Monad m => EGraphST m (Maybe Double)
 getBestFitness = do
     bec <- (gets (snd . getGreatest . _fitRangeDB . _eDB) >>= canonical)
     gets (_fitness . _info . (IntMap.! bec) . _eClass)
+getDL :: EClassId -> RndEGraph (Maybe Double)
+getDL c = gets (_dl . _info . (IM.! c) . _eClass)
+{-# INLINE getDL #-}

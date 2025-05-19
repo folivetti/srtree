@@ -125,6 +125,7 @@ pickRndSubTree = do ecIds <- gets (IntSet.toList . _unevaluated . _eDB)
                           else pure Nothing
 
 getParetoEcsUpTo n maxSize = concat <$> forM [1..maxSize] (\i -> getTopFitEClassWithSize i n)
+getParetoDLEcsUpTo n maxSize = concat <$> forM [1..maxSize] (\i -> getTopDLEClassWithSize i n)
 
 getBestExprWithSize n =
         do ec <- getTopFitEClassWithSize n 1 >>= traverse canonical
