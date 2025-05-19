@@ -25,6 +25,7 @@ module Data.SRTree.Random
          , randomFunction
          , randomNode
          , randomNonTerminal
+         , randomRange
          , randomTreeTemplate
          , randomTree
          , randomTreeBalanced
