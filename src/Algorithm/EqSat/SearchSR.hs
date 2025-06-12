@@ -169,14 +169,14 @@ paretoFront fitFun maxSize printExprFun = go 1 0 (-(1.0/0.0))
             if not (null ecList)
                 then do let (ec, mf) = head ecList
                             f' = fromJust mf
-                            improved = f' > f && (not . isNaN) f' && (not . isInfinite) f'
+                            improved = f' >= f && (not . isNaN) f' && (not . isInfinite) f'
                         ec' <- canonical ec
                         if improved
                                 then do refit fitFun ec'
                                         t <- printExprFun ix ec'
-                                        ts <- go (n+1) (ix + if improved then 1 else 0) (max f (fromJust mf))
+                                        ts <- go (n+1) (ix + if improved then 1 else 0) (max f f')
                                         pure (t:ts)
-                                else go (n+1) (ix + if improved then 1 else 0) (max f (fromJust mf))
+                                else go (n+1) (ix + if improved then 1 else 0) (max f f')
                 else go (n+1) ix f
 
 evaluateUnevaluated fitFun = do
