@@ -1,5 +1,9 @@
 # Changelog for srtree
 
+## 2.0.1.5
+
+- Fix `refit` to only replace the fitness if it improves the fitness 
+
 ## 2.0.1.4
 
 - Added `loadTrainingOnly`, `splitData`, and `loadX` to `Data.SRTree.Datasets`

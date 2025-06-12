@@ -1,4 +1,0 @@
-Algorithm
-Data
-Numeric
-Text

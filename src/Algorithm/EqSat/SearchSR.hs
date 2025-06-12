@@ -145,7 +145,10 @@ insertRndExpr maxSize rndTerm rndNonTerm =
 refit fitFun ec = do
   t <- getBestExpr ec
   (f, p) <- fitFun t
-  insertFitness ec f p
+  mf <- getFitness ec
+  case mf of
+    Nothing -> insertFitness ec f p
+    Just f' -> when (f > f') $ insertFitness ec f p
 
 --printBest :: (Int -> EClassId -> RndEGraph ()) -> RndEGraph ()
 printBest fitFun printExprFun = do
