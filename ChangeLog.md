@@ -3,6 +3,7 @@
 ## 2.0.1.5
 
 - Fix `refit` to only replace the fitness if it improves the fitness 
+- Fix `paretoFront` 
 
 ## 2.0.1.4
 

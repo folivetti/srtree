@@ -122,7 +122,7 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty
                        -- step 1: match the rules
                        let matchSch        = matchWithScheduler it
                            matchAll        = zipWithM matchSch [0..]
-                           (rules, sch') = runState (matchAll rules') sch
+                           (rules, sch')   = runState (matchAll rules') sch
 
                        -- step 2: apply matches and rebuild
                        matches <- mapM (\rule -> map (rule,) <$> match (source rule)) $ concat rules

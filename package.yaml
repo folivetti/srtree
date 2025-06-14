@@ -70,7 +70,7 @@ executables:
     #- -O2
     #- -optc-O3
     dependencies:
-    - optparse-applicative >= 0.17 && < 0.19
+    - optparse-applicative >= 0.18 && < 0.20
     - srtree
   srtools:
     main:                Main.hs
@@ -83,7 +83,7 @@ executables:
     #- -optc-O3
     dependencies:
     - srtree
-    - optparse-applicative >= 0.17 && < 0.19
+    - optparse-applicative >= 0.18 && < 0.20
   srsimplify:
     main:                Main.hs
     source-dirs:         apps/srsimplify
@@ -94,7 +94,7 @@ executables:
     #- -O2
     #- -optc-O3
     dependencies:
-    - optparse-applicative >= 0.17 && < 0.19
+    - optparse-applicative >= 0.18 && < 0.20
     - srtree
 #  eggp:
 #    main:                Main.hs
