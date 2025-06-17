@@ -143,12 +143,15 @@ showLatex :: Fix SRTree -> String
 showLatex = cata alg . removeProtection
   where
     alg = \case
-      Var ix        -> concat ["x_{, ", show ix, "}"]
-      Param ix      -> concat ["\\theta_{, ", show ix, "}"]
+      Var ix        -> concat ["x_{", show ix, "}"]
+      Param ix      -> concat ["\\theta_{", show ix, "}"]
       Const c       -> show c
       Bin Power l r -> concat [l, "^{", r, "}"]
+      Bin Mul l r    -> concat ["\\left(", l, " \\cdot ", r, "\\right)"]
+      Bin Div l r    -> concat ["\\frac{", l, "}{", r, "}"]
       Bin op l r    -> concat ["\\left(", l, " ", showOp op, " ", r, "\\right)"]
       Uni Abs t     -> concat ["\\left |", t, "\\right |"]
+      Uni Recip t   -> concat ["\\frac{1}{", t, "}"]
       Uni f t       -> concat [showLatexFun f, "(", t, ")"]
 
 showLatexFun :: Function -> String
