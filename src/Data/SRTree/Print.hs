@@ -147,7 +147,8 @@ showLatex = cata alg . removeProtection
       Var ix        -> concat ["x_{", show ix, "}"]
       Param ix      -> concat ["\\theta_{", show ix, "}"]
       Const c       -> show c
-      Bin Power l r -> concat [l, "^{", r, "}"]
+      Bin Power l r -> concat ["{", l, "^{", r, "}}"]
+      Bin PowerAbs l r ->  concat ["{\\left|", l, "\\right|^{", r, "}}"]
       Bin Mul l r    -> concat ["\\left(", l, " \\cdot ", r, "\\right)"]
       Bin Div l r    -> concat ["\\frac{", l, "}{", r, "}"]
       Bin op l r    -> concat ["\\left(", l, " ", showOp op, " ", r, "\\right)"]
@@ -162,7 +163,8 @@ showLatexWithVars varnames = cata alg . removeProtection
       Var ix        -> concat ["\\operatorname{", varnames !! ix, "}"]
       Param ix      -> concat ["\\theta_{", show ix, "}"]
       Const c       -> show c
-      Bin Power l r -> concat [l, "^{", r, "}"]
+      Bin Power l r -> concat ["{", l, "^{", r, "}}"]
+      Bin PowerAbs l r ->  concat ["{\\left|", l, "\\right|^{", r, "}}"]
       Bin Mul l r    -> concat ["\\left(", l, " \\cdot ", r, "\\right)"]
       Bin Div l r    -> concat ["\\frac{", l, "}{", r, "}"]
       Bin op l r    -> concat ["\\left(", l, " ", showOp op, " ", r, "\\right)"]
