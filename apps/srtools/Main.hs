@@ -14,13 +14,14 @@ main = do
   args             <- execParser opts
   g                <- getStdGen
   (dset, varnames, tgname) <- getDataset args
+
   let seed = if rseed args < 0 
                then g 
                else mkStdGen (rseed args)
       varnames' = map unpack $ split ',' $ pack varnames
   withInput (infile args) (from args) varnames False (simpl args)
     >>= if toScreen args
-          then printResultsScreen args seed dset varnames' tgname  -- full report on screne
+          then printResultsScreen args seed dset varnames' tgname  -- full report on screen
           else if simple args
                  then printResultsSimple args seed dset varnames' -- csv file
                  else printResults args seed dset varnames' -- csv file

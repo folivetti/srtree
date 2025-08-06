@@ -14,7 +14,7 @@ import Algorithm.SRTree.ConfidenceIntervals ( printCI, BasicStats(_stdErr, _corr
 import qualified Data.SRTree.Print as P
 import Data.SRTree.Eval ( compMode )
 
-import Args ( Args(outfile, alpha,dist,niter) )
+import Args ( Args(outfile, alpha,dist,niter,sigma) )
 import Report
 import Data.SRTree.Recursion ( cata )
 
@@ -44,7 +44,10 @@ processTree :: Args        -- command line arguments
             -> (BasicInfo, SSE, SSE, Info, (BasicStats, [CI], [CI], [CI], [CI]))
 processTree args seed dset t ix = (basic, sseOrig, sseOpt, info, cis)
   where
-    (tree, theta0)  = floatConstsToParam t
+    (tree, theta0')  = floatConstsToParam t
+    theta0           = if dist args == Gaussian
+                          then theta0' <> [sigma args]
+                          else theta0'
 
     basic   = getBasicStats args seed dset tree theta0 ix
     treeVal = case (_xVal dset, _yVal dset) of
@@ -64,7 +67,10 @@ processTreeSimple :: Args        -- command line arguments
             -> (BasicInfo, SSE, SSE)
 processTreeSimple args seed dset t ix = (basic, sseOrig, sseOpt)
   where
-    (tree, theta0)  = floatConstsToParam t
+    (tree, theta0')  = floatConstsToParam t
+    theta0           = if dist args == Gaussian
+                          then theta0' <> [sigma args]
+                          else theta0'
 
     basic   = getBasicStats args seed dset tree theta0 ix
     treeVal = case (_xVal dset, _yVal dset) of

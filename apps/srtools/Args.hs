@@ -24,6 +24,7 @@ data Args = Args
       , toScreen    :: Bool
       , useProfile  :: Bool
       , simple      :: Bool
+      , sigma       :: Double
       , alpha       :: Double
       , ptype       :: PType
     } deriving Show
@@ -122,6 +123,12 @@ opt = Args
    <*> switch
        ( long "simple"
        <> help "If set, calculates only SSE.")
+   <*> option auto
+       ( long "sigma"
+       <> metavar "SIGMA"
+       <> showDefault
+       <> value 0.001
+       <> help "Estimation of error for Guassian distribution.")
    <*> option auto
        ( long "alpha"
        <> metavar "ALPHA"

@@ -185,10 +185,16 @@ getInfo args dset tree treeVal =
                          (Nothing, _)     -> (xTr, yTr)
                          (_, Nothing)     -> (xTr, yTr)
                          (Just a, Just b) -> (a, b)
-    (tOpt, thetaOpt) = floatConstsToParam tree
+    (tOpt, thetaOpt_nosig) = floatConstsToParam tree
+    thetaOpt         = if dist args == Gaussian
+                          then thetaOpt_nosig <> [sigma args]
+                          else thetaOpt_nosig
     thetaOpt'        = A.fromList compMode thetaOpt
 
-    (tOptVal, thetaOptVal) = floatConstsToParam treeVal
+    (tOptVal, thetaOptVal_nosig) = floatConstsToParam treeVal
+    thetaOptVal  = if dist args == Gaussian
+                      then thetaOptVal_nosig <> [sigma args]
+                      else thetaOptVal_nosig
     thetaOptVal'           = A.fromList compMode thetaOptVal
 
     dist'            = dist args
