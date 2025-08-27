@@ -30,7 +30,7 @@ import Debug.Trace
 
 -- | Bayesian information criterion
 bic :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
-bic dist mYerr xss ys theta tree = (p + 1) * log n + 2 * nll dist mYerr xss ys tree theta
+bic dist mYerr xss ys theta tree = p * log n + 2 * nll dist mYerr xss ys tree theta
   where
     (A.Sz (fromIntegral -> p)) = A.size theta
     (A.Sz (fromIntegral -> n)) = A.size ys
@@ -38,7 +38,7 @@ bic dist mYerr xss ys theta tree = (p + 1) * log n + 2 * nll dist mYerr xss ys t
 
 -- | Akaike information criterion
 aic :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
-aic dist mYerr xss ys theta tree = 2 * (p + 1) + 2 * nll dist mYerr xss ys tree theta
+aic dist mYerr xss ys theta tree = 2 * p + 2 * nll dist mYerr xss ys tree theta
   where
     (A.Sz (fromIntegral -> p)) = A.size theta
     (A.Sz (fromIntegral -> n)) = A.size ys
@@ -58,7 +58,7 @@ evidence dist mYerr xss ys theta tree = (1 - b) * nll dist mYerr xss ys tree the
 mdl :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
 mdl dist mYerr xss ys theta tree =   nll' dist mYerr xss ys theta tree
                                    + logFunctional tree
-                                   -- + logParameters dist mYerr xss ys theta tree
+                                   + logParameters dist mYerr xss ys theta tree
   where
     fisher = fisherNLL dist mYerr xss ys tree theta
     theta' = A.computeAs A.S $ A.zipWith (\t f -> if isSignificant t f then t else 0.0) theta fisher
@@ -87,7 +87,7 @@ mdlFreq dist mYerr xss ys theta tree = nll dist mYerr xss ys tree theta
 
 -- log of the functional complexity
 logFunctional :: Fix SRTree -> Double
-logFunctional tree = countNodes tree * log (countUniqueTokens tree') 
+logFunctional tree = countNodes tree * log (countUniqueTokens tree')
                    + foldr (\c acc -> log (abs c) + acc) 0 consts 
                    + log(2) * numberOfConsts
   where

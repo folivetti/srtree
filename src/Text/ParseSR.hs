@@ -26,7 +26,7 @@ import qualified Data.SRTree.Print as P
 import qualified Data.Map.Strict as Map
 import Data.List.Split ( splitOn )
 
-import Debug.Trace (trace)
+import Debug.Trace (trace, traceShow)
 
 -- * Data types
 
@@ -235,7 +235,7 @@ parseOperon b = parseExpr b (prefixOps : binOps) binFuns var
             , [binary "*" (*) AssocLeft, binary "/" (/) AssocLeft]
             , [binary "+" (+) AssocLeft, binary "-" (-) AssocLeft]
             ]
-    var = do char 'X'
+    var = do char 'X' <|> char 'x'
              ix <- decimal
              pure $ Fix $ Var (ix - 1) -- Operon is not 0-based
           <?> "var"
