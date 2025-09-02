@@ -47,7 +47,8 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.List ( foldl' )
 import qualified Data.Vector.Storable as VS
 import Control.Scheduler 
-import Data.Maybe ( fromJust )
+import Data.Maybe ( fromJust, isJust )
+import Algorithm.EqSat.Egraph
 
 import Control.Monad.State.Strict
 
@@ -55,8 +56,138 @@ import Control.Monad.State.Strict
 
 import qualified Data.Map.Strict as Map
 
+-- this should be moved to another place, probably egraph lib
+type ECache = IntMap.IntMap PVector
+
+-- reverse mode applied directly on an e-graph. Supports caching.
+-- assumes root points to the loss function, so for an expression
+-- f(x) and the loss (y - (f(x))^2), root will point to "^"
+reverseModeEGraph :: SRMatrix -> PVector -> Maybe PVector -> EGraph -> ECache -> EClassId -> VS.Vector Double -> (Array D Ix1 Double, VS.Vector Double, ECache)
+reverseModeEGraph xss ys mYErr egraph cache root theta =
+    (delay $ cache'' IntMap.! root
+    , VS.fromList [M.sum $ cachedGrad Map.! (Param ix) | ix <- [0..p-1]]
+    , cache'')
+    where
+        yErr = fromJust mYErr
+        m    = M.size ys
+        p    = VS.length theta
+        comp = M.getComp xss
+        one :: Array S Ix1 Double
+        one  = M.replicate comp m 1
+
+        canon rt = case _canonicalMap egraph IntMap.!? rt of
+                     Nothing -> error "wrong canon"
+                     Just rt' -> if rt == rt' then rt else canon rt'
+
+        getNode rt' = let rt  = canon rt'
+                          cls = _eClass egraph IntMap.! rt
+                      in (_best . _info) cls
+
+        getId n = _eNodeToEClass egraph Map.! n
+
+        ((cache', localcache), _) = evalCached root `execState` ((cache, IntMap.empty), Map.empty)
+           where
+            evalCached :: EClassId -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
+            evalCached rt = insertKey rt
+
+        insertKey :: EClassId -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
+        insertKey key = do
+            isCachedGlobal <- gets ((key `IntMap.member`) . fst . fst)
+            isCachedLocal  <- gets ((key `IntMap.member`) . snd . fst)
+            when (not isCachedLocal && not isCachedGlobal) $ do
+                let node = getNode key
+                (ev, toLocal) <- evalKey node
+                modify' (insKey node ev toLocal)
+            getVal key
+
+        evalKey :: ENode -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
+        evalKey (Var ix)     = pure $ if | ix == -1  -> (ys, False)
+                                         | ix == -2  -> (yErr, False)
+                                         | otherwise -> (M.computeAs S $ xss <! ix, False)
+        evalKey (Const v)    = pure $ (M.replicate comp m v, False)
+        evalKey (Param ix)   = pure $ (M.replicate comp m (theta VS.! ix), True)
+        evalKey (Uni f t)    = do (v, b) <- getVal t
+                                  pure $ (M.computeAs S . M.map (evalFun f) $ v, b)
+        evalKey (Bin op l r) = do (vl, bl) <- getVal l
+                                  (vr, br) <- getVal r
+                                  pure $ (M.computeAs S $ M.zipWith (evalOp op) vl vr, bl || br)
+
+        insKey (Var   _) _ _       s = s
+        insKey (Const _) _ _       s = s
+        insKey (Param _) _ _       s = s
+        insKey node      v toLocal ((global,local), s) =
+            let k = getId node
+            in if toLocal
+                  then ((global, IntMap.insert k v local), s)
+                  else ((IntMap.insert k v global, local), s)
+
+        insertLocal k v = do (c1, c2) <- get
+                             put (c1, IntMap.insert k v c2)
+        insertGlobal k v = do (c1, c2) <- get
+                              put (IntMap.insert k v c1, c2)
+        getVal rt' = do let rt = canon rt'
+                            n  = getNode rt
+                        case n of
+                          Var ix   -> evalKey n
+                          Const v  -> evalKey n
+                          Param ix -> evalKey n
+                          _        -> getFromCache rt
+        getFromCache rt = do
+            global <- gets ((IntMap.!? rt) . fst . fst)
+            local  <- gets ((IntMap.!? rt) . snd . fst)
+            if | isJust global -> pure (fromJust global, False)
+               | isJust local  -> pure (fromJust local, True)
+               | otherwise     -> insertKey rt
+
+        ((cache'', localcache'), cachedGrad) = calcGrad root one `execState` ((cache', localcache), Map.empty)
+
+        calcGrad :: Int -> Array S Ix1 Double -> State ((IntMap.IntMap (Array S Ix1 Double), IntMap.IntMap (Array S Ix1 Double)), Map.Map (SRTree Int) (Array S Ix1 Double)) ()
+        calcGrad rt v = do let node = getNode rt
+                           case node of
+                              Bin op l r -> do xl <- fst <$> getVal l
+                                               xr <- fst <$> getVal r
+                                               (dl, dr) <- diff op v xl xr l r
+                                               calcGrad l dl
+                                               calcGrad r dr
+                              Uni f  t   -> do x <- fst <$> getVal t
+                                               calcGrad t (M.computeAs S $ M.zipWith (*) v (M.map (derivative f) x))
+                              Param ix   -> modify' (insertGrad v (Param ix))
+                              _          -> pure ()
+          where
+            insertGrad v k ((a, b), g) = ((a, b), Map.insertWith (\v1 v2 -> M.computeAs S $ M.zipWith (+) v1 v2) k v g)
+
+        --diff :: Op -> Array S Ix1 Double -> Array S Ix1 Double -> Array S Ix1 Double -> (Array S Ix1 Double, Array S Ix1 Double)
+        diff Add dx fx gy l r   = pure (dx, dx)
+        diff Sub dx fx gy l r   = pure (dx, M.computeAs S $ M.map negate dx)
+        diff Mul dx fx gy l r   = pure (M.computeAs S $ M.zipWith (*) dx gy, M.computeAs S $ M.zipWith (*) dx fx)
+        diff Div dx fx gy l r   = do
+            let k = getId (Bin Div l r)
+            v <- fst <$> getVal k
+            pure (M.computeAs S $ M.zipWith (/) dx gy
+                 , M.computeAs S $ M.zipWith (*) dx (M.zipWith (\l r -> negate l/r) v gy))
+        diff Power dx fx gy l r = do
+            let k = getId (Bin Power l r)
+            v <- fst <$> getVal k
+            pure ( M.computeAs S $ M.zipWith4 (\d f g vi -> fixNaN $ d * g * vi / f) dx fx gy v
+                 , M.computeAs S $ M.zipWith3 (\d f vi -> fixNaN $ d * vi * log f) dx fx v)
+
+        diff PowerAbs dx fx gy l r = do
+            let k = getId (Bin PowerAbs l r)
+            v <- fst <$> getVal k
+            let v2 = M.map abs fx
+                v3 = M.computeAs S $ M.zipWith (*) fx gy
+            pure ( M.computeAs S $ M.zipWith4 (\d v3i vi v2i -> fixNaN $ d * v3i * vi / (v2i^2)) dx v3 v v2
+                 , M.computeAs S $ M.zipWith3 (\d f vi -> fixNaN $ d * vi * log f) dx v2 v)
+
+        diff AQ dx fx gy l r = let dxl = M.zipWith (\g d -> d * (recip . sqrt . (+1) . (^2)) g) gy dx
+                                   dxy = M.zipWith3 (\f g dl -> f * g * dl^3) fx gy dxl
+                           in pure (M.computeAs S $ dxl, M.computeAs S $ dxy)
+
+        fixNaN x = if isNaN x then 0 else x
+
+
 reverseModeGraph :: SRMatrix -> PVector -> Maybe PVector -> VS.Vector Double -> Fix SRTree -> (Array D Ix1 Double, VS.Vector Double)
-reverseModeGraph xss ys mYErr theta tree = (delay $ cachedVal IntMap.! root
+reverseModeGraph xss ys mYErr theta tree = (delay $ cachedVal' IntMap.! root
                                             , VS.fromList [M.sum $ cachedGrad Map.! (Param ix) | ix <- [0..p-1]])
     where
         yErr = fromJust mYErr
@@ -87,9 +218,12 @@ reverseModeGraph xss ys mYErr theta tree = (delay $ cachedVal IntMap.! root
 
         graph (a, _, _, _) = a
         insKey key ev (a, b, c, d) = (Map.insert key d a, IntMap.insert d key b, IntMap.insert d ev c, d+1)
+        -- get the values from the cache
         getVal key (a, b, c, d)    = c IntMap.! key
+        -- maps the the struct to an integer key
         getKey key (a, b, c, d)    = a Map.! key
 
+        -- this tells the order in which we traverse the tree
         leftToRight (Uni f mt)    = Uni f <$> mt;
         leftToRight (Bin f ml mr) = Bin f <$> ml <*> mr
         leftToRight (Var ix)      = pure (Var ix)
