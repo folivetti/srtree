@@ -22,6 +22,7 @@
 
 module Algorithm.SRTree.AD
          ( reverseModeArr
+         , reverseModeEGraph
          , reverseModeGraph
          , forwardModeUniqueJac
          ) where
@@ -55,9 +56,6 @@ import Control.Monad.State.Strict
 --import UnliftIO.Async
 
 import qualified Data.Map.Strict as Map
-
--- this should be moved to another place, probably egraph lib
-type ECache = IntMap.IntMap PVector
 
 -- reverse mode applied directly on an e-graph. Supports caching.
 -- assumes root points to the loss function, so for an expression

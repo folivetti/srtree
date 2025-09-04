@@ -12,7 +12,7 @@
 -- Module containing the algebraic rules and simplification function.
 --
 -----------------------------------------------------------------------------
-module Algorithm.EqSat.Simplify ( Rule(..), simplifyEqSatDefault, applyMergeOnlyDftl, rewrites, rewritesParams, rewriteBasic, rewritesFun, rewritesSimple, rewritesWithConstant ) where
+module Algorithm.EqSat.Simplify ( Rule(..), simplifyEqSatDefault, applyMergeOnlyDftl, rewrites, rewritesParams, rewriteBasic, rewritesFun, rewritesSimple, rewritesWithConstant, myCost ) where
 
 import Algorithm.EqSat (eqSat, applySingleMergeOnlyEqSat)
 import Algorithm.EqSat.Egraph

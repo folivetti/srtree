@@ -53,6 +53,7 @@ type ENodeEnc     = (Int, Int, Int, Double)
 type EGraphST m a = StateT EGraph m a
 type Cost         = Int
 type CostFun      = SRTree Cost -> Cost
+type ECache = IntMap.IntMap PVector
 
 instance Hashable ENode where
   hashWithSalt n enode = hashWithSalt n (encodeEnode enode)

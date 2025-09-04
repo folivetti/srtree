@@ -30,6 +30,7 @@ import Data.Map.Strict ( Map )
 import qualified Data.Map.Strict as Map
 import qualified Data.HashSet as Set
 import Control.Monad.State.Strict
+import Control.Monad.Identity
 import Data.SRTree.Recursion (cataM)
 import Algorithm.EqSat.Info
 import qualified Data.IntSet as IntSet
@@ -389,6 +390,11 @@ fromTree costFun = cataM sequence (add costFun)
 fromTrees :: Monad m => CostFun -> [Fix SRTree] -> EGraphST m [EClassId]
 fromTrees costFun = foldM (\rs t -> do eid <- fromTree costFun t; pure (eid:rs)) []
 {-# INLINE fromTrees #-}
+
+countParamsEg :: EGraph -> EClassId -> Int
+countParamsEg eg rt = countParams . runIdentity $ getBestExpr rt `evalStateT` eg
+countParamsUniqEg :: EGraph -> EClassId -> Int
+countParamsUniqEg eg rt = countParamsUniq . runIdentity $ getBestExpr rt `evalStateT` eg
 
 
 -- | gets the best expression given the default cost function

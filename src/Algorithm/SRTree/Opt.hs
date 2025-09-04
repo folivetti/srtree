@@ -23,9 +23,37 @@ import Data.SRTree.Eval (evalTree, compMode)
 import qualified Data.Vector.Storable as VS
 import qualified Data.IntMap.Strict as IntMap
 import Data.SRTree.Recursion
+import Algorithm.EqSat.Egraph hiding ( size )
+import Algorithm.EqSat.Build
+import Control.Monad.State.Strict
+import Control.Monad.Identity
 
 import Debug.Trace
 
+-- | minimizes the negative log-likelihood of the expression
+minimizeNLLEGraph :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> Distribution -> Maybe PVector -> Int -> SRMatrix -> PVector -> EGraph -> EClassId -> ECache -> PVector -> (PVector, Double, Int, ECache)
+minimizeNLLEGraph alg dist mYerr niter xss ys egraph root cache t0
+  | niter == 0 = (t0, f, 0, cache')
+  | n == 0     = (t0, f, 0, cache')
+  | otherwise  = (t_opt', nll dist mYerr xss ys tree t_opt', nEvs, cache')
+  where
+    (rt, eg)   = buildNLLEGraph dist (fromIntegral m) egraph root -- convertProtectedOps
+    t0'        = toStorableVector t0
+    (Sz n)     = size t0
+    (Sz m)     = size ys
+    tree       = runIdentity $ getBestExpr root `evalStateT` egraph
+
+    funAndGrad t   = let (f, g, _) = gradNLLEGraph dist xss ys mYerr eg cache' rt t in (f,g)
+    (f, _, cache') = gradNLLEGraph dist xss ys mYerr eg cache rt t0' -- if there's no parameter or no iterations
+
+
+    algorithm  = alg funAndGrad (Just $ VectorStorage $ fromIntegral n)
+    stop       = ObjectiveRelativeTolerance 1e-6 :| [ObjectiveAbsoluteTolerance 1e-6, MaximumEvaluations (fromIntegral niter)]
+    problem    = LocalProblem (fromIntegral n) stop algorithm
+    (t_opt, nEvs) = case minimizeLocal problem t0' of
+                      Right sol -> (solutionParams sol, nEvals sol)
+                      Left e    -> (t0', 0)
+    t_opt'      = fromStorableVector compMode t_opt
 
 
 -- | minimizes the negative log-likelihood of the expression

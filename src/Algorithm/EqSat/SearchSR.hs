@@ -35,6 +35,7 @@ import Data.SRTree.Random
 import Algorithm.EqSat.Queries
 import Data.List ( maximumBy )
 import qualified Data.Map.Strict as Map
+import Control.Monad.Identity
 
 -- Environment of an e-graph with support to random generator and IO
 type RndEGraph a = EGraphST (StateT StdGen IO) a
@@ -59,36 +60,40 @@ while p arg prog = do if (p arg)
                               while p arg' prog
                       else pure arg
 
-fitnessFun :: Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> PVector -> (Double, PVector)
-fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) tree thetaOrig =
+fitnessFun :: Int -> Distribution -> DataSet -> DataSet -> EGraph -> EClassId -> ECache -> PVector -> (Double, PVector, ECache)
+fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) egraph root cache thetaOrig =
   if isNaN val -- || isNaN tr
-    then (-(1/0), theta) -- infinity
-    else (val, theta)
+    then (-(1/0), theta,cache') -- infinity
+    else (val, theta, cache')
   where
-    --tree          = relabelParams _tree
-    nParams       = countParamsUniq tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
-    (theta, _, _) = minimizeNLL' VAR1 distribution mYErr nIter x y tree thetaOrig
+    tree          = runIdentity $ getBestExpr root `evalStateT` egraph
+    nParams       = countParamsUniqEg egraph root + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
+    (theta, _, _, cache') = minimizeNLLEGraph VAR1 distribution mYErr nIter x y egraph root cache thetaOrig
     evalF a b c   = negate $ nll distribution c a b tree $ if nParams == 0 then thetaOrig else theta
-    --tr            = evalF x y mYErr
     val           = evalF x_val y_val mYErr_val
 
 --{-# INLINE fitnessFun #-}
 
-fitnessFunRep :: Int -> Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> RndEGraph (Double, PVector)
-fitnessFunRep nRep nIter distribution dataTrain dataVal tree = do
-    let nParams = countParamsUniq tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
+fitnessFunRep :: Int -> Int -> Distribution -> DataSet -> DataSet -> EClassId -> ECache -> RndEGraph (Double, PVector, ECache)
+fitnessFunRep nRep nIter distribution dataTrain dataVal root cache = do
+    egraph <- get
+    let nParams = countParamsUniqEg egraph root + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
+        fst' (a, _, _) = a
     thetaOrigs <- replicateM nRep (rnd $ randomVec nParams)
-    let fits = maximumBy (compare `on` fst) $ Prelude.map (fitnessFun nIter distribution dataTrain dataVal tree) thetaOrigs
+    let fits = maximumBy (compare `on` fst') $ Prelude.map (fitnessFun nIter distribution dataTrain dataVal egraph root cache) thetaOrigs
     pure fits
 --{-# INLINE fitnessFunRep #-}
 
 
-fitnessMV :: Bool -> Int -> Int -> Distribution -> [(DataSet, DataSet)] -> Fix SRTree -> RndEGraph (Double, [PVector])
-fitnessMV shouldReparam nRep nIter distribution dataTrainsVals _tree = do
-  let tree = if shouldReparam then relabelParams _tree else relabelParamsOrder _tree
-  response <- forM dataTrainsVals $ \(dt, dv) -> fitnessFunRep nRep nIter distribution dt dv tree
-  pure (minimum (Prelude.map fst response), Prelude.map snd response)
-
+fitnessMV :: Bool -> Int -> Int -> Distribution -> [(DataSet, DataSet)] -> EClassId -> [ECache] -> RndEGraph (Double, [PVector], [ECache])
+fitnessMV shouldReparam nRep nIter distribution dataTrainsVals root caches = do
+  -- let tree = if shouldReparam then relabelParams _tree else relabelParamsOrder _tree
+  -- WARNING: this should be done BEFORE inserting into egraph, so it's up to the algorithm'
+  response <- forM (Prelude.zip dataTrainsVals caches) $ \((dt, dv), cache) -> fitnessFunRep nRep nIter distribution dt dv root cache
+  pure (minimum (Prelude.map fst' response), Prelude.map snd' response, Prelude.map trd response )
+  where fst' (a, _, _) = a
+        snd' (_, a, _) = a
+        trd  (_, _, a) = a
 
 
 

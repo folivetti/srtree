@@ -24,9 +24,11 @@ module Algorithm.SRTree.Likelihoods
   , nll
   , predict
   , buildNLL
+  , buildNLLEGraph
   , gradNLL
   , gradNLLArr
   , gradNLLGraph
+  , gradNLLEGraph
   , fisherNLL
   , getSErr
   , hessianNLL
@@ -34,7 +36,7 @@ module Algorithm.SRTree.Likelihoods
   )
     where
 
-import Algorithm.SRTree.AD ( reverseModeArr, reverseModeGraph )
+import Algorithm.SRTree.AD ( reverseModeArr, reverseModeGraph, reverseModeEGraph )
 import Data.Massiv.Array hiding (all, map, read, replicate, tail, take, zip)
 import qualified Data.Massiv.Array as M
 import qualified Data.Massiv.Array.Mutable as Mut
@@ -50,6 +52,11 @@ import Data.Maybe
 
 import Debug.Trace
 import Data.SRTree.Print
+import Algorithm.EqSat.Egraph
+import Algorithm.EqSat.Simplify
+import Algorithm.EqSat.Build
+import Control.Monad.State.Strict
+import Control.Monad.Identity
 
 -- | Supported distributions for negative log-likelihood
 -- MSE refers to mean squared error
@@ -250,6 +257,73 @@ buildNLL ROXY m tree = neglogP
                 + s2 * (logX - mu_gauss) ** 2
                 ) / den
 
+buildNLLEGraph MSE m egraph root = runIdentity $ addToEg  `runStateT` egraph
+  where
+    addToEg :: EGraphST Identity EClassId
+    addToEg = do v  <- add myCost (Var (-1))
+                 c1 <- add myCost (Const 2)
+                 c2 <- add myCost (Const m)
+                 x <- add myCost (Bin Sub root v)
+                 y <- add myCost (Bin Power x c1)
+                 add myCost (Bin Div y c2)
+
+
+buildNLLEGraph Gaussian m egraph root = runIdentity (addToEg `runStateT` egraph)
+  where
+    p      = 11 -- countParamsUniqEg egraph root
+    addToEg :: EGraphST Identity EClassId
+    addToEg = do v <- add myCost (Var (-1))
+                 p <- add myCost (Param p)
+                 sp <- add myCost (Uni Square p)
+                 lsp <- add myCost (Uni Log sp)
+                 d <- add myCost (Bin Sub root v)
+                 sd <- add myCost (Uni Square d)
+                 x <- add myCost (Bin Div sd sp)
+                 add myCost (Bin Add x lsp)
+
+buildNLLEGraph HGaussian m egraph root = runIdentity $ addToEg `runStateT` egraph
+  where
+    addToEg :: EGraphST Identity EClassId
+    addToEg = do v1 <- add myCost (Var (-1))
+                 v2 <- add myCost (Var (-2))
+                 c1 <- add myCost (Const (2*pi))
+                 c2 <- add myCost (Const m)
+                 x <- add myCost (Bin Sub root v1)
+                 y <- add myCost (Uni Square x)
+                 z <- add myCost (Bin Div y v2)
+                 w <- add myCost (Bin Mul c1 v2)
+                 lw <- add myCost (Uni Log w)
+                 p <- add myCost (Bin Mul c2 lw)
+                 add myCost (Bin Add z p)
+
+
+buildNLLEGraph Poisson m egraph root = runIdentity $ addToEg `runStateT` egraph
+  where
+    addToEg :: EGraphST Identity EClassId
+    addToEg = do v1 <- add myCost (Var (-1))
+                 lv <- add myCost (Uni Log v1)
+                 x  <- add myCost (Bin Mul v1 lv)
+                 y  <- add myCost (Uni Exp root)
+                 z  <- add myCost (Bin Add x y)
+                 vt <- add myCost (Bin Mul v1 root)
+                 add myCost (Bin Sub z vt)
+
+buildNLLEGraph Bernoulli m egraph root = runIdentity $ addToEg `runStateT` egraph
+  where
+    addToEg :: EGraphST Identity EClassId
+    addToEg = do v <- add myCost (Var (-1))
+                 c1 <- add myCost (Const 1)
+                 c2 <- add myCost (Const (-1))
+                 mr <- add myCost (Bin Mul c2 root)
+                 er <- add myCost (Uni Exp mr)
+                 er1 <- add myCost (Bin Add c1 er)
+                 ler1 <- add myCost (Uni Log er1)
+                 v1 <- add myCost (Bin Sub c1 v)
+                 v1r <- add myCost (Bin Mul v1 root)
+                 add myCost (Bin Add ler1 v1r)
+
+buildNLLEGraph ROXY m egraph root = error "ROXY not supported with cache"
+
 -- | Prediction for different distributions
 predict :: Distribution -> Fix SRTree -> PVector -> SRMatrix -> SRVector
 predict MSE       tree theta xss = evalTree xss theta tree
@@ -279,28 +353,7 @@ gradNLL dist mYerr xss ys tree theta = (f, delay grad) -- gradNLLArr dist xss ys
     treeArr   = IntMap.toAscList $ tree2arr tree'
     j2ix      = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]
 
-    {-
-    -- EXAMPLE OF FINITE DIFFERENCE
-    -- Implement for debugging
-gradNLL ROXY mXerr mYerr xss ys tree theta =
-   (f, delay grad)
-  where
-    (Sz p) = M.size theta
-    (Sz2 m n) = M.size xss
-    yhat   = predict Gaussian tree theta xss
-    f      = nll ROXY mXerr mYerr xss ys tree theta
-    grad   = makeArray @S (getComp xss) (Sz p) finiteDiff
-    eps    = 1e-8
 
-    finiteDiff ix = unsafePerformIO $ do
-                      theta' <- Mut.thaw theta
-                      v <- Mut.readM theta' ix
-                      Mut.writeM theta' ix (v + eps)
-                      theta'' <- Mut.freezeS theta'
-                      let f'= nll ROXY mXerr mYerr xss ys tree theta''
-                          g = (f' - f)/eps
-                      pure $ if isNaN g then (1/0) else g
-                      -}
 
 nanTo0 x = x -- if isNaN x || isInfinite x then 0 else x
 {-# INLINE nanTo0 #-}
@@ -362,6 +415,35 @@ gradNLLGraph ROXY xss ys mYerr tree theta =
   where
     (yhat, grad) = reverseModeGraph xss ys mYerr theta tree
     grad'        = VS.map nanTo0 grad
+
+-- | e-graph support
+gradNLLEGraph MSE xss ys mYerr egraph cache root theta =
+  (M.sum yhat, grad', cache')
+  where
+    (yhat, grad, cache') = reverseModeEGraph xss ys mYerr egraph cache root theta
+    grad'                = VS.map nanTo0 grad
+gradNLLEGraph Gaussian xss ys mYerr egraph cache root theta =
+  (M.sum yhat, grad', cache')
+  where
+    (yhat, grad, cache') = reverseModeEGraph xss ys mYerr egraph cache root theta
+    grad'                = VS.map nanTo0 grad
+gradNLLEGraph Bernoulli xss ys mYerr egraph cache root theta
+  | M.any (\x -> x /= 0 && x /= 1) ys = error "For Bernoulli distribution the output must be either 0 or 1."
+  | otherwise                         = (M.sum yhat, grad', cache')
+  where
+    (yhat, grad, cache') = reverseModeEGraph xss ys mYerr egraph cache root theta
+    grad'        = VS.map nanTo0 grad
+gradNLLEGraph Poisson xss ys mYerr egraph cache root theta
+  | M.any (<0) ys    = error "For Poisson distribution the output must be non-negative."
+  | otherwise        = (M.sum yhat, grad', cache')
+  where
+    (yhat, grad, cache') = reverseModeEGraph xss ys mYerr egraph cache root theta
+    grad'                = VS.map nanTo0 grad
+gradNLLEGraph ROXY xss ys mYerr egraph cache root theta =
+  ((*0.5) $ M.sum yhat, VS.map (*(0.5)) $ grad', cache')
+  where
+    (yhat, grad, cache') = reverseModeEGraph xss ys mYerr egraph cache root theta
+    grad'                = VS.map nanTo0 grad
 
 -- | Fisher information of negative log-likelihood
 fisherNLL :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> SRVector
