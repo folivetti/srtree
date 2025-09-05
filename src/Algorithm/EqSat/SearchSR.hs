@@ -117,7 +117,7 @@ updateIfNothing fitFun ec = do
       case mf of
         Nothing -> do
           --t <- getBestExpr ec
-          (f, p, c) <- fitFun ec
+          (f, p) <- fitFun ec
           insertFitness ec f p
           pure True
         Just _ -> pure False
