@@ -83,7 +83,7 @@ reverseModeEGraph xss ys mYErr egraph cache root' theta = traceShow (Map.keys ca
                           cls = _eClass egraph IntMap.! rt
                       in (_best . _info) cls
 
-        getId n = traceShow (n, _eNodeToEClass egraph `Map.member` n) $ _eNodeToEClass egraph Map.! n
+        getId n = traceShow (n, n `Map.member` _eNodeToEClass egraph) $ _eNodeToEClass egraph Map.! n
 
         ((cache', localcache), _) = evalCached root `execState` ((cache, IntMap.empty), Map.empty)
            where
