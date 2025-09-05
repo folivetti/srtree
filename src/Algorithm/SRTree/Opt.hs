@@ -50,7 +50,7 @@ minimizeNLLEGraph alg dist mYerr niter xss ys egraph root cache t0
     algorithm  = alg funAndGrad (Just $ VectorStorage $ fromIntegral n)
     stop       = ObjectiveRelativeTolerance 1e-6 :| [ObjectiveAbsoluteTolerance 1e-6, MaximumEvaluations (fromIntegral niter)]
     problem    = LocalProblem (fromIntegral n) stop algorithm
-    (t_opt, nEvs) = case minimizeLocal problem t0' of
+    (t_opt, nEvs) = traceShow (f) $ case minimizeLocal problem t0' of
                       Right sol -> (solutionParams sol, nEvals sol)
                       Left e    -> (t0', 0)
     t_opt'      = fromStorableVector compMode t_opt
