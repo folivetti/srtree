@@ -116,8 +116,8 @@ updateIfNothing fitFun ec = do
       mf <- getFitness ec
       case mf of
         Nothing -> do
-          t <- getBestExpr ec
-          (f, p, c) <- fitFun t
+          --t <- getBestExpr ec
+          (f, p, c) <- fitFun ec
           insertFitness ec f p
           pure True
         Just _ -> pure False
@@ -152,8 +152,8 @@ insertRndExpr maxSize rndTerm rndNonTerm =
          fromTree myCost t >>= canonical
 
 refit fitFun ec = do
-  t <- getBestExpr ec
-  (f, p) <- fitFun t
+  --t <- getBestExpr ec
+  (f, p) <- fitFun ec
   mf <- getFitness ec
   case mf of
     Nothing -> insertFitness ec f p
@@ -191,15 +191,15 @@ paretoFront fitFun maxSize printExprFun = go 1 0 (-(1.0/0.0))
 evaluateUnevaluated fitFun = do
           ec <- gets (IntSet.toList . _unevaluated . _eDB)
           forM_ ec $ \c -> do
-              t <- getBestExpr c
-              (f, p) <- fitFun t
+              --t <- getBestExpr c
+              (f, p) <- fitFun c
               insertFitness c f p
 
 evaluateRndUnevaluated fitFun = do
           ec <- gets (IntSet.toList . _unevaluated . _eDB)
           c <- rnd . randomFrom $ ec
-          t <- getBestExpr c
-          (f, p) <- fitFun t
+          --t <- getBestExpr c
+          (f, p) <- fitFun c
           insertFitness c f p
           pure c
 
