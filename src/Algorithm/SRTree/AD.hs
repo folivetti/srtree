@@ -61,7 +61,7 @@ import qualified Data.Map.Strict as Map
 -- assumes root points to the loss function, so for an expression
 -- f(x) and the loss (y - (f(x))^2), root will point to "^"
 reverseModeEGraph :: SRMatrix -> PVector -> Maybe PVector -> EGraph -> ECache -> EClassId -> VS.Vector Double -> (Array D Ix1 Double, VS.Vector Double, ECache)
-reverseModeEGraph xss ys mYErr egraph cache root' theta = traceShow (cache'' IntMap.! root') $
+reverseModeEGraph xss ys mYErr egraph cache root' theta = traceShow (root, root', cache'' IntMap.! root') $
     (delay $ cache'' IntMap.! root
     , VS.fromList [M.sum $ cachedGrad Map.! (Param ix) | ix <- [0..p-1]]
     , cache'')
