@@ -77,28 +77,28 @@ instance HasExps FullParams where
 instance HasFuns FullParams where
   _funs (P _ _ _ fs) = fs
 
-type Rng a = StateT StdGen IO a
+type Rng m a = StateT StdGen m a
 
 -- auxiliary function to sample between False and True
-toss :: StateT StdGen IO Bool
+toss :: Monad m => Rng m Bool
 toss = state random
 {-# INLINE toss #-}
 
-tossBiased :: Double -> Rng Bool
+tossBiased :: Monad m => Double -> Rng m Bool
 tossBiased p = do r <- state random
                   pure (r < p)
 
-randomVal :: Rng Double
+randomVal :: Monad m => Rng m Double
 randomVal = state random
 
 -- returns a random element of a list
-randomFrom :: [a] -> StateT StdGen IO a
+randomFrom :: Monad m => [a] -> Rng m a
 randomFrom funs = do n <- randomRange (0, length funs - 1)
                      pure $ funs !! n
 {-# INLINE randomFrom #-}
 
 -- returns a random element within a range
-randomRange :: (Ord val, Random val) => (val, val) -> StateT StdGen IO val
+randomRange :: (Ord val, Random val, Monad m) => (val, val) -> Rng m val
 randomRange rng = state (randomR rng)
 {-# INLINE randomRange #-}
 
@@ -116,31 +116,31 @@ replaceFixChildren _             _ _ = Nothing
 
 -- | RndTree is a Monad Transformer to generate random trees of type `SRTree ix val` 
 -- given the parameters `p ix val` using the random number generator `StdGen`.
-type RndTree p = ReaderT p (StateT StdGen IO) (Fix SRTree)
+type RndTree m p = ReaderT p (StateT StdGen m) (Fix SRTree)
 
 -- | Returns a random variable, the parameter `p` must have the `HasVars` property
-randomVar :: HasVars p => RndTree p
+randomVar :: Monad m => HasVars p => RndTree m p
 randomVar = do vars <- asks _vars
                lift $ Fix . Var <$> randomFrom vars
 
 -- | Returns a random constant, the parameter `p` must have the `HasConst` property
-randomConst :: HasVals p => RndTree p
+randomConst :: (HasVals p, Monad m) => RndTree m p
 randomConst = do rng <- asks _range
                  lift $ Fix . Const <$> randomRange rng
 
 -- | Returns a random integer power node, the parameter `p` must have the `HasExps` property
-randomPow :: HasExps p => RndTree p
+randomPow :: (HasExps p, Monad m) => RndTree m p
 randomPow = do rng <- asks _exponents
                lift $ Fix . Bin Power 0 . Fix . Const . fromIntegral <$> randomRange rng
 
 -- | Returns a random function, the parameter `p` must have the `HasFuns` property
-randomFunction :: HasFuns p => RndTree p
+randomFunction :: (HasFuns p, Monad m) => RndTree m p
 randomFunction = do funs <- asks _funs
                     f <- lift $ randomFrom funs
                     lift $ pure $ Fix (Uni f 0)
 
 -- | Returns a random node, the parameter `p` must have every property.
-randomNode :: HasEverything p => RndTree p
+randomNode :: (HasEverything p, Monad m) => RndTree m p
 randomNode = do
   choice <- lift $ randomRange (0, 8 :: Int)
   case choice of
@@ -155,7 +155,7 @@ randomNode = do
     8 -> pure . Fix $ Bin Power 0 0
 
 -- | Returns a random non-terminal node, the parameter `p` must have every property.
-randomNonTerminal :: HasEverything p => RndTree p
+randomNonTerminal :: (HasEverything p, Monad m) => RndTree m p
 randomNonTerminal = do
   choice <- lift $ randomRange (0, 6 :: Int)
   case choice of
@@ -173,7 +173,7 @@ randomNonTerminal = do
 -- >>> tree <- evalStateT treeGen (mkStdGen 52)
 -- >>> showExpr tree
 -- "(-2.7631152121655838 / Exp((x0 / ((x0 * -7.681722660704317) - Log(3.378309080134594)))))"
-randomTreeTemplate :: HasEverything p => Int -> RndTree p
+randomTreeTemplate :: (HasEverything p, Monad m) => Int -> RndTree m p
 randomTreeTemplate 0      = do
   coin <- lift toss
   if coin
@@ -192,7 +192,7 @@ randomTreeTemplate budget = do
 -- >>> tree <- evalStateT treeGen (mkStdGen 42)
 -- >>> showExpr tree
 -- "Exp(Log((((7.784360517385774 * x0) - (3.6412224491658223 ^ x1)) ^ ((x0 ^ -4.09764995657091) + Log(-7.710216839988497)))))"
-randomTreeBalanced :: HasEverything p => Int -> RndTree p
+randomTreeBalanced :: (HasEverything p, Monad m) => Int -> RndTree m p
 randomTreeBalanced n | n <= 1 = do
   coin <- lift toss
   if coin
@@ -205,10 +205,10 @@ randomTreeBalanced n = do
     2 -> replaceFixChildren node <$> randomTreeBalanced (n `div` 2) <*> randomTreeBalanced (n `div` 2)    
 
 
-randomVec :: Int -> Rng PVector
+randomVec :: Monad m => Int -> Rng m PVector
 randomVec n = MA.fromList compMode <$> replicateM n (randomRange (-1, 1))
 
-randomTree :: Int -> Int -> Int -> Rng (Fix SRTree) -> Rng (SRTree ()) -> Bool -> Rng (Fix SRTree)
+randomTree :: Monad m => Int -> Int -> Int -> Rng m (Fix SRTree) -> Rng m (SRTree ()) -> Bool -> Rng  m (Fix SRTree)
 randomTree minDepth maxDepth maxSize genTerm genNonTerm grow
   | noSpaceLeft = genTerm
   | needNonTerm = genRecursion

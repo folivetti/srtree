@@ -38,12 +38,14 @@ import qualified Data.Map.Strict as Map
 import Control.Monad.Identity
 
 -- Environment of an e-graph with support to random generator and IO
-type RndEGraph a = EGraphST (StateT StdGen IO) a
+type RndEGraph a = EGraphST (StateT StdGen (StateT [ECache] IO)) a
 
 io :: IO a -> RndEGraph a
-io = lift . lift
+io = lift . lift . lift
 {-# INLINE io #-}
-rnd :: StateT StdGen IO a -> RndEGraph a
+getCache :: StateT [ECache] IO a -> RndEGraph a
+getCache = lift . lift
+rnd :: StateT StdGen (StateT [ECache] IO)  a -> RndEGraph a
 rnd = lift
 {-# INLINE rnd #-}
 
@@ -85,12 +87,14 @@ fitnessFunRep nRep nIter distribution dataTrain dataVal root cache = do
 --{-# INLINE fitnessFunRep #-}
 
 
-fitnessMV :: Bool -> Int -> Int -> Distribution -> [(DataSet, DataSet)] -> EClassId -> [ECache] -> RndEGraph (Double, [PVector], [ECache])
-fitnessMV shouldReparam nRep nIter distribution dataTrainsVals root caches = do
+fitnessMV :: Bool -> Int -> Int -> Distribution -> [(DataSet, DataSet)] -> EClassId -> RndEGraph (Double, [PVector])
+fitnessMV shouldReparam nRep nIter distribution dataTrainsVals root = do
   -- let tree = if shouldReparam then relabelParams _tree else relabelParamsOrder _tree
   -- WARNING: this should be done BEFORE inserting into egraph, so it's up to the algorithm'
+  caches <- getCache get
   response <- forM (Prelude.zip dataTrainsVals caches) $ \((dt, dv), cache) -> fitnessFunRep nRep nIter distribution dt dv root cache
-  pure (minimum (Prelude.map fst' response), Prelude.map snd' response, Prelude.map trd response )
+  getCache $ put (Prelude.map trd response)
+  pure (minimum (Prelude.map fst' response), Prelude.map snd' response)
   where fst' (a, _, _) = a
         snd' (_, a, _) = a
         trd  (_, _, a) = a
@@ -113,7 +117,7 @@ updateIfNothing fitFun ec = do
       case mf of
         Nothing -> do
           t <- getBestExpr ec
-          (f, p) <- fitFun t
+          (f, p, c) <- fitFun t
           insertFitness ec f p
           pure True
         Just _ -> pure False
