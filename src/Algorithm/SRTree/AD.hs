@@ -61,11 +61,12 @@ import qualified Data.Map.Strict as Map
 -- assumes root points to the loss function, so for an expression
 -- f(x) and the loss (y - (f(x))^2), root will point to "^"
 reverseModeEGraph :: SRMatrix -> PVector -> Maybe PVector -> EGraph -> ECache -> EClassId -> VS.Vector Double -> (Array D Ix1 Double, VS.Vector Double, ECache)
-reverseModeEGraph xss ys mYErr egraph cache root' theta = traceShow (root, root', cache'' IntMap.! root') $
-    (delay $ cache'' IntMap.! root
+reverseModeEGraph xss ys mYErr egraph cache root' theta = traceShow (root, root', rootVal) $
+    (delay $ rootVal
     , VS.fromList [M.sum $ cachedGrad Map.! (Param ix) | ix <- [0..p-1]]
     , cache'')
     where
+        rootVal = extractCache (cache'' IntMap.!? root', localcache' IntMap.!? root')
         root = canon root'
         yErr = fromJust mYErr
         m    = M.size ys
@@ -137,6 +138,10 @@ reverseModeEGraph xss ys mYErr egraph cache root' theta = traceShow (root, root'
             if | isJust global -> pure (fromJust global, False)
                | isJust local  -> pure (fromJust local, True)
                | otherwise     -> insertKey rt
+
+        extractCache (Nothing, Nothing) = error "no root info"
+        extractCache (Just r, _) = r
+        extractCache (_, Just r) = r
 
         ((cache'', localcache'), cachedGrad) = calcGrad root one `execState` ((cache', localcache), Map.empty)
 
