@@ -79,7 +79,7 @@ reverseModeEGraph xss ys mYErr egraph cache root' theta = traceShow (root, root'
                      Just rt' -> if rt == rt' then rt else canon rt'
 
         getNode rt' = let rt  = canon rt'
-                          cls = _eClass egraph IntMap.! rt
+                          cls = traceShow rt $ _eClass egraph IntMap.! rt
                       in (_best . _info) cls
 
         getId n = _eNodeToEClass egraph Map.! n
