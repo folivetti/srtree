@@ -79,7 +79,7 @@ evalCache xss egraph cache root' theta = cache'
                       in (_best . _info) cls
 
         getId n' = let n = runIdentity $ canonize n' `evalStateT` egraph
-                   in _eNodeToEClass egraph Map.! n
+                   in traceShow (n, n `Map.member` _eNodeToEClass egraph ) $ _eNodeToEClass egraph Map.! n
 
         ((cache', localcache), _) = evalCached root `execState` ((cache, IntMap.empty), Map.empty)
            where
