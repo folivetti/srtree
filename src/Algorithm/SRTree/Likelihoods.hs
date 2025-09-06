@@ -58,6 +58,8 @@ import Algorithm.EqSat.Build
 import Control.Monad.State.Strict
 import Control.Monad.Identity
 
+import Data.SRTree.Print
+
 -- | Supported distributions for negative log-likelihood
 -- MSE refers to mean squared error
 -- HGaussian is Gaussian with heteroscedasticity, where the error should be provided
@@ -66,7 +68,7 @@ data Distribution = MSE | Gaussian | HGaussian | Bernoulli | Poisson | ROXY
 
 -- | Sum-of-square errors or Sum-of-square residues
 sse :: SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
-sse xss ys tree theta = err
+sse xss ys tree theta = trace (showExpr tree) err
   where
     (Sz m) = M.size ys
     cmp    = getComp xss
