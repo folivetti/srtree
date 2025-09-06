@@ -66,7 +66,7 @@ fitnessFun :: Int -> Distribution -> DataSet -> DataSet -> EGraph -> EClassId ->
 fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) egraph root cache thetaOrig =
   if isNaN val -- || isNaN tr
     then (-(1/0), theta,cache') -- infinity
-    else (val, theta, cache')
+    else traceShow theta $ (val, theta, cache')
   where
     tree          = runIdentity $ getBestExpr root `evalStateT` egraph
     nParams       = countParamsUniqEg egraph root + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
