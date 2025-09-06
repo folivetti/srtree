@@ -90,10 +90,10 @@ evalCache xss egraph cache root' theta = cache'
         insertKey key = do
             isCachedGlobal <- gets ((key `IntMap.member`) . fst . fst)
             isCachedLocal  <- gets ((key `IntMap.member`) . snd . fst)
-            trace "hiho" $ when (not isCachedLocal && not isCachedGlobal) $ do
+            when (not isCachedLocal && not isCachedGlobal) $ do
                 let node = getNode key
                 (ev, toLocal) <- evalKey node
-                traceShow (ev, toLocal) $ modify' (insKey node ev toLocal)
+                modify' (insKey node ev toLocal)
             getVal key
 
         evalKey :: ENode -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
@@ -111,7 +111,7 @@ evalCache xss egraph cache root' theta = cache'
         insKey (Param _) _ _       s = s
         insKey node      v toLocal ((global,local), s) =
             let k = getId node
-            in if toLocal
+            in trace "k " $ traceShow k $ if toLocal
                   then ((global, IntMap.insert k v local), s)
                   else ((IntMap.insert k v global, local), s)
 
