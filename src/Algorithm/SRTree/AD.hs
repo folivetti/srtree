@@ -79,7 +79,7 @@ evalCache xss egraph cache root' theta = cache'
                       in (_best . _info) cls
 
         getId n' = let n = runIdentity $ canonize n' `evalStateT` egraph
-                   in traceShow (n, n `Map.member` _eNodeToEClass egraph, n' `Map.member` _eNodeToEClass egraph ) $ _eNodeToEClass egraph Map.! n
+                   in traceShow (n, n `Map.member` _eNodeToEClass egraph, n' `Map.member` _eNodeToEClass egraph ) $ _eNodeToEClass egraph Map.! n'
 
         ((cache', localcache), _) = evalCached root `execState` ((cache, IntMap.empty), Map.empty)
            where
@@ -127,11 +127,12 @@ evalCache xss egraph cache root' theta = cache'
                           Param ix -> evalKey n
                           _        -> getFromCache rt
         getFromCache rt = do
+            let rt' = canon rt
             global <- gets ((IntMap.!? rt) . fst . fst)
             local  <- gets ((IntMap.!? rt) . snd . fst)
             if | isJust global -> pure (fromJust global, False)
                | isJust local  -> pure (fromJust local, True)
-               | otherwise     -> traceShow ("recurse to ", rt) $ insertKey rt
+               | otherwise     -> traceShow ("recurse to ", rt, rt') $ insertKey rt
 
 -- reverse mode applied directly on an e-graph. Supports caching.
 -- assumes root points to the loss function, so for an expression
@@ -160,7 +161,7 @@ reverseModeEGraph xss ys mYErr egraph cache root' theta = traceShow (IntMap.keys
                       in (_best . _info) cls
 
         getId n' = let n = runIdentity $ canonize n' `evalStateT` egraph
-                   in _eNodeToEClass egraph Map.! n
+                   in _eNodeToEClass egraph Map.! n'
 
         ((cache', localcache), _) = evalCached root `execState` ((cache, IntMap.empty), Map.empty)
            where
