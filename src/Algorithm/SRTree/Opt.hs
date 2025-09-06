@@ -36,7 +36,7 @@ minimizeNLLEGraph :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> 
 minimizeNLLEGraph alg dist mYerr niter xss ys egraph root cache t0
   | niter == 0 = (t0, f, 0, cache')
   | n == 0     = (t0, f, 0, cache')
-  | otherwise  = trace "minmized" $ traceShow cache' $ traceShow f $ trace "finish f" $ traceShow (f, t0, aa) $ (t_opt', nll dist mYerr xss ys tree t_opt', nEvs, cache')
+  | otherwise  = (t_opt', nll dist mYerr xss ys tree t_opt', nEvs, cache')
   where
     (rt, eg)   = buildNLLEGraph dist (fromIntegral m) egraph root -- convertProtectedOps
     t0'        = toStorableVector t0

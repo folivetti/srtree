@@ -68,7 +68,7 @@ data Distribution = MSE | Gaussian | HGaussian | Bernoulli | Poisson | ROXY
 
 -- | Sum-of-square errors or Sum-of-square residues
 sse :: SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
-sse xss ys tree theta = trace (showExpr tree) err
+sse xss ys tree theta = err
   where
     (Sz m) = M.size ys
     cmp    = getComp xss

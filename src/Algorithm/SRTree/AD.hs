@@ -79,7 +79,7 @@ evalCache xss egraph cache root' theta = cache'
                       in (_best . _info) cls
 
         getId n' = let n = runIdentity $ canonize n' `evalStateT` egraph
-                   in traceShow (n, n `Map.member` _eNodeToEClass egraph, n' `Map.member` _eNodeToEClass egraph ) $ if n `Map.member` _eNodeToEClass egraph then  _eNodeToEClass egraph Map.! n else _eNodeToEClass egraph Map.! n'
+                   in if n `Map.member` _eNodeToEClass egraph then  _eNodeToEClass egraph Map.! n else _eNodeToEClass egraph Map.! n'
 
         ((cache', localcache), _) = evalCached root `execState` ((cache, IntMap.empty), Map.empty)
            where
@@ -99,7 +99,7 @@ evalCache xss egraph cache root' theta = cache'
         evalKey :: ENode -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
         evalKey (Var ix)     = pure $ (M.computeAs S $ xss <! ix, False)
         evalKey (Const v)    = pure $ (M.replicate comp m v, False)
-        evalKey (Param ix)   = trace "theta " $ traceShow (p, ix) $ pure $ (M.replicate comp m (theta VS.! ix), True)
+        evalKey (Param ix)   = pure $ (M.replicate comp m (theta VS.! ix), True)
         evalKey (Uni f t)    = do (v, b) <- getVal t
                                   pure $ (M.computeAs S . M.map (evalFun f) $ v, b)
         evalKey (Bin op l r) = do (vl, bl) <- getVal l
@@ -132,13 +132,13 @@ evalCache xss egraph cache root' theta = cache'
             local  <- gets ((IntMap.!? rt) . snd . fst)
             if | isJust global -> pure (fromJust global, False)
                | isJust local  -> pure (fromJust local, True)
-               | otherwise     -> traceShow ("recurse to ", rt, rt') $ insertKey rt
+               | otherwise     -> insertKey rt
 
 -- reverse mode applied directly on an e-graph. Supports caching.
 -- assumes root points to the loss function, so for an expression
 -- f(x) and the loss (y - (f(x))^2), root will point to "^"
 reverseModeEGraph :: SRMatrix -> PVector -> Maybe PVector -> EGraph -> ECache -> EClassId -> VS.Vector Double -> (Array D Ix1 Double, VS.Vector Double)
-reverseModeEGraph xss ys mYErr egraph cache root' theta = traceShow (IntMap.keys cache, Map.keys cachedGrad, p) $
+reverseModeEGraph xss ys mYErr egraph cache root' theta =
     (delay $ rootVal
     , VS.fromList [M.sum $ cachedGrad Map.! (Param ix) | ix <- [0..p-1]]
     )
