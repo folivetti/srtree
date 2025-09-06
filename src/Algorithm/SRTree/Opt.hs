@@ -36,7 +36,7 @@ minimizeNLLEGraph :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> 
 minimizeNLLEGraph alg dist mYerr niter xss ys egraph root cache t0
   | niter == 0 = (t0, f, 0, cache')
   | n == 0     = (t0, f, 0, cache')
-  | otherwise  = traceShow (f, t0) $ (t0, f, 0, cache') -- (t_opt', nll dist mYerr xss ys tree t_opt', nEvs, cache')
+  | otherwise  = traceShow (1, t0) $ (t0, 1, 0, cache') -- (t_opt', nll dist mYerr xss ys tree t_opt', nEvs, cache')
   where
     (rt, eg)   = buildNLLEGraph dist (fromIntegral m) egraph root -- convertProtectedOps
     t0'        = toStorableVector t0
@@ -52,8 +52,7 @@ minimizeNLLEGraph alg dist mYerr niter xss ys egraph root cache t0
     algorithm  = alg funAndGrad (Just $ VectorStorage $ fromIntegral n)
     stop       = ObjectiveRelativeTolerance 1e-6 :| [ObjectiveAbsoluteTolerance 1e-6, MaximumEvaluations (fromIntegral niter)]
     problem    = LocalProblem (fromIntegral n) stop algorithm
-    aaa        = traceShow f $ minimizeLocal problem t0'
-    (t_opt, nEvs) = case aaa of
+    (t_opt, nEvs) = case minimizeLocal problem t0' of
                       Right sol -> (solutionParams sol, nEvals sol)
                       Left e    -> (t0', 0)
     t_opt'      = fromStorableVector compMode t_opt
