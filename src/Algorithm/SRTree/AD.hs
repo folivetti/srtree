@@ -99,7 +99,7 @@ evalCache xss egraph cache root' theta = cache'
         evalKey :: ENode -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
         evalKey (Var ix)     = pure $ (M.computeAs S $ xss <! ix, False)
         evalKey (Const v)    = pure $ (M.replicate comp m v, False)
-        evalKey (Param ix)   = pure $ (M.replicate comp m (theta VS.! ix), True)
+        evalKey (Param ix)   = trace "theta " $ traceShow (p, ix) $ pure $ (M.replicate comp m (theta VS.! ix), True)
         evalKey (Uni f t)    = do (v, b) <- getVal t
                                   pure $ (M.computeAs S . M.map (evalFun f) $ v, b)
         evalKey (Bin op l r) = do (vl, bl) <- getVal l
