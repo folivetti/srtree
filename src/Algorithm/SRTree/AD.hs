@@ -79,7 +79,7 @@ evalCache xss egraph cache root' theta = cache'
                       in (_best . _info) cls
 
         getId n' = let n = runIdentity $ canonize n' `evalStateT` egraph
-                   in traceShow (n, n `Map.member` _eNodeToEClass egraph, n' `Map.member` _eNodeToEClass egraph ) $ _eNodeToEClass egraph Map.! n'
+                   in traceShow (n, n `Map.member` _eNodeToEClass egraph, n' `Map.member` _eNodeToEClass egraph ) $ if n `Map.member` _eNodeToEClass egraph then  _eNodeToEClass egraph Map.! n else _eNodeToEClass egraph Map.! n'
 
         ((cache', localcache), _) = evalCached root `execState` ((cache, IntMap.empty), Map.empty)
            where
@@ -161,7 +161,7 @@ reverseModeEGraph xss ys mYErr egraph cache root' theta = traceShow (IntMap.keys
                       in (_best . _info) cls
 
         getId n' = let n = runIdentity $ canonize n' `evalStateT` egraph
-                   in _eNodeToEClass egraph Map.! n'
+                   in if n `Map.member` _eNodeToEClass egraph then  _eNodeToEClass egraph Map.! n else _eNodeToEClass egraph Map.! n'
 
         ((cache', localcache), _) = evalCached root `execState` ((cache, IntMap.empty), Map.empty)
            where
