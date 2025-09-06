@@ -143,7 +143,7 @@ evalCache xss ys mYErr egraph cache root' theta = cache'
 -- assumes root points to the loss function, so for an expression
 -- f(x) and the loss (y - (f(x))^2), root will point to "^"
 reverseModeEGraph :: SRMatrix -> PVector -> Maybe PVector -> EGraph -> ECache -> EClassId -> VS.Vector Double -> (Array D Ix1 Double, VS.Vector Double)
-reverseModeEGraph xss ys mYErr egraph cache root' theta = traceShow (IntMap.keys cache, p) $
+reverseModeEGraph xss ys mYErr egraph cache root' theta = traceShow (IntMap.keys cache, Map.keys cachedGrad, p) $
     (delay $ rootVal
     , VS.fromList [M.sum $ cachedGrad Map.! (Param ix) | ix <- [0..p-1]]
     )
