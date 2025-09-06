@@ -131,7 +131,7 @@ evalCache xss egraph cache root' theta = cache'
             local  <- gets ((IntMap.!? rt) . snd . fst)
             if | isJust global -> pure (fromJust global, False)
                | isJust local  -> pure (fromJust local, True)
-               | otherwise     -> insertKey rt
+               | otherwise     -> traceShow ("recurse to ", rt) $ insertKey rt
 
 -- reverse mode applied directly on an e-graph. Supports caching.
 -- assumes root points to the loss function, so for an expression
