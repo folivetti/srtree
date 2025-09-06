@@ -71,7 +71,7 @@ fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) egraph roo
     else traceShow (theta, nParams) $ (val, theta, cache')
   where
     tree          = runIdentity $ getBestExpr root `evalStateT` egraph
-    nParams       = countParamsUniqEg egraph root + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
+    nParams       = countParamsEg egraph root + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
     (theta, _, _, cache') = minimizeNLLEGraph VAR1 distribution mYErr nIter x y egraph root cache thetaOrig
     evalF a b c   = negate $ nll distribution c a b tree $ if nParams == 0 then thetaOrig else theta
     val           = evalF x_val y_val mYErr_val
