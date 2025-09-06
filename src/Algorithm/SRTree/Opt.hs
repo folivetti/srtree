@@ -27,6 +27,7 @@ import Algorithm.EqSat.Egraph hiding ( size )
 import Algorithm.EqSat.Build
 import Control.Monad.State.Strict
 import Control.Monad.Identity
+import Algorithm.SRTree.AD (evalCache)
 
 import Debug.Trace
 
@@ -43,8 +44,9 @@ minimizeNLLEGraph alg dist mYerr niter xss ys egraph root cache t0
     (Sz m)     = size ys
     tree       = runIdentity $ getBestExpr root `evalStateT` egraph
 
-    funAndGrad t   = let (f, g, _) = gradNLLEGraph dist xss ys mYerr eg cache' rt t in (f,g)
-    (f, _, cache') = gradNLLEGraph dist xss ys mYerr eg cache rt t0' -- if there's no parameter or no iterations
+    funAndGrad = gradNLLEGraph dist xss ys mYerr eg cache' rt
+    (f, _) = gradNLLEGraph dist xss ys mYerr eg cache rt t0' -- if there's no parameter or no iterations
+    cache' = evalCache xss ys mYerr eg cache root t0'
 
 
     algorithm  = alg funAndGrad (Just $ VectorStorage $ fromIntegral n)

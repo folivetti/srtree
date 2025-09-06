@@ -418,31 +418,31 @@ gradNLLGraph ROXY xss ys mYerr tree theta =
 
 -- | e-graph support
 gradNLLEGraph MSE xss ys mYerr egraph cache root theta =
-  (M.sum yhat, grad', cache')
+  (M.sum yhat, grad')
   where
-    (yhat, grad, cache') = reverseModeEGraph xss ys mYerr egraph cache root theta
+    (yhat, grad) = reverseModeEGraph xss ys mYerr egraph cache root theta
     grad'                = VS.map nanTo0 grad
 gradNLLEGraph Gaussian xss ys mYerr egraph cache root theta =
-  (M.sum yhat, grad', cache')
+  (M.sum yhat, grad')
   where
-    (yhat, grad, cache') = reverseModeEGraph xss ys mYerr egraph cache root theta
+    (yhat, grad) = reverseModeEGraph xss ys mYerr egraph cache root theta
     grad'                = VS.map nanTo0 grad
 gradNLLEGraph Bernoulli xss ys mYerr egraph cache root theta
   | M.any (\x -> x /= 0 && x /= 1) ys = error "For Bernoulli distribution the output must be either 0 or 1."
-  | otherwise                         = (M.sum yhat, grad', cache')
+  | otherwise                         = (M.sum yhat, grad')
   where
-    (yhat, grad, cache') = reverseModeEGraph xss ys mYerr egraph cache root theta
+    (yhat, grad) = reverseModeEGraph xss ys mYerr egraph cache root theta
     grad'        = VS.map nanTo0 grad
 gradNLLEGraph Poisson xss ys mYerr egraph cache root theta
   | M.any (<0) ys    = error "For Poisson distribution the output must be non-negative."
-  | otherwise        = (M.sum yhat, grad', cache')
+  | otherwise        = (M.sum yhat, grad')
   where
-    (yhat, grad, cache') = reverseModeEGraph xss ys mYerr egraph cache root theta
+    (yhat, grad) = reverseModeEGraph xss ys mYerr egraph cache root theta
     grad'                = VS.map nanTo0 grad
 gradNLLEGraph ROXY xss ys mYerr egraph cache root theta =
-  ((*0.5) $ M.sum yhat, VS.map (*(0.5)) $ grad', cache')
+  ((*0.5) $ M.sum yhat, VS.map (*(0.5)) $ grad')
   where
-    (yhat, grad, cache') = reverseModeEGraph xss ys mYerr egraph cache root theta
+    (yhat, grad) = reverseModeEGraph xss ys mYerr egraph cache root theta
     grad'                = VS.map nanTo0 grad
 
 -- | Fisher information of negative log-likelihood

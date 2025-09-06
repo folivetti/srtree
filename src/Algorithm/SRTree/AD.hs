@@ -25,6 +25,7 @@ module Algorithm.SRTree.AD
          , reverseModeEGraph
          , reverseModeGraph
          , forwardModeUniqueJac
+         , evalCache
          ) where
 
 import Control.Monad (forM_, foldM, when)
@@ -58,14 +59,94 @@ import Control.Monad.Identity
 
 import qualified Data.Map.Strict as Map
 
+evalCache :: SRMatrix -> PVector -> Maybe PVector -> EGraph -> ECache -> EClassId -> VS.Vector Double -> ECache
+evalCache xss ys mYErr egraph cache root' theta = cache'
+    where
+        root = canon root'
+        yErr = fromJust mYErr
+        m    = M.size ys
+        p    = VS.length theta
+        comp = M.getComp xss
+        one :: Array S Ix1 Double
+        one  = M.replicate comp m 1
+
+        canon rt = case _canonicalMap egraph IntMap.!? rt of
+                     Nothing -> error "wrong canon"
+                     Just rt' -> if rt == rt' then rt else canon rt'
+
+        getNode rt' = let rt  = canon rt'
+                          cls = _eClass egraph IntMap.! rt
+                      in (_best . _info) cls
+
+        getId n' = let n = runIdentity $ canonize n `evalStateT` egraph
+                   in traceShow (n, n `Map.member` _eNodeToEClass egraph) $ _eNodeToEClass egraph Map.! n
+
+        ((cache', localcache), _) = evalCached root `execState` ((cache, IntMap.empty), Map.empty)
+           where
+            evalCached :: EClassId -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
+            evalCached rt = insertKey rt
+
+        insertKey :: EClassId -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
+        insertKey key = do
+            isCachedGlobal <- gets ((key `IntMap.member`) . fst . fst)
+            isCachedLocal  <- gets ((key `IntMap.member`) . snd . fst)
+            when (not isCachedLocal && not isCachedGlobal) $ do
+                let node = getNode key
+                (ev, toLocal) <- evalKey node
+                modify' (insKey node ev toLocal)
+            getVal key
+
+        evalKey :: ENode -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
+        evalKey (Var ix)     = pure $ if | ix == -1  -> (ys, False)
+                                         | ix == -2  -> (yErr, False)
+                                         | otherwise -> (M.computeAs S $ xss <! ix, False)
+        evalKey (Const v)    = pure $ (M.replicate comp m v, False)
+        evalKey (Param ix)   = pure $ (M.replicate comp m (theta VS.! ix), True)
+        evalKey (Uni f t)    = do (v, b) <- getVal t
+                                  pure $ (M.computeAs S . M.map (evalFun f) $ v, b)
+        evalKey (Bin op l r) = do (vl, bl) <- getVal l
+                                  (vr, br) <- getVal r
+                                  pure $ (M.computeAs S $ M.zipWith (evalOp op) vl vr, bl || br)
+
+        insKey (Var   _) _ _       s = s
+        insKey (Const _) _ _       s = s
+        insKey (Param _) _ _       s = s
+        insKey node      v toLocal ((global,local), s) =
+            let k = getId node
+            in if toLocal
+                  then ((global, IntMap.insert k v local), s)
+                  else ((IntMap.insert k v global, local), s)
+
+        insertLocal k v = do (c1, c2) <- get
+                             put (c1, IntMap.insert k v c2)
+        insertGlobal k v = do (c1, c2) <- get
+                              put (IntMap.insert k v c1, c2)
+        getVal rt' = do let rt = canon rt'
+                            n  = getNode rt
+                        case n of
+                          Var ix   -> evalKey n
+                          Const v  -> evalKey n
+                          Param ix -> evalKey n
+                          _        -> getFromCache rt
+        getFromCache rt = do
+            global <- gets ((IntMap.!? rt) . fst . fst)
+            local  <- gets ((IntMap.!? rt) . snd . fst)
+            if | isJust global -> pure (fromJust global, False)
+               | isJust local  -> pure (fromJust local, True)
+               | otherwise     -> insertKey rt
+
+        extractCache (Nothing, Nothing) = error "no root info"
+        extractCache (Just r, _) = r
+        extractCache (_, Just r) = r
+
 -- reverse mode applied directly on an e-graph. Supports caching.
 -- assumes root points to the loss function, so for an expression
 -- f(x) and the loss (y - (f(x))^2), root will point to "^"
-reverseModeEGraph :: SRMatrix -> PVector -> Maybe PVector -> EGraph -> ECache -> EClassId -> VS.Vector Double -> (Array D Ix1 Double, VS.Vector Double, ECache)
+reverseModeEGraph :: SRMatrix -> PVector -> Maybe PVector -> EGraph -> ECache -> EClassId -> VS.Vector Double -> (Array D Ix1 Double, VS.Vector Double)
 reverseModeEGraph xss ys mYErr egraph cache root' theta = traceShow (Map.keys cachedGrad, p) $
     (delay $ rootVal
     , VS.fromList [M.sum $ cachedGrad Map.! (Param ix) | ix <- [0..p-1]]
-    , cache'')
+    )
     where
         rootVal = extractCache (cache'' IntMap.!? root', localcache' IntMap.!? root')
         root = canon root'
