@@ -93,7 +93,7 @@ evalCache xss egraph cache root' theta = cache'
             trace "hiho" $ when (not isCachedLocal && not isCachedGlobal) $ do
                 let node = getNode key
                 (ev, toLocal) <- evalKey node
-                modify' (insKey node ev toLocal)
+                traceShow (ev, toLocal) $ modify' (insKey node ev toLocal)
             getVal key
 
         evalKey :: ENode -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
