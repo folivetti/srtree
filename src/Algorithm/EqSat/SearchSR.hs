@@ -71,7 +71,7 @@ fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) egraph roo
     else traceShow (theta, nParams) $ (val, theta, cache')
   where
     tree          = runIdentity $ getBestExpr root `evalStateT` egraph
-    nParams       = countParamsEg egraph root + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
+    nParams       = countParamsUniqEg egraph root + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
     (theta, _, _, cache') = minimizeNLLEGraph VAR1 distribution mYErr nIter x y egraph root cache thetaOrig
     evalF a b c   = negate $ nll distribution c a b tree $ if nParams == 0 then thetaOrig else theta
     val           = evalF x_val y_val mYErr_val
@@ -81,7 +81,7 @@ fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) egraph roo
 fitnessFunRep :: Int -> Int -> Distribution -> DataSet -> DataSet -> EClassId -> ECache -> RndEGraph (Double, PVector, ECache)
 fitnessFunRep nRep nIter distribution dataTrain dataVal root cache = do
     egraph <- get
-    let nParams = countParamsEg egraph root + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
+    let nParams = countParamsUniqEg egraph root + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
         fst' (a, _, _) = a
     thetaOrigs <- replicateM nRep (rnd $ randomVec nParams)
     let fits = maximumBy (compare `on` fst') $ Prelude.map (fitnessFun nIter distribution dataTrain dataVal egraph root cache) thetaOrigs
