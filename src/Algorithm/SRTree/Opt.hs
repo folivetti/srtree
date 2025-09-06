@@ -36,7 +36,7 @@ minimizeNLLEGraph :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> 
 minimizeNLLEGraph alg dist mYerr niter xss ys egraph root cache t0
   | niter == 0 = (t0, f, 0, cache')
   | n == 0     = (t0, f, 0, cache')
-  | otherwise  = traceShow t_opt' $ (t_opt', nll dist mYerr xss ys tree t_opt', nEvs, cache')
+  | otherwise  = traceShow (f, t0) $ (t_opt', nll dist mYerr xss ys tree t_opt', nEvs, cache')
   where
     (rt, eg)   = buildNLLEGraph dist (fromIntegral m) egraph root -- convertProtectedOps
     t0'        = toStorableVector t0
@@ -46,7 +46,7 @@ minimizeNLLEGraph alg dist mYerr niter xss ys egraph root cache t0
 
     funAndGrad = gradNLLEGraph dist xss ys mYerr eg cache' rt
     (f, _) = gradNLLEGraph dist xss ys mYerr eg cache rt t0' -- if there's no parameter or no iterations
-    cache' = evalCache xss ys mYerr eg cache root t0'
+    cache' = evalCache xss ys mYerr egraph cache root t0'
 
 
     algorithm  = alg funAndGrad (Just $ VectorStorage $ fromIntegral n)
