@@ -37,6 +37,8 @@ import Data.List ( maximumBy )
 import qualified Data.Map.Strict as Map
 import Control.Monad.Identity
 
+import Debug.Trace
+
 -- Environment of an e-graph with support to random generator and IO
 type RndEGraph a = EGraphST (StateT StdGen (StateT [ECache] IO)) a
 
