@@ -46,7 +46,7 @@ minimizeNLLEGraph alg dist mYerr niter xss ys egraph root cache t0
 
     funAndGrad = gradNLLEGraph dist xss ys mYerr eg cache' rt
     (f, _) = gradNLLEGraph dist xss ys mYerr eg cache rt t0' -- if there's no parameter or no iterations
-    cache' = evalCache xss ys mYerr egraph cache root t0'
+    cache' = evalCache xss egraph cache root t0'
 
 
     algorithm  = alg funAndGrad (Just $ VectorStorage $ fromIntegral n)

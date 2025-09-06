@@ -59,12 +59,12 @@ import Control.Monad.Identity
 
 import qualified Data.Map.Strict as Map
 
-evalCache :: SRMatrix -> PVector -> Maybe PVector -> EGraph -> ECache -> EClassId -> VS.Vector Double -> ECache
-evalCache xss ys mYErr egraph cache root' theta = cache'
+evalCache :: SRMatrix -> EGraph -> ECache -> EClassId -> VS.Vector Double -> ECache
+evalCache xss egraph cache root' theta = cache'
     where
+        (Sz2 _ m') = M.size xss
+        m    = Sz1 m'
         root = canon root'
-        yErr = fromJust mYErr
-        m    = M.size ys
         p    = VS.length theta
         comp = M.getComp xss
         one :: Array S Ix1 Double
@@ -90,16 +90,14 @@ evalCache xss ys mYErr egraph cache root' theta = cache'
         insertKey key = do
             isCachedGlobal <- gets ((key `IntMap.member`) . fst . fst)
             isCachedLocal  <- gets ((key `IntMap.member`) . snd . fst)
-            when (not isCachedLocal && not isCachedGlobal) $ do
+            trace "hiho" $ when (not isCachedLocal && not isCachedGlobal) $ do
                 let node = getNode key
                 (ev, toLocal) <- evalKey node
                 modify' (insKey node ev toLocal)
             getVal key
 
         evalKey :: ENode -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
-        evalKey (Var ix)     = pure $ if | ix == -1  -> (ys, False)
-                                         | ix == -2  -> (yErr, False)
-                                         | otherwise -> (M.computeAs S $ xss <! ix, False)
+        evalKey (Var ix)     = pure $ (M.computeAs S $ xss <! ix, False)
         evalKey (Const v)    = pure $ (M.replicate comp m v, False)
         evalKey (Param ix)   = pure $ (M.replicate comp m (theta VS.! ix), True)
         evalKey (Uni f t)    = do (v, b) <- getVal t
@@ -134,10 +132,6 @@ evalCache xss ys mYErr egraph cache root' theta = cache'
             if | isJust global -> pure (fromJust global, False)
                | isJust local  -> pure (fromJust local, True)
                | otherwise     -> insertKey rt
-
-        extractCache (Nothing, Nothing) = error "no root info"
-        extractCache (Just r, _) = r
-        extractCache (_, Just r) = r
 
 -- reverse mode applied directly on an e-graph. Supports caching.
 -- assumes root points to the loss function, so for an expression
