@@ -87,7 +87,8 @@ evalCache xss egraph cache root' theta = cache'
             evalCached rt = insertKey rt
 
         insertKey :: EClassId -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
-        insertKey key = do
+        insertKey key' = do
+            let key = canon key'
             isCachedGlobal <- gets ((key `IntMap.member`) . fst . fst)
             isCachedLocal  <- gets ((key `IntMap.member`) . snd . fst)
             when (not isCachedLocal && not isCachedGlobal) $ do
@@ -127,7 +128,6 @@ evalCache xss egraph cache root' theta = cache'
                           Param ix -> evalKey n
                           _        -> getFromCache rt
         getFromCache rt = do
-            let rt' = canon rt
             global <- gets ((IntMap.!? rt) . fst . fst)
             local  <- gets ((IntMap.!? rt) . snd . fst)
             if | isJust global -> pure (fromJust global, False)
@@ -169,7 +169,8 @@ reverseModeEGraph xss ys mYErr egraph cache root' theta =
             evalCached rt = insertKey rt
 
         insertKey :: EClassId -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
-        insertKey key = do
+        insertKey key' = do
+            let key = canon key'
             isCachedGlobal <- gets ((key `IntMap.member`) . fst . fst)
             isCachedLocal  <- gets ((key `IntMap.member`) . snd . fst)
             when (not isCachedLocal && not isCachedGlobal) $ do
