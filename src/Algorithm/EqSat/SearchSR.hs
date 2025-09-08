@@ -101,6 +101,16 @@ fitnessMV shouldReparam nRep nIter distribution dataTrainsVals root = do
         snd' (_, a, _) = a
         trd  (_, _, a) = a
 
+fitnessMVNoCache :: Bool -> Int -> Int -> Distribution -> [(DataSet, DataSet)] -> EClassId -> RndEGraph (Double, [PVector])
+fitnessMVNoCache shouldReparam nRep nIter distribution dataTrainsVals root = do
+  -- let tree = if shouldReparam then relabelParams _tree else relabelParamsOrder _tree
+  -- WARNING: this should be done BEFORE inserting into egraph, so it's up to the algorithm'
+  caches <- getCache get
+  response <- forM (Prelude.zip dataTrainsVals caches) $ \((dt, dv), cache) -> fitnessFunRep nRep nIter distribution dt dv root cache
+  pure (minimum (Prelude.map fst' response), Prelude.map snd' response)
+  where fst' (a, _, _) = a
+        snd' (_, a, _) = a
+        trd  (_, _, a) = a
 
 
 
