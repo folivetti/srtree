@@ -43,7 +43,7 @@ minimizeNLLEGraph alg dist mYerr niter xss ys egraph root cache t0
     (Sz n)     = size t0
     (Sz m)     = size ys
     tree       = runIdentity $ getBestExpr root `evalStateT` egraph
-    aa = gradNLLEGraph dist xss ys mYerr eg cache' rt t_opt'
+    aa = gradNLLEGraph dist xss ys mYerr eg cache' rt t_opt
 
     funAndGrad = gradNLLEGraph dist xss ys mYerr eg cache' rt
     (f, _) = gradNLLEGraph dist xss ys mYerr eg cache' rt t0' -- if there's no parameter or no iterations
