@@ -466,6 +466,37 @@ getAllExpressionsFrom eId' = do
         pure (t:ts)
 {-# INLINE getAllExpressionsFrom #-}
 
+getNExpressionsFrom :: Monad m => Int -> EClassId -> EGraphST m [Fix SRTree]
+getNExpressionsFrom n eId' = do
+  eId <- canonical eId'
+  nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! eId) . _eClass)
+  concat <$> go n nodes
+  where
+    isTerm (Var _) = True
+    isTerm (Const _) = True
+    isTerm (Param _) = True
+    isTerm _ = False
+    toTree (Var ix) = Fix $ Var ix
+    toTree (Const x) = Fix $ Const x
+    toTree (Param ix) = Fix $ Param ix
+    toTree _ = undefined
+
+    go n' []     = pure []
+    go n' (node:ns) = do
+        t <- Prelude.map Fix <$> case node of
+                Bin op l r -> do l' <- getNExpressionsFrom n' l
+                                 r' <- getNExpressionsFrom n' r
+                                 pure $ Prelude.take n [Bin op li ri | li <- l', ri <- r']
+                Uni f t    -> Prelude.map (Uni f) <$> getNExpressionsFrom n' t
+                Var ix     -> pure [Var ix]
+                Const x    -> pure [Const x]
+                Param ix   -> pure [Param ix]
+        let n'' = n' - length t
+        if n'' <= 0
+          then pure [t]
+          else do ts <- go n' ns
+                  pure (t:ts)
+
 getAllChildEClasses :: Monad m => EClassId -> EGraphST m [EClassId]
 getAllChildEClasses eId' = do
   eId <- canonical eId'
