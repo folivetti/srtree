@@ -137,7 +137,7 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty
                        -- if nothing changed, return
                        if it == 1 || (eNodes' == eNodes && eClasses' == eClasses)
                           then pure (True, it)
-                          else if IntMap.size eClasses' > 500 -- maximum allowed number of e-classes. TODO: customize
+                          else if IntMap.size eClasses' > 1500 -- maximum allowed number of e-classes. TODO: customize
                                  then pure (False, it)
                                  else go (it-1) sch'
 
