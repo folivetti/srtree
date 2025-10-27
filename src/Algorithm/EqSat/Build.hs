@@ -467,10 +467,14 @@ getAllExpressionsFrom eId' = do
 {-# INLINE getAllExpressionsFrom #-}
 
 getNExpressionsFrom :: Monad m => Int -> EClassId -> EGraphST m [Fix SRTree]
-getNExpressionsFrom n eId' = do
+getNExpressionsFrom n eId' = getNExpressionsFrom' n 10 eId' 
+
+getNExpressionsFrom' :: Monad m => Int -> Int -> EClassId -> EGraphST m [Fix SRTree]
+getNExpressionsFrom' _ 0 _ = pure []
+getNExpressionsFrom' n d eId' = do
   eId <- canonical eId'
   nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! eId) . _eClass)
-  concat <$> go n nodes
+  concat <$> go n d nodes
   where
     isTerm (Var _) = True
     isTerm (Const _) = True
@@ -481,21 +485,22 @@ getNExpressionsFrom n eId' = do
     toTree (Param ix) = Fix $ Param ix
     toTree _ = undefined
 
-    go n' []     = pure []
-    go n' (node:ns) = do
-        t <- Prelude.map Fix <$> case node of
-                Bin op l r -> do l' <- getNExpressionsFrom n' l
-                                 r' <- getNExpressionsFrom n' r
+    go n' _ []     = pure []
+    go n' 0 ts     = pure []
+    go n' d (node:ns) = do
+        tt <- Prelude.map Fix <$> case node of
+                Bin op l r -> do l' <- getNExpressionsFrom' n' (d-1) l
+                                 r' <- getNExpressionsFrom' n' (d-1) r
                                  pure $ Prelude.take n [Bin op li ri | li <- l', ri <- r']
-                Uni f t    -> Prelude.map (Uni f) <$> getNExpressionsFrom n' t
+                Uni f t    -> Prelude.map (Uni f) <$> getNExpressionsFrom' n' (d-1) t
                 Var ix     -> pure [Var ix]
                 Const x    -> pure [Const x]
                 Param ix   -> pure [Param ix]
-        let n'' = n' - length t
+        let n'' = n' - length tt
         if n'' <= 0
-          then pure [t]
-          else do ts <- go n' ns
-                  pure (t:ts)
+          then pure [tt]
+          else do ts <- go n'' (d-1) ns
+                  pure (tt:ts)
 
 getAllChildEClasses :: Monad m => EClassId -> EGraphST m [EClassId]
 getAllChildEClasses eId' = do
