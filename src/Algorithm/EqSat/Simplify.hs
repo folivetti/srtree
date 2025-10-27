@@ -119,6 +119,9 @@ rewriteBasic =
     -- , "a" * (("x" * "y") + ("z" * "w")) :=> ("a" * "x") * ("y" + ("z" / "x") * "w") :| isConstPt "a" :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
     , (("x" * "y") - ("z" * "w")) :=> "x" * ("y" - ("z" / "x") * "w") :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
     , (("x" * "y") * ("z" * "w")) :=> ("x" * "z") * ("y" * "w") :| isConstPt "x" :| isConstPt "z"
+    , "x" * "x" :=> "x" ** 2 
+    , ("x" + "y") ** 2 :=> "x" ** 2 + 2 * "x" * "y" + "y" ** 2 
+    , "x" ** 2 + "x" * "y" :=> "x" * ("x" + "y")
     -- , "x" + "y" :=> "y" * ("x" * "y" ** (-1) + 1) :| isNotZero "y" -- GABRIEL 
     -- , "x" + "y" * "z" :=> "y" * ("x" * "y" ** (-1) + "z") :| isNotZero "y" -- GABRIEL 
     ]
