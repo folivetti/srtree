@@ -148,6 +148,7 @@ rewritesFun =
     --, recip "x" :==: "x" ** (-1) -- GABRIEL 
     --, "x" / "y" :==: "x" * "y" ** (-1) -- GABRIEL 
     , abs "x" ** "y" :=> "x" ** "y" :| isEven "y"
+    , sqrt ("x" * "x") :=> abs "x"
     ]
 
 -- Rules that reduces redundant parameters
