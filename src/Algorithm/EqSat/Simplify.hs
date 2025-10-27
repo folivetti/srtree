@@ -103,6 +103,7 @@ rewriteBasic =
     --, ("x" ** "y") * ("x" ** "z") :=> "x" ** ("y" + "z") -- :| isPositive "x"
     --, (powabs "x" "y") * (powabs "x" "z") :=> powabs "x" ("y" + "x")
     , ("x" + "y") + "z" :=> "x" + ("y" + "z")
+    , ("x" + "y") - "z" :=> "x" + ("y" - "z")
     --, ("x" + "y") - "z" :=> "x" + ("y" - "z") -- TODO: check that I don't need that
     , ("x" * "y") * "z" :=> "x" * ("y" * "z")
     , ("x" * "y") + ("x" * "z") :=> "x" * ("y" + "z")
@@ -122,8 +123,6 @@ rewriteBasic =
     , "x" * "x" :=> "x" ** 2 
     , ("x" + "y") ** 2 :=> "x" ** 2 + 2 * "x" * "y" + "y" ** 2 
     , "x" ** 2 + "x" * "y" :=> "x" * ("x" + "y")
-    , ("x" + "y") + "z" :=> "x" + ("y" + "z") :| isConstPt "y" :| isConstPt "z"
-    , ("x" * "y") * "z" :=> "x" * ("y" * "z") :| isConstPt "y" :| isConstPt "z"
     -- , "x" + "y" :=> "y" * ("x" * "y" ** (-1) + 1) :| isNotZero "y" -- GABRIEL 
     -- , "x" + "y" * "z" :=> "y" * ("x" * "y" ** (-1) + "z") :| isNotZero "y" -- GABRIEL 
     ]
