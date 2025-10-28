@@ -274,7 +274,10 @@ createDBBest = do modify' $ over (eDB . patDB) (const Map.empty)
 addToDB :: Monad m => ENode -> EClassId -> EGraphST m () -- State DB ()
 addToDB enode' eid = do
   isConst <- gets (_consts . _info . (IntMap.! eid) . _eClass)
-  enode <- if (isConst == NotConst) then pure enode' else gets (_best . _info . (IntMap.! eid) . _eClass)
+  let enode = case isConst of
+                ConstVal x -> Const x
+                ParamIx  x -> Param x
+                _          -> enode'
   let ids = eid : childrenOf enode -- we will add the e-class id and the children ids
       op  = getOperator enode    -- changes Bin op l r to Bin op () () so `op` as a single entry in the DB
   trie <- gets ((Map.!? op) . _patDB . _eDB)       -- gets the entry for op, if it exists
