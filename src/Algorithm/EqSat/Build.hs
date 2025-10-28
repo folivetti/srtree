@@ -480,7 +480,7 @@ getNExpressionsFrom' _ 0 _ = pure []
 getNExpressionsFrom' n d eId' = do
   eId <- canonical eId'
   nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! eId) . _eClass)
-  concat <$> go n d nodes
+  traceShow nodes $ (concat <$> go n d nodes)
   where
     isTerm (Var _) = True
     isTerm (Const _) = True
