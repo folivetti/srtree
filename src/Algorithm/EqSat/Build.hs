@@ -473,7 +473,7 @@ getAllExpressionsFrom eId' = do
 {-# INLINE getAllExpressionsFrom #-}
 
 getNExpressionsFrom :: Monad m => Int -> EClassId -> EGraphST m [Fix SRTree]
-getNExpressionsFrom n eId' = getNExpressionsFrom' n 50 eId' 
+getNExpressionsFrom n eId' = getNExpressionsFrom' n 20 eId' 
 
 getNExpressionsFrom' :: Monad m => Int -> Int -> EClassId -> EGraphST m [Fix SRTree]
 getNExpressionsFrom' _ 0 _ = pure []
