@@ -273,12 +273,14 @@ createDBBest = do modify' $ over (eDB . patDB) (const Map.empty)
 -- | `addToDB` adds an e-node and e-class id to the database
 addToDB :: Monad m => ENode -> EClassId -> EGraphST m () -- State DB ()
 addToDB enode eid = do
-  let ids = eid : childrenOf enode -- we will add the e-class id and the children ids
-      op  = getOperator enode    -- changes Bin op l r to Bin op () () so `op` as a single entry in the DB
-  trie <- gets ((Map.!? op) . _patDB . _eDB)       -- gets the entry for op, if it exists
-  case populate trie ids of      -- populates the trie
-    Nothing -> pure ()
-    Just t  -> modify' $ over (eDB . patDB) (Map.insert op t) -- if something was created, insert back into the DB
+  isConst <- gets (_consts . _info . (IntMap.! eid) . _eClass)
+  when (isConst == NotConst) $ do
+      let ids = eid : childrenOf enode -- we will add the e-class id and the children ids
+          op  = getOperator enode    -- changes Bin op l r to Bin op () () so `op` as a single entry in the DB
+      trie <- gets ((Map.!? op) . _patDB . _eDB)       -- gets the entry for op, if it exists
+      case populate trie ids of      -- populates the trie
+        Nothing -> pure ()
+        Just t  -> modify' $ over (eDB . patDB) (Map.insert op t) -- if something was created, insert back into the DB
 {-# INLINE addToDB #-}
 
 -- | Populates an IntTrie with a sequence of e-class ids
