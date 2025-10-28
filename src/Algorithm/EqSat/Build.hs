@@ -273,7 +273,8 @@ createDBBest = do modify' $ over (eDB . patDB) (const Map.empty)
 -- | `addToDB` adds an e-node and e-class id to the database
 addToDB :: Monad m => ENode -> EClassId -> EGraphST m () -- State DB ()
 addToDB enode' eid = do
-  isConst <- gets (_consts . _info . (IntMap.! eid) . _eClass)
+  eid' <- canonical eid
+  isConst <- gets (_consts . _info . (IntMap.! eid') . _eClass)
   let enode = case isConst of
                 ConstVal x -> Const x
                 ParamIx  x -> Param x
