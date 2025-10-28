@@ -473,14 +473,14 @@ getAllExpressionsFrom eId' = do
 {-# INLINE getAllExpressionsFrom #-}
 
 getNExpressionsFrom :: Monad m => Int -> EClassId -> EGraphST m [Fix SRTree]
-getNExpressionsFrom n eId' = getNExpressionsFrom' n 10 eId' 
+getNExpressionsFrom n eId' = getNExpressionsFrom' n 50 eId' 
 
 getNExpressionsFrom' :: Monad m => Int -> Int -> EClassId -> EGraphST m [Fix SRTree]
 getNExpressionsFrom' _ 0 _ = pure []
 getNExpressionsFrom' n d eId' = do
   eId <- canonical eId'
   nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! eId) . _eClass)
-  traceShow nodes $ (concat <$> go n d nodes)
+  (concat <$> go n d nodes)
   where
     isTerm (Var _) = True
     isTerm (Const _) = True
