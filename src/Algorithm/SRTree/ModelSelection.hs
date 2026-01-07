@@ -53,6 +53,16 @@ evidence dist mYerr xss ys theta tree = (1 - b) * nll dist mYerr xss ys tree the
     b = 1 / sqrt n
 {-# INLINE evidence #-}
 
+fractionalBayesFactor :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+fractionalBayesFactor dist mYerr xss ys theta tree = (1 - b) * nll dist mYerr xss ys tree theta - p / 2 * log b + f_compl + p / 2 * log(2*pi*nup)
+  where
+    (A.Sz (fromIntegral -> p)) = A.size theta
+    (A.Sz (fromIntegral -> n)) = A.size ys
+    b = 1 / sqrt n
+    nup = exp(1 - log 3)
+    f_compl = countNodes tree * log (countUniqueTokens tree)
+{-# INLINE fractionalBayesFactor #-}
+
 -- | MDL as described in 
 -- Bartlett, Deaglan J., Harry Desmond, and Pedro G. Ferreira. "Exhaustive symbolic regression." IEEE Transactions on Evolutionary Computation (2023).
 mdl :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
