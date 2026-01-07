@@ -51,7 +51,7 @@ rnd :: StateT StdGen (StateT [ECache] IO)  a -> RndEGraph a
 rnd = lift
 {-# INLINE rnd #-}
 
-myCost :: SRTree Int -> Int
+myCost :: SRTree var Int -> Int
 myCost (Var _)     = 1
 myCost (Const _)   = 1
 myCost (Param _)   = 1
@@ -116,7 +116,7 @@ fitnessMVNoCache shouldReparam nRep nIter distribution dataTrainsVals root = do
 
 -- RndEGraph utils
 -- fitFun fitnessFunRep rep iter distribution x y mYErr x_val y_val mYErr_val
-insertExpr :: Fix SRTree -> (Fix SRTree -> RndEGraph (Double, [PVector])) -> RndEGraph EClassId
+insertExpr :: Fix NamedTree -> (Fix NamedTree -> RndEGraph (Double, [PVector])) -> RndEGraph EClassId
 insertExpr t fitFun = do
     ecId <- fromTree myCost t >>= canonical
     (f, p) <- fitFun t

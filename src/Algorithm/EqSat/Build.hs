@@ -388,12 +388,12 @@ isValidConditions cond match = gets $ cond (fst match)
 -- * Tree to e-graph conversion and utility functions
 
 -- | Creates an e-graph from an expression tree
-fromTree :: Monad m => CostFun -> Fix SRTree -> EGraphST m EClassId
+fromTree :: Monad m => CostFun -> Fix NamedTree -> EGraphST m EClassId
 fromTree costFun = cataM sequence (add costFun)
 {-# INLINE fromTree #-}
 
 -- | Builds an e-graph from multiple independent trees
-fromTrees :: Monad m => CostFun -> [Fix SRTree] -> EGraphST m [EClassId]
+fromTrees :: Monad m => CostFun -> [Fix NamedTree] -> EGraphST m [EClassId]
 fromTrees costFun = foldM (\rs t -> do eid <- fromTree costFun t; pure (eid:rs)) []
 {-# INLINE fromTrees #-}
 
@@ -404,7 +404,7 @@ countParamsUniqEg eg rt = countParamsUniq . runIdentity $ getBestExpr rt `evalSt
 
 
 -- | gets the best expression given the default cost function
-getBestExpr :: Monad m => EClassId -> EGraphST m (Fix SRTree)
+getBestExpr :: Monad m => EClassId -> EGraphST m (Fix NamedTree)
 getBestExpr eid = do eid' <- canonical eid
                      best <- gets (_best . _info . (IntMap.! eid') . _eClass)
                      childs <- mapM getBestExpr $ childrenOf best
@@ -417,7 +417,7 @@ getBestENode eid = do eid' <- canonical eid
 
 -- | returns one expression rooted at e-class `eId`
 -- TODO: avoid loopings
-getExpressionFrom :: Monad m => EClassId -> EGraphST m (Fix SRTree)
+getExpressionFrom :: Monad m => EClassId -> EGraphST m (Fix NamedTree)
 getExpressionFrom eId' = do
     eId <- canonical eId'
     nodes <- gets (Set.map decodeEnode . _eNodes . (IntMap.! eId) . _eClass)
@@ -439,7 +439,7 @@ getExpressionFrom eId' = do
 
 -- | returns all expressions rooted at e-class `eId`
 -- TODO: check for infinite list
-getAllExpressionsFrom :: Monad m => EClassId -> EGraphST m [Fix SRTree]
+getAllExpressionsFrom :: Monad m => EClassId -> EGraphST m [Fix NamedTree]
 getAllExpressionsFrom eId' = do
   eId <- canonical eId'
   nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! eId) . _eClass)
@@ -472,10 +472,10 @@ getAllExpressionsFrom eId' = do
         pure (t:ts)
 {-# INLINE getAllExpressionsFrom #-}
 
-getNExpressionsFrom :: Monad m => Int -> EClassId -> EGraphST m [Fix SRTree]
+getNExpressionsFrom :: Monad m => Int -> EClassId -> EGraphST m [Fix NamedTree]
 getNExpressionsFrom n eId' = getNExpressionsFrom' n 15 eId' 
 
-getNExpressionsFrom' :: Monad m => Int -> Int -> EClassId -> EGraphST m [Fix SRTree]
+getNExpressionsFrom' :: Monad m => Int -> Int -> EClassId -> EGraphST m [Fix NamedTree]
 getNExpressionsFrom' _ 0 _ = pure []
 getNExpressionsFrom' n d eId' = do
   eId <- canonical eId'
@@ -552,7 +552,7 @@ getAllChildBestEClasses eId' = do
                         pure ((n : eids) <> concat eids')
 
 -- | returns a random expression rooted at e-class `eId`
-getRndExpressionFrom :: EClassId -> EGraphST (State StdGen) (Fix SRTree)
+getRndExpressionFrom :: EClassId -> EGraphST (State StdGen) (Fix NamedTree)
 getRndExpressionFrom eId' = do
     eId <- canonical eId'
     nodes <- gets (Set.toList . _eNodes . (IntMap.! eId) . _eClass)

@@ -1,4 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ExplicitForAll #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE DeriveGeneric #-}
@@ -41,6 +44,7 @@ import Data.Hashable
 import Data.Binary
 import qualified Data.Binary as Bin
 import qualified Data.Massiv.Array as MA
+import Data.Text ( Text, pack )
 
 import GHC.Generics
 
@@ -48,41 +52,41 @@ import Debug.Trace
 
 type EClassId     = Int -- NOTE: DO NOT CHANGE THIS, this will break the use of IntMap and IntSet
 type ClassIdMap   = IntMap
-type ENode        = SRTree EClassId
-type ENodeEnc     = (Int, Int, Int, Double)
+type ENode        = NamedTree EClassId
+type ENodeEnc     = (Int, Text, Int, Int, Double)
 type EGraphST m a = StateT EGraph m a
 type Cost         = Int
-type CostFun      = SRTree Cost -> Cost
+type CostFun      = NamedTree Cost -> Cost
 type ECache = IntMap.IntMap PVector
 
 instance Hashable ENode where
   hashWithSalt n enode = hashWithSalt n (encodeEnode enode)
 
-type RangeTree a = Seq (a, EClassId)
-
 -- | this assumes up to 999 variables and params
-encodeEnode :: ENode -> ENodeEnc
+encodeEnode :: ENode -> ENodeEnc 
 --encodeEnode = id
 {--}
-encodeEnode (Var ix)         = (0, ix, -1, 0)
-encodeEnode (Param ix)       = (1, ix, -1, 0)
-encodeEnode (Const x)        = (2, -1, -1, x)
-encodeEnode (Uni f ed)       = (300 + fromEnum f, ed, -1, 0)
-encodeEnode (Bin op ed1 ed2) = (400 + fromEnum op, ed1, ed2, 0)
+encodeEnode (Var ix)         = (0, ix, -1, -1, 0)
+encodeEnode (Param ix)       = (1, "", ix, -1, 0)
+encodeEnode (Const x)        = (2, "", -1, -1, x)
+encodeEnode (Uni f ed)       = (300 + fromEnum f, "", ed, -1, 0)
+encodeEnode (Bin op ed1 ed2) = (400 + fromEnum op, "", ed1, ed2, 0)
 {--}
 {-# INLINE encodeEnode #-}
 
-decodeEnode :: ENodeEnc -> ENode
+decodeEnode :: ENodeEnc -> ENode 
 --decodeEnode = id
 {--}
-decodeEnode (0, ix, _, _) = Var ix
-decodeEnode (1, ix, _, _) = Param ix
-decodeEnode (2, _, _, x)  = Const x
-decodeEnode (opCode, arg1, arg2, arg3)
+decodeEnode (0, ix, _, _, _) = Var ix
+decodeEnode (1, _, ix, _, _) = Param ix
+decodeEnode (2, _, _, _, x)  = Const x
+decodeEnode (opCode, _, arg1, arg2, arg3)
   | opCode < 400 = Uni (toEnum $ opCode-300) arg1
   | otherwise    = Bin (toEnum $ opCode-400) arg1 arg2
   {--}
 {-# INLINE decodeEnode #-}
+
+type RangeTree a = Seq (a, EClassId)
 
 insertRange :: (Ord a, Show a) => EClassId -> a -> RangeTree a -> RangeTree a
 insertRange eid x Empty                      = FingerTree.singleton (x, eid)
@@ -211,7 +215,7 @@ data EClassData = EData { _cost    :: Cost
 -- * Serialization
 instance Generic (EClassId, ENode)
 
-instance Binary (SRTree EClassId) where
+instance Binary (NamedTree EClassId) where
   put (Var ix)     = put (0 :: Word8) >> put ix
   put (Param ix)   = put (1 :: Word8) >> put ix
   put (Const x)    = put (2 :: Word8) >> put x
@@ -226,7 +230,7 @@ instance Binary (SRTree EClassId) where
                 3 -> Uni   <$> (toEnum <$> get) <*> get
                 4 -> Bin   <$> (toEnum <$> get) <*> get <*> get
 
-instance Binary (SRTree ()) where
+instance Binary (NamedTree ()) where
   put (Var ix)     = put (0 :: Word8) >> put ix
   put (Param ix)   = put (1 :: Word8) >> put ix
   put (Const x)    = put (2 :: Word8) >> put x
@@ -263,7 +267,7 @@ instance Eq EClassData where
 -- The database maps a symbol to an IntTrie
 -- The IntTrie stores the possible paths from a certain e-class
 -- that matches a pattern
-type DB = Map (SRTree ()) IntTrie
+type DB = Map (NamedTree ()) IntTrie
 -- The IntTrie is composed of the set of available keys (for convenience)
 -- and an IntMap that maps one e-class id to the first child IntTrie,
 -- the first child IntTrie will point to the next child and so on

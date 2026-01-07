@@ -29,7 +29,7 @@ import qualified Data.Vector.Storable as VS
 import Debug.Trace
 
 -- | Bayesian information criterion
-bic :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+bic :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix IndexedTree -> Double
 bic dist mYerr xss ys theta tree = p * log n + 2 * nll dist mYerr xss ys tree theta
   where
     (A.Sz (fromIntegral -> p)) = A.size theta
@@ -37,7 +37,7 @@ bic dist mYerr xss ys theta tree = p * log n + 2 * nll dist mYerr xss ys tree th
 {-# INLINE bic #-}
 
 -- | Akaike information criterion
-aic :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+aic :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix IndexedTree -> Double
 aic dist mYerr xss ys theta tree = 2 * p + 2 * nll dist mYerr xss ys tree theta
   where
     (A.Sz (fromIntegral -> p)) = A.size theta
@@ -45,7 +45,7 @@ aic dist mYerr xss ys theta tree = 2 * p + 2 * nll dist mYerr xss ys tree theta
 {-# INLINE aic #-}
 
 -- | Evidence 
-evidence :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+evidence :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix IndexedTree -> Double
 evidence dist mYerr xss ys theta tree = (1 - b) * nll dist mYerr xss ys tree theta - p / 2 * log b
   where
     (A.Sz (fromIntegral -> p)) = A.size theta
@@ -53,9 +53,19 @@ evidence dist mYerr xss ys theta tree = (1 - b) * nll dist mYerr xss ys tree the
     b = 1 / sqrt n
 {-# INLINE evidence #-}
 
+fractionalBayesFactor :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix IndexedTree -> Double
+fractionalBayesFactor dist mYerr xss ys theta tree = (1 - b) * nll dist mYerr xss ys tree theta - p / 2 * log b + f_compl + p / 2 * log(2*pi*nup)
+  where
+    (A.Sz (fromIntegral -> p)) = A.size theta
+    (A.Sz (fromIntegral -> n)) = A.size ys
+    b = 1 / sqrt n
+    nup = exp(1 - log 3)
+    f_compl = countNodes tree * log (countUniqueTokens tree)
+{-# INLINE fractionalBayesFactor #-}
+
 -- | MDL as described in 
 -- Bartlett, Deaglan J., Harry Desmond, and Pedro G. Ferreira. "Exhaustive symbolic regression." IEEE Transactions on Evolutionary Computation (2023).
-mdl :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+mdl :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix IndexedTree -> Double
 mdl dist mYerr xss ys theta tree =   nll' dist mYerr xss ys theta tree
                                    + logFunctional tree
                                    + logParameters dist mYerr xss ys theta tree
@@ -67,7 +77,7 @@ mdl dist mYerr xss ys theta tree =   nll' dist mYerr xss ys theta tree
 
 -- | MDL Lattice as described in
 -- Bartlett, Deaglan, Harry Desmond, and Pedro Ferreira. "Priors for symbolic regression." Proceedings of the Companion Conference on Genetic and Evolutionary Computation. 2023.
-mdlLatt :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+mdlLatt :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix IndexedTree -> Double
 mdlLatt dist mYerr xss ys theta tree = nll' dist mYerr xss ys theta' tree
                                      + logFunctional tree
                                      + logParametersLatt dist mYerr xss ys theta tree
@@ -79,14 +89,14 @@ mdlLatt dist mYerr xss ys theta tree = nll' dist mYerr xss ys theta' tree
 
 -- | same as `mdl` but weighting the functional structure by frequency calculated using a wiki information of
 -- physics and engineering functions
-mdlFreq :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+mdlFreq :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix IndexedTree -> Double
 mdlFreq dist mYerr xss ys theta tree = nll dist mYerr xss ys tree theta
                                      + logFunctionalFreq tree
                                      + logParameters dist mYerr xss ys theta tree
 {-# INLINE mdlFreq #-}
 
 -- log of the functional complexity
-logFunctional :: Fix SRTree -> Double
+logFunctional :: Fix IndexedTree -> Double
 logFunctional tree = countNodes tree * log (countUniqueTokens tree')
                    + foldr (\c acc -> log (abs c) + acc) 0 consts 
                    + log(2) * numberOfConsts
@@ -98,7 +108,7 @@ logFunctional tree = countNodes tree * log (countUniqueTokens tree')
 {-# INLINE logFunctional #-}
 
 -- same as above but weighted by frequency 
-logFunctionalFreq  :: Fix SRTree -> Double
+logFunctionalFreq  :: Fix IndexedTree -> Double
 logFunctionalFreq tree = treeToNat tree' 
                        + foldr (\c acc -> log (abs c) + acc) 0 consts  
                        + countVarNodes tree * log (numberOfVars tree)
@@ -108,7 +118,7 @@ logFunctionalFreq tree = treeToNat tree'
 {-# INLINE logFunctionalFreq #-}
 
 -- log of the parameters complexity
-logParameters :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+logParameters :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix IndexedTree -> Double
 logParameters dist mYerr xss ys theta tree = -(p / 2) * log 3 + 0.5 * logFisher + logTheta
   where
     -- p      = fromIntegral $ VS.length theta
@@ -124,7 +134,7 @@ logParameters dist mYerr xss ys theta tree = -(p / 2) * log 3 + 0.5 * logFisher 
     isSignificant v f = abs (v / sqrt(12 / f) ) >= 1
 
 -- same as above but for the Lattice 
-logParametersLatt :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+logParametersLatt :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix IndexedTree -> Double
 logParametersLatt dist mYerr xss ys theta tree = 0.5 * p * (1 - log 3) + 0.5 * log detFisher
   where
     fisher = fisherNLL dist mYerr xss ys tree theta
@@ -140,11 +150,11 @@ logParametersLatt dist mYerr xss ys theta tree = 0.5 * p * (1 - log 3) + 0.5 * l
     isSignificant v f = abs (v / sqrt(12 / f) ) >= 1
 
 -- flipped version of nll
-nll' :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
+nll' :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix IndexedTree -> Double
 nll' dist mYerr xss ys theta tree = nll dist mYerr xss ys tree theta
 {-# INLINE nll' #-}
 
-treeToNat :: Fix SRTree -> Double
+treeToNat :: Fix IndexedTree -> Double
 treeToNat = cata $
   \case
     Uni f t    -> funToNat f + t

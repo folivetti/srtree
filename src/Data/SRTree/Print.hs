@@ -35,7 +35,7 @@ import Data.SRTree.Recursion (cata)
 
 -- | converts a tree with protected operators to
 -- a conventional math tree
-removeProtection :: Fix SRTree -> Fix SRTree
+removeProtection :: Fix (SRTree var) -> Fix (SRTree var)
 removeProtection = cata $
   \case
      Var ix -> Fix (Var ix)
@@ -53,7 +53,7 @@ removeProtection = cata $
 --
 -- >>> showExpr $ "x0" + sin ( tanh ("t0" + 2) )
 -- "(x0 + Sin(Tanh((t0 + 2.0))))"
-showExpr :: Fix SRTree -> String
+showExpr :: Show var => Fix (SRTree var) -> String
 showExpr = cata alg . removeProtection
   where alg = \case
                 Var ix     -> 'x' : show ix
@@ -67,7 +67,7 @@ showExpr = cata alg . removeProtection
 --
 -- >>> showExprWithVar ["mu", "eps"] $ "x0" + sin ( "x1" * tanh ("t0" + 2) )
 -- "(mu + Sin(Tanh(eps * (t0 + 2.0))))"
-showExprWithVars :: [String] -> Fix SRTree -> String
+showExprWithVars :: [String] -> Fix (SRTree Int) -> String
 showExprWithVars varnames = cata alg . removeProtection
   where alg = \case
                 Var ix     -> varnames !! ix
@@ -77,11 +77,11 @@ showExprWithVars varnames = cata alg . removeProtection
                 Uni f t    -> concat [show f, "(", t, ")"]
 
 -- | prints the expression 
-printExpr :: Fix SRTree -> IO ()
+printExpr :: Show var => Fix (SRTree var) -> IO ()
 printExpr = putStrLn . showExpr 
 
 -- | prints the expression
-printExprWithVars :: [String] -> Fix SRTree -> IO ()
+printExprWithVars :: [String] -> Fix (SRTree Int) -> IO ()
 printExprWithVars varnames = putStrLn . showExprWithVars varnames
 
 -- how to display an operator 
@@ -99,7 +99,7 @@ showOp PowerAbs = "|^|"
 --
 -- >>> showPython $ "x0" + sin ( tanh ("t0" + 2) )
 -- "(x[:, 0] + np.sin(np.tanh((t[:, 0] + 2.0))))"
-showPython :: Fix SRTree -> String
+showPython :: Show var => Fix (SRTree var) -> String
 showPython = cata alg . removeProtection
   where
     alg = \case
@@ -133,14 +133,14 @@ showPython = cata alg . removeProtection
     pyFun Recip  = "np.reciprocal"
 
 -- | print the expression in numpy notation
-printPython :: Fix SRTree -> IO ()
+printPython :: Show var => Fix (SRTree var) -> IO ()
 printPython = putStrLn . showPython
 
 -- | Displays a tree as a LaTeX compatible expression.
 --
 -- >>> showLatex $ "x0" + sin ( tanh ("t0" + 2) )
 -- "\\left(x_{, 0} + \\operatorname{sin}(\\operatorname{tanh}(\\left(\\theta_{, 0} + 2.0\\right)))\\right)"
-showLatex :: Fix SRTree -> String
+showLatex :: Show var => Fix (SRTree var) -> String
 showLatex = cata alg . removeProtection
   where
     alg = \case
@@ -156,7 +156,7 @@ showLatex = cata alg . removeProtection
       Uni Recip t   -> concat ["\\frac{1}{", t, "}"]
       Uni f t       -> concat [showLatexFun f, "(", t, ")"]
       
-showLatexWithVars :: [String] -> Fix SRTree -> String
+showLatexWithVars :: [String] -> Fix (SRTree Int) -> String
 showLatexWithVars varnames = cata alg . removeProtection
   where 
     alg = \case
@@ -177,11 +177,11 @@ showLatexFun f = mconcat ["\\operatorname{", map toLower $ show f, "}"]
 {-# INLINE showLatexFun #-}
 
 -- | prints expression in LaTeX notation. 
-printLatex :: Fix SRTree -> IO ()
+printLatex :: Show var => Fix (SRTree var) -> IO ()
 printLatex = putStrLn . showLatex
 
 -- | Displays a tree in Tikz format
-showTikz :: Fix SRTree -> String
+showTikz :: Show var => Fix (SRTree var) -> String
 showTikz = cata alg . removeProtection
   where
     alg = \case
@@ -200,5 +200,5 @@ showTikz = cata alg . removeProtection
     showOpTikz Power = "\\^{}\n"
 
 -- | prints the tree in TikZ format 
-printTikz :: Fix SRTree -> IO ()
+printTikz :: Show var => Fix (SRTree var) -> IO ()
 printTikz = putStrLn . showTikz

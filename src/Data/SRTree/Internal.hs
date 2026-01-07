@@ -18,6 +18,8 @@
 
 module Data.SRTree.Internal
          ( SRTree(..)
+         , IndexedTree
+         , NamedTree
          , Function(..)
          , Op(..)
          , param
@@ -56,11 +58,12 @@ import Data.String (IsString (..))
 import Text.Read (readMaybe)
 import qualified Data.IntMap as IntMap
 import Data.List ( nub )
+import Data.Text ( Text, pack ) 
 
 -- | Tree structure to be used with Symbolic Regression algorithms.
 -- This structure is a fixed point of a n-ary tree. 
-data SRTree val =
-   Var Int     -- ^ index of the variables
+data SRTree var val =
+   Var var     -- ^ index of the variables
  | Param Int   -- ^ index of the parameter
  | Const Double -- ^ constant value, can be converted to a parameter
  -- | IConst Int   -- TODO: integer constant
@@ -68,6 +71,9 @@ data SRTree val =
  | Uni Function val -- ^ univariate function
  | Bin Op val val -- ^ binary operator
  deriving (Show, Eq, Ord, Functor)
+
+type NamedTree = SRTree Text 
+type IndexedTree = SRTree Int 
 
 -- | Supported operators
 data Op = Add | Sub | Mul | Div | Power | PowerAbs | AQ
@@ -100,7 +106,7 @@ data Function =
   | Cube
      deriving (Show, Read, Eq, Ord, Enum)
 
-removeProtectedOps :: Fix SRTree -> Fix SRTree 
+removeProtectedOps :: Fix (SRTree var) -> Fix (SRTree var) 
 removeProtectedOps = cata alg 
   where 
     alg (Var ix)           = var ix
@@ -113,7 +119,7 @@ removeProtectedOps = cata alg
     alg (Uni f t)          = Fix $ Uni f t
 {-# INLINE removeProtectedOps #-}
 
-convertProtectedOps :: Fix SRTree -> Fix SRTree 
+convertProtectedOps :: Fix (SRTree var) -> Fix (SRTree var) 
 convertProtectedOps = cata alg 
   where 
     alg (Var ix)           = var ix
@@ -127,15 +133,15 @@ convertProtectedOps = cata alg
 {-# INLINE convertProtectedOps #-}
 
 -- | create a tree with a single node representing a variable
-var :: Int -> Fix SRTree
+var :: var -> Fix (SRTree var)
 var ix = Fix (Var ix)
 
 -- | create a tree with a single node representing a parameter
-param :: Int -> Fix SRTree
+param :: Int -> Fix (SRTree var)
 param ix = Fix (Param ix)
 
 -- | create a tree with a single node representing a constant value
-constv :: Double -> Fix SRTree
+constv :: Double -> Fix (SRTree var)
 constv x = Fix (Const x)
 
 -- | the instance of `IsString` allows us to
@@ -144,7 +150,7 @@ constv x = Fix (Const x)
 -- >>> :t  "x0" + "t0" * sin("x1" * "t1")
 -- Fix SRTree
 --
-instance IsString (Fix SRTree) where 
+instance IsString (Fix IndexedTree) where 
     fromString [] = error "empty string for SRTree"
     fromString ('x':ix) = case readMaybe ix of 
                             Just iy -> Fix (Var iy)
@@ -154,7 +160,14 @@ instance IsString (Fix SRTree) where
                             Nothing -> error "wrong format for parameter. It should be ti where i is an index. Ex.: \"t0\", \"t1\"."
     fromString _        = error "A string can represent a variable or a parameter following the format xi or ti, respectivelly, where i is the index. Ex.: \"x0\", \"t0\"."
 
-instance Num (Fix SRTree) where
+instance IsString (Fix NamedTree) where 
+    fromString ('_':xs) = Fix (Var $ pack xs)
+    fromString ('t':ix) = case readMaybe ix of 
+                            Just iy -> Fix (Param iy)
+                            Nothing -> error "wrong format for parameter. It should be ti where i is an index. Ex.: \"t0\", \"t1\"."
+    fromString _        = error "A string can represent a variable or a parameter following the format xi or ti, respectivelly, where i is the index. Ex.: \"x0\", \"t0\"."
+
+instance Num (Fix (SRTree var)) where
   Fix (Const 0) + r = r
   l + Fix (Const 0) = l
   Fix (Const c1) + Fix (Const c2) = Fix . Const $ c1 + c2
@@ -188,7 +201,7 @@ instance Num (Fix SRTree) where
   fromInteger x = Fix $ Const (fromInteger x)
   {-# INLINE fromInteger #-}
 
-instance Fractional (Fix SRTree) where
+instance Fractional (Fix (SRTree var)) where
   l / Fix (Const 1) = l
   Fix (Const c1) / Fix (Const c2) = Fix . Const $ c1/c2
   l / r                   = Fix $ Bin Div l r
@@ -200,7 +213,7 @@ instance Fractional (Fix SRTree) where
   fromRational = Fix . Const . fromRational
   {-# INLINE fromRational #-}
 
-instance Floating (Fix SRTree) where
+instance Floating (Fix (SRTree var)) where
   pi      = Fix $ Const  pi
   {-# INLINE pi #-}
   exp     = Fix . Uni Exp
@@ -243,14 +256,14 @@ instance Floating (Fix SRTree) where
   logBase l r = log l / log r
   {-# INLINE logBase #-}
 
-instance Foldable SRTree where 
+instance Foldable (SRTree var) where 
     foldMap f =
         \case
           Bin op l r -> f l <> f r
           Uni g t    -> f t 
           _          -> mempty 
 
-instance Traversable SRTree where 
+instance Traversable (SRTree var) where 
     traverse f = 
         \case 
           Bin op l r -> Bin op <$> f l <*> f r 
@@ -267,7 +280,7 @@ instance Traversable SRTree where
           Const x    -> pure (Const x) 
 
 -- | Arity of the current node
-arity :: Fix SRTree -> Int
+arity :: Fix (SRTree var) -> Int
 arity = cata alg
   where
     alg Var {}      = 0
@@ -282,7 +295,7 @@ arity = cata alg
 -- >>> map showExpr . getChildren $ "x0" + 2 
 -- ["x0", 2]
 --
-getChildren :: Fix SRTree -> [Fix SRTree]
+getChildren :: Fix (SRTree var) -> [Fix (SRTree var)]
 getChildren (Fix (Var {})) = []
 getChildren (Fix (Param {})) = []
 getChildren (Fix (Const {})) = []
@@ -292,7 +305,7 @@ getChildren (Fix (Bin _ l r)) = [l, r]
 
 -- | Get the children of an unfixed node 
 -- 
-childrenOf :: SRTree a -> [a] 
+childrenOf :: SRTree v a -> [a] 
 childrenOf = 
     \case 
       Uni _ t   -> [t] 
@@ -300,7 +313,7 @@ childrenOf =
       _         -> []
 
 -- | replaces the children with elements from a list 
-replaceChildren :: [a] -> SRTree b -> SRTree a
+replaceChildren :: [a] -> SRTree v b -> SRTree v a
 replaceChildren [l, r] (Bin op _ _) = Bin op l r
 replaceChildren [t]    (Uni f _)    = Uni f t
 replaceChildren _      (Var ix)     = Var ix
@@ -310,7 +323,7 @@ replaceChildren xs     n            = error "ERROR: trying to replace children w
 {-# INLINE replaceChildren #-}
 
 -- | returns a node containing the operator and () as children
-getOperator :: SRTree a -> SRTree ()
+getOperator :: SRTree v a -> SRTree v ()
 getOperator (Bin op _ _) = Bin op () ()
 getOperator (Uni f _)    = Uni f ()
 getOperator (Var ix)     = Var ix
@@ -322,7 +335,7 @@ getOperator (Const x)    = Const x
 --
 -- >>> countNodes $ "x0" + 2
 -- 3
-countNodes :: Num a => Fix SRTree -> a
+countNodes :: Num a => Fix (SRTree var) -> a
 countNodes = cata alg
   where
       alg Var   {}    = 1
@@ -336,7 +349,7 @@ countNodes = cata alg
 --
 -- >>> countVarNodes $ "x0" + 2 * ("x0" - sin "x1")
 -- 3
-countVarNodes :: Num a => Fix SRTree -> a
+countVarNodes :: Num a => Fix (SRTree var) -> a
 countVarNodes = cata alg
   where
       alg Var {} = 1
@@ -350,7 +363,7 @@ countVarNodes = cata alg
 --
 -- >>> countParams $ "x0" + "t0" * sin ("t1" + "x1") - "t0"
 -- 3
-countParams :: Num a => Fix SRTree -> a
+countParams :: Num a => Fix (SRTree var) -> a
 countParams = cata alg
   where
       alg Var {} = 0
@@ -364,7 +377,7 @@ countParams = cata alg
 --
 -- >>> countParams $ "x0" + "t0" * sin ("t1" + "x1") - "t0"
 -- 2
-countParamsUniq :: Fix SRTree -> Int
+countParamsUniq :: Fix (SRTree var) -> Int
 countParamsUniq t = length . nub $ cata alg t
   where
       alg Var {} = []
@@ -378,7 +391,7 @@ countParamsUniq t = length . nub $ cata alg t
 --
 -- >>> countConsts $ "x0"* 2 + 3 * sin "x0"
 -- 2
-countConsts :: Num a => Fix SRTree -> a
+countConsts :: Num a => Fix (SRTree var) -> a
 countConsts = cata alg
   where
       alg Var {} = 0
@@ -392,7 +405,7 @@ countConsts = cata alg
 --
 -- >>> countOccurrences 0 $ "x0"* 2 + 3 * sin "x0" + "x1"
 -- 2
-countOccurrences :: Num a => Int -> Fix SRTree -> a
+countOccurrences :: (Num a, Eq var) => var -> Fix (SRTree var) -> a
 countOccurrences ix = cata alg
   where
       alg (Var iy) = if ix == iy then 1 else 0
@@ -406,7 +419,7 @@ countOccurrences ix = cata alg
 --
 -- >>> countUniqueTokens $ "x0" + ("x1" * "x0" - sin ("x0" ** 2))
 -- 8
-countUniqueTokens :: Num a => Fix SRTree -> a
+countUniqueTokens :: (Ord var, Num a) => Fix (SRTree var) -> a
 countUniqueTokens = len . cata alg
   where
     len (a, b, c, d, e) = fromIntegral $ length a + length b + length c + length d + length e
@@ -421,7 +434,7 @@ countUniqueTokens = len . cata alg
 -- 
 -- >>> numberOfVars $ "x0" + 2 * ("x0" - sin "x1")
 -- 2
-numberOfVars :: Num a => Fix SRTree -> a
+numberOfVars :: (Ord var, Num a) => Fix (SRTree var) -> a
 numberOfVars = fromIntegral . S.size . cata alg
   where
     alg (Uni f t)    = t
@@ -435,7 +448,7 @@ numberOfVars = fromIntegral . S.size . cata alg
 --
 -- >>> getIntConsts $ "x0" + 2 * "x1" ** 3 - 3.14
 -- [2.0,3.0]
-getIntConsts :: Fix SRTree -> [Double]
+getIntConsts :: Fix (SRTree var) -> [Double]
 getIntConsts = cata alg
   where
     alg (Uni f t)    = t
@@ -449,7 +462,7 @@ getIntConsts = cata alg
 --
 -- >>> showExpr . relabelParams $ "x0" + "t0" * sin ("t1" + "x1") - "t0" 
 -- "x0" + "t0" * sin ("t1" + "x1") - "t2" 
-relabelParams :: Fix SRTree -> Fix SRTree
+relabelParams :: Fix (SRTree var) -> Fix (SRTree var)
 relabelParams t = cataM leftToRight alg t `evalState` 0
   where
       -- | leftToRight (left to right) defines the sequence of processing
@@ -461,7 +474,7 @@ relabelParams t = cataM leftToRight alg t `evalState` 0
 
       -- | any time we reach a Param ix, it replaces ix with current state
       -- and increments one to the state.
-      alg :: SRTree (Fix SRTree) -> State Int (Fix SRTree)
+      alg :: SRTree var (Fix (SRTree var)) -> State Int (Fix (SRTree var))
       alg (Var ix)    = pure $ var ix
       alg (Param ix)  = do iy <- get; modify (+1); pure (param iy)
       alg (Const c)   = pure $ Fix $ Const c
@@ -472,7 +485,7 @@ relabelParams t = cataM leftToRight alg t `evalState` 0
 --
 -- >>> showExpr . relabelParamsOrder $ "x0" + "t1" * sin ("t3" + "x1") - "t1"
 -- "x0" + "t0" * sin ("t1" + "x1") - "t0"
-relabelParamsOrder :: Fix SRTree -> Fix SRTree
+relabelParamsOrder :: Fix (SRTree var) -> Fix (SRTree var)
 relabelParamsOrder t = cataM leftToRight alg t `evalState` (IntMap.empty, 0)
   where
       -- | leftToRight (left to right) defines the sequence of processing
@@ -484,7 +497,7 @@ relabelParamsOrder t = cataM leftToRight alg t `evalState` (IntMap.empty, 0)
 
       -- | any time we reach a Param ix, it replaces ix with current state
       -- and increments one to the state.
-      alg :: SRTree (Fix SRTree) -> State (IntMap.IntMap Int, Int) (Fix SRTree)
+      alg :: SRTree var (Fix (SRTree var)) -> State (IntMap.IntMap Int, Int) (Fix (SRTree var))
       alg (Var ix)    = pure $ var ix
       alg (Param ix)  = do (m, iy) <- get
                            if IntMap.member ix m
@@ -500,7 +513,7 @@ relabelParamsOrder t = cataM leftToRight alg t `evalState` (IntMap.empty, 0)
 --
 -- >>> showExpr . relabelParams $ "x0" + "t0" * sin ("t1" + "x1") - "t0"
 -- "x0" + "t0" * sin ("t1" + "x1") - "t2"
-relabelVars :: Fix SRTree -> Fix SRTree
+relabelVars :: Fix (SRTree Int) -> Fix (SRTree Int)
 relabelVars t = cataM leftToRight alg t `evalState` 0
   where
       -- | leftToRight (left to right) defines the sequence of processing
@@ -512,7 +525,7 @@ relabelVars t = cataM leftToRight alg t `evalState` 0
 
       -- | any time we reach a Param ix, it replaces ix with current state
       -- and increments one to the state.
-      alg :: SRTree (Fix SRTree) -> State Int (Fix SRTree)
+      alg :: SRTree var (Fix (SRTree Int)) -> State Int (Fix (SRTree Int))
       alg (Var ix)    = do iy <- get; modify (+1); pure (var iy)
       alg (Param ix)  = pure $ param ix
       alg (Const c)   = pure $ Fix $ Const c
@@ -524,7 +537,7 @@ relabelVars t = cataM leftToRight alg t `evalState` 0
 --
 -- >>> snd . constsToParam $ "x0" * 2 + 3.14 * sin (5 * "x1")
 -- [2.0,3.14,5.0]
-constsToParam :: Fix SRTree -> (Fix SRTree, [Double])
+constsToParam :: Fix (SRTree var) -> (Fix (SRTree var), [Double])
 constsToParam = first relabelParams . cata alg
   where
       first f (x, y) = (f x, y)
@@ -544,7 +557,7 @@ constsToParam = first relabelParams . cata alg
 --
 -- >>> snd . floatConstsToParam $ "x0" * 2 + 3.14 * sin (5 * "x1")
 -- [3.14]
-floatConstsToParam :: Fix SRTree -> (Fix SRTree, [Double])
+floatConstsToParam :: Fix (SRTree var) -> (Fix (SRTree var), [Double])
 floatConstsToParam = first relabelParams . cata alg
   where
       first f (x, y)          = (f x, y)
@@ -561,7 +574,7 @@ floatConstsToParam = first relabelParams . cata alg
 --
 -- >>> showExpr . paramsToConst [1.1, 2.2, 3.3] $ "x0" + "t0" * sin ("t1" * "x0" - "t2")
 -- x0 + 1.1 * sin(2.2 * x0 - 3.3)
-paramsToConst :: [Double] -> Fix SRTree -> Fix SRTree
+paramsToConst :: [Double] -> Fix (SRTree var) -> Fix (SRTree var)
 paramsToConst theta = cata alg
   where
       alg (Var ix)    = Fix $ Var ix

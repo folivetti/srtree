@@ -82,7 +82,7 @@ replicateAs xss c = let (Sz (m :. _)) = M.size xss in M.replicate (getComp xss) 
 {-# INLINE replicateAs #-}
 
 -- | Evaluates the tree given a vector of variable values, a vector of parameter values and a function that takes a Double and change to whatever type the variables have. This is useful when working with datasets of many values per variables.
-evalTree :: SRMatrix -> PVector -> Fix SRTree -> SRVector
+evalTree :: SRMatrix -> PVector -> Fix IndexedTree -> SRVector
 evalTree xss params = cata $ 
     \case 
       Var ix     -> xss <! ix

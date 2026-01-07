@@ -18,7 +18,7 @@ import Algorithm.SRTree.Likelihoods
 import Algorithm.SRTree.NonlinearOpt
 import Data.Bifunctor (bimap, second)
 import Data.Massiv.Array
-import Data.SRTree (Fix (..), SRTree (..), floatConstsToParam, relabelParams, countNodes, convertProtectedOps)
+import Data.SRTree (Fix (..), SRTree (..), IndexedTree, floatConstsToParam, relabelParams, countNodes, convertProtectedOps)
 import Data.SRTree.Eval (evalTree, compMode)
 import qualified Data.Vector.Storable as VS
 import qualified Data.IntMap.Strict as IntMap
@@ -60,7 +60,7 @@ minimizeNLLEGraph alg dist mYerr niter xss ys egraph root cache t0
 
 
 -- | minimizes the negative log-likelihood of the expression
-minimizeNLL' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> Distribution -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
+minimizeNLL' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> Distribution -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix IndexedTree -> PVector -> (PVector, Double, Int)
 minimizeNLL' alg dist mYerr niter xss ys tree t0
   | niter == 0 = (t0, f, 0)
   | n == 0     = (t0, f, 0)
@@ -91,11 +91,11 @@ minimizeNLL' alg dist mYerr niter xss ys tree t0
                       g3 = gradNLLGraph dist xss ys mYerr tree' t
                   in traceShow (t, g1, g2, g3) $ g3 -- second (toStorableVector . computeAs S) g2
 
-minimizeNLL :: Distribution -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
+minimizeNLL :: Distribution -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix IndexedTree -> PVector -> (PVector, Double, Int)
 minimizeNLL = minimizeNLL' TNEWTON
 
 -- | minimizes the function while keeping the parameter ix fixed (used to calculate the profile)
-minimizeNLLWithFixedParam' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> Distribution -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix SRTree -> Int -> PVector -> PVector
+minimizeNLLWithFixedParam' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> Distribution -> Maybe PVector -> Int -> SRMatrix -> PVector -> Fix IndexedTree -> Int -> PVector -> PVector
 minimizeNLLWithFixedParam' alg dist mYerr niter xss ys tree ix t0
   | niter == 0 = t0
   | n == 0     = t0
@@ -123,13 +123,13 @@ minimizeNLLWithFixedParam' alg dist mYerr niter xss ys tree ix t0
 minimizeNLLWithFixedParam = minimizeNLLWithFixedParam' TNEWTON
 
 -- | minimizes using Gaussian likelihood 
-minimizeGaussian :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
+minimizeGaussian :: Int -> SRMatrix -> PVector -> Fix IndexedTree -> PVector -> (PVector, Double, Int)
 minimizeGaussian = minimizeNLL Gaussian Nothing
 
 -- | minimizes using Binomial likelihood 
-minimizeBinomial :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
+minimizeBinomial :: Int -> SRMatrix -> PVector -> Fix IndexedTree -> PVector -> (PVector, Double, Int)
 minimizeBinomial = minimizeNLL Bernoulli Nothing
 
 -- | minimizes using Poisson likelihood 
-minimizePoisson :: Int -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (PVector, Double, Int)
+minimizePoisson :: Int -> SRMatrix -> PVector -> Fix IndexedTree -> PVector -> (PVector, Double, Int)
 minimizePoisson = minimizeNLL Poisson Nothing

@@ -47,6 +47,7 @@ dependencies:
 - unliftio >= 0.2.10 && < 1
 - unliftio-core >= 0.2.1 && < 1
 - binary >= 0.8.9.1 && < 0.9
+- text >= 2 && < 3
 
 library:
   source-dirs: src

@@ -32,11 +32,11 @@ import Data.Attoparsec.ByteString.Char8 (double)
 -- "(2.0 * x1)"
 -- >>> showExpr . deriveBy True 1 $ 2 * "x0" * "t0" - sqrt ("t1" * "x0")
 -- "(-1.0 * ((1.0 / (2.0 * Sqrt((t1 * x0)))) * x0))"
-deriveBy :: Bool -> Int -> Fix SRTree -> Fix SRTree
-deriveBy p dx = fst (mutu alg1 alg2)
+deriveByVar :: Eq var => var -> Fix (SRTree var) -> Fix (SRTree var)
+deriveByVar dx = fst (mutu alg1 alg2)
   where
-      alg1 (Var ix)           = if not p && ix == dx then 1 else 0
-      alg1 (Param ix)         = if p && ix == dx then 1 else 0
+      alg1 (Var ix)           = if ix == dx then 1 else 0
+      alg1 (Param ix)         = 0
       alg1 (Const _)          = 0
       alg1 (Uni f t)          = derivative f (snd t) * fst t
       alg1 (Bin Add l r)      = fst l + fst r
@@ -55,6 +55,28 @@ deriveBy p dx = fst (mutu alg1 alg2)
       --(abs (snd l) ** (snd r))
       powabs l r = Fix (Bin PowerAbs l r)
 
+deriveByParam :: Int -> Fix (SRTree var) -> Fix (SRTree var)
+deriveByParam dx = fst (mutu alg1 alg2)
+  where
+      alg1 (Var ix)           = 0
+      alg1 (Param ix)         = if ix == dx then 1 else 0
+      alg1 (Const _)          = 0
+      alg1 (Uni f t)          = derivative f (snd t) * fst t
+      alg1 (Bin Add l r)      = fst l + fst r
+      alg1 (Bin Sub l r)      = fst l - fst r
+      alg1 (Bin Mul l r)      = fst l * snd r + snd l * fst r
+      alg1 (Bin Div l r)      = (fst l * snd r - snd l * fst r) / snd r ** 2
+      alg1 (Bin Power l r)    = snd l ** (snd r - 1) * (snd r * fst l + snd l * log (snd l) * fst r)
+      alg1 (Bin PowerAbs l r) = (powabs (snd l) (snd r)) * (fst r * log (abs (snd l)) + snd r * fst l / snd l)
+      alg1 (Bin AQ l r)       = ((1 + snd r * snd r) * fst l - snd l * snd r * fst r) / (1 + snd r * snd r) ** 1.5
+
+      alg2 (Var ix)    = var ix
+      alg2 (Param ix)  = param ix
+      alg2 (Const c)   = Fix (Const c)
+      alg2 (Uni f t)   = Fix (Uni f $ snd t)
+      alg2 (Bin f l r) = Fix (Bin f (snd l) (snd r))
+      --(abs (snd l) ** (snd r))
+      powabs l r = Fix (Bin PowerAbs l r)
 -- | Derivative of each supported function
 -- For a function h(f) it returns the derivative dh/df
 --
@@ -115,13 +137,3 @@ doubleDerivative LogAbs  = negate . recip . (^2)
 doubleDerivative Recip   = (*2) . recip . (^3)
 doubleDerivative Cube    = (6*)
 {-# INLINE doubleDerivative #-}
-
--- | Symbolic derivative by a variable
-deriveByVar :: Int -> Fix SRTree -> Fix SRTree
-deriveByVar = deriveBy False
-{-# INLINE deriveByVar #-}
-
--- | Symbolic derivative by a parameter
-deriveByParam :: Int -> Fix SRTree -> Fix SRTree
-deriveByParam = deriveBy True
-{-# INLINE deriveByParam #-}

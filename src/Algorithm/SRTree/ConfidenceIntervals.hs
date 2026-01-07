@@ -97,7 +97,7 @@ paramCI (Profile stats profiles) nSamples _ alpha = zipWith3 CI theta lows highs
 
 -- | calculates the prediction confidence interval using Laplace approximation or profile likelihood. 
 --
-predictionCI :: CIType -> Distribution -> (SRMatrix -> PVector) -> (SRMatrix -> [PVector]) -> (CI -> PVector -> Fix SRTree -> (Double -> Double, Double)) -> SRMatrix -> Fix SRTree -> PVector -> Double -> [CI] -> [CI]
+predictionCI :: CIType -> Distribution -> (SRMatrix -> PVector) -> (SRMatrix -> [PVector]) -> (CI -> PVector -> Fix IndexedTree -> (Double -> Double, Double)) -> SRMatrix -> Fix IndexedTree -> PVector -> Double -> [CI] -> [CI]
 predictionCI (Laplace stats) _ predFun jacFun _ xss tree theta alpha _ = zipWith3 CI yhat lows highs
   where
     yhat     = A.toList $ predFun xss
@@ -140,7 +140,7 @@ inverseDist Bernoulli y = log (y/(1-y))
 inverseDist Poisson y   = log y
 
 -- rewrite the tree by fixing theta 0 to optimal value 
-replaceParam0 :: Fix SRTree -> Fix SRTree -> Fix SRTree
+replaceParam0 :: Fix IndexedTree -> Fix IndexedTree -> Fix IndexedTree
 replaceParam0 tree t0 = cata alg tree
   where
     alg (Var ix)     = Fix $ Var ix
@@ -150,7 +150,7 @@ replaceParam0 tree t0 = cata alg tree
     alg (Uni g t)    = Fix $ Uni g t
     alg (Bin op l r) = Fix $ Bin op l r
 
-evalVar :: PVector -> Fix SRTree -> Fix SRTree
+evalVar :: PVector -> Fix IndexedTree -> Fix IndexedTree
 evalVar xs = cata alg
   where
     alg (Var ix)     = Fix $ Const (xs A.! ix)
@@ -159,7 +159,7 @@ evalVar xs = cata alg
     alg (Uni g t)    = Fix $ Uni g t
     alg (Bin op l r) = Fix $ Bin op l r
 
-calcTheta0 :: Distribution -> Fix SRTree -> Fix SRTree
+calcTheta0 :: Distribution -> Fix IndexedTree -> Fix IndexedTree
 calcTheta0 dist tree = case cata alg tree of
                          Left g -> g $ inverseDist dist (Fix $ Param 0)
                          Right _ -> error "No theta0?"
@@ -180,7 +180,7 @@ calcTheta0 dist tree = case cata alg tree of
                                        Right vr -> Right $ evalOp op vl vr
 
 -- calculate the profile likelihood of every parameter 
-getAllProfiles :: PType -> Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> PVector -> [CI] -> Double -> [ProfileT]
+getAllProfiles :: PType -> Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix IndexedTree -> PVector -> PVector -> [CI] -> Double -> [ProfileT]
 getAllProfiles ptype dist mYerr xss ys tree theta stdErr estCIs alpha = reverse (getAll 0 [])
   where
     (A.Sz k)   = A.size theta
@@ -203,7 +203,7 @@ getProfile :: Distribution
            -> Maybe PVector
            -> SRMatrix
            -> PVector
-           -> Fix SRTree
+           -> Fix IndexedTree
            -> PVector
            -> Double
            -> Double
@@ -252,7 +252,7 @@ getProfileCnstr :: Distribution
                 -> Maybe PVector
                 -> SRMatrix
                 -> PVector
-                -> Fix SRTree
+                -> Fix IndexedTree
                 -> PVector
                 -> Double -> Double
                 -> Int
@@ -270,7 +270,7 @@ getProfileCnstr dist mYerr xss ys tree theta stdErr_i tau_max ix
     rightPt  = getPoint False
     tau2theta tau = if tau < 0 then leftPt else rightPt
 
-getEndPoint :: Distribution -> Maybe PVector -> A.Array A.S Ix2 Double -> A.Array A.S A.Ix1 Double -> Fix SRTree -> A.Array A.S A.Ix1 Double -> Double -> Int -> Bool -> Double
+getEndPoint :: Distribution -> Maybe PVector -> A.Array A.S Ix2 Double -> A.Array A.S A.Ix1 Double -> Fix IndexedTree -> A.Array A.S A.Ix1 Double -> Double -> Int -> Bool -> Double
 getEndPoint dist mYerr xss ys tree theta tau_max ix isLeft =
   case minimizeAugLag problem (A.toStorableVector theta_opt) of
             Right sol -> solutionParams sol VS.! ix
@@ -300,7 +300,7 @@ getProfileODE :: Distribution
            -> Maybe PVector
            -> SRMatrix
            -> PVector
-           -> Fix SRTree
+           -> Fix IndexedTree
            -> PVector
            -> Double
            -> CI
@@ -362,7 +362,7 @@ rk f (t, y) t' = (t', y !+! ((1.0/6.0) *. h' !*! (k1 !+! (2.0 *. k2) !+! (2.0 *.
 {-# INLINE rk #-}
 
 -- tau0, tau1  theta0, thetaX = tau1 theta0 / tau0
-getStatsFromModel :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> BasicStats
+getStatsFromModel :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix IndexedTree -> PVector -> BasicStats
 getStatsFromModel dist mYerr xss ys tree theta = MkStats cov corr stdErr
   where
     (A.Sz1 k) = A.size theta

@@ -125,9 +125,9 @@ calculateHeights =
     getChildrenEC ec' = do ec <- canonical ec'
                            gets (concatMap childrenOf' . _eNodes . (IntMap.! ec) . _eClass)
 
-    childrenOf' (_, -1, -1, _) = []
-    childrenOf' (_, e1, -1, _) = [e1]
-    childrenOf' (_, e1, e2, _) = [e1, e2]
+    childrenOf' (_, _, -1, -1, _) = []
+    childrenOf' (_, _, e1, -1, _) = [e1]
+    childrenOf' (_, _, e1, e2, _) = [e1, e2]
 
     go [] _    _ = pure ()
     go qs tabu h =
@@ -137,14 +137,14 @@ calculateHeights =
          go childrenL (TrueSet.union tabu childrenOf) (h+1) -- move one breadth search style
 
 -- | calculates the cost of a node
-calculateCost :: Monad m => CostFun -> SRTree EClassId -> EGraphST m Cost
+calculateCost :: Monad m => CostFun -> NamedTree EClassId -> EGraphST m Cost
 calculateCost f t =
   do let cs = childrenOf t
      costs <- traverse (fmap (_cost . _info) . getEClass) cs
      pure . f $ replaceChildren costs t
 
 -- | check whether an e-node evaluates to a const
-calculateConsts :: Monad m => SRTree EClassId -> EGraphST m Consts
+calculateConsts :: Monad m => NamedTree EClassId -> EGraphST m Consts
 calculateConsts t =
   do let cs = childrenOf t
      eg <- get
@@ -153,7 +153,7 @@ calculateConsts t =
           ConstVal x | isNaN x -> pure (ConstVal x)
           a -> pure a
 
-combineConsts :: SRTree Consts -> Consts
+combineConsts :: NamedTree Consts -> Consts
 combineConsts (Const x)    = ConstVal x
 combineConsts (Param ix)   = ParamIx ix
 combineConsts (Var _)      = NotConst

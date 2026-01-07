@@ -12,6 +12,8 @@
 -----------------------------------------------------------------------------
 module Data.SRTree 
          ( SRTree(..)
+         , IndexedTree
+         , NamedTree
          , Function(..)
          , Op(..)
          , param
@@ -45,6 +47,8 @@ module Data.SRTree
          
 import Data.SRTree.Internal 
          ( SRTree(..)
+         , NamedTree
+         , IndexedTree
          , Function(..)
          , Op(..)
          , param

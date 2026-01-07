@@ -48,7 +48,7 @@ fromJust _        = error "fromJust called with Nothing"
 -- | runs equality saturation from an expression tree,
 -- a given set of rules, and a cost function.
 -- Returns the tree with the smallest cost.
-eqSat :: Monad m => Fix SRTree -> [Rule] -> CostFun -> Int -> EGraphST m (Fix SRTree)
+eqSat :: Monad m => Fix NamedTree -> [Rule] -> CostFun -> Int -> EGraphST m (Fix NamedTree)
 eqSat expr rules costFun maxIt =
     do root <- fromTree costFun expr
        (end, it) <- runEqSat costFun rules maxIt
@@ -60,17 +60,17 @@ eqSat expr rules costFun maxIt =
          then do modify' (const emptyGraph) >> eqSat best rules costFun it -- reapplies eqsat on the best so far
          else pure best
 
-type CostMap = Map EClassId (Int, Fix SRTree)
+type CostMap = Map EClassId (Int, Fix NamedTree)
 
 -- | recalculates the costs with a new cost function
-recalculateBest :: Monad m => CostFun -> EClassId -> EGraphST m (Fix SRTree)
+recalculateBest :: Monad m => CostFun -> EClassId -> EGraphST m (Fix NamedTree)
 recalculateBest costFun eid =
     do classes <- gets _eClass
        let costs = fillUpCosts classes Map.empty
        eid' <- canonical eid
        pure $ snd $ costs Map.! eid'
     where
-        nodeCost :: CostMap -> ENode -> Maybe (Int, Fix SRTree)
+        nodeCost :: CostMap -> ENode -> Maybe (Int, Fix NamedTree)
         nodeCost costMap enode =
           do optChildren <- traverse (costMap Map.!?) (childrenOf enode) -- | gets the cost of the children, if one is missing, returns Nothing
              let cc = map fst optChildren

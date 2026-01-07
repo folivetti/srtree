@@ -254,7 +254,7 @@ powabs l r = Fixed (Bin PowerAbs l r)
 --        symbol comparison (constants, parameters, variables x0, x10, x2)
 --          op priorities (+, -, *, inv_div, pow, abs, exp, log, log10, sqrt)
 --            univariates
-myCost :: SRTree Int -> Int
+myCost :: NamedTree Int -> Int
 myCost (Var _)      = 1
 myCost (Const _)    = 3
 myCost (Param _)    = 3
@@ -268,11 +268,11 @@ rewritesParams :: [Rule]
 rewritesParams = rewriteBasic <> constReduction <> rewritesFun <> rewritesWithParam
 
 -- | simplify using the default parameters 
-simplifyEqSatDefault :: Fix SRTree -> Fix SRTree
+simplifyEqSatDefault :: Fix NamedTree -> Fix NamedTree
 simplifyEqSatDefault t = eqSat t rewrites myCost 30 `evalState` emptyGraph
 
 -- | simplifies with custom parameters
-simplifyEqSat :: [Rule] -> CostFun -> Int -> Fix SRTree -> Fix SRTree
+simplifyEqSat :: [Rule] -> CostFun -> Int -> Fix NamedTree -> Fix NamedTree
 simplifyEqSat rwrts costFun it t = eqSat t rwrts costFun it `evalState` emptyGraph
 
 -- | apply a single step of merge-only using default rules

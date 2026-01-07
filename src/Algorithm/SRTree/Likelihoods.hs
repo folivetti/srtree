@@ -1,5 +1,6 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -67,7 +68,7 @@ data Distribution = MSE | Gaussian | HGaussian | Bernoulli | Poisson | ROXY
     deriving (Show, Read, Enum, Bounded, Eq)
 
 -- | Sum-of-square errors or Sum-of-square residues
-sse :: SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
+sse :: SRMatrix -> PVector -> Fix IndexedTree -> PVector -> Double
 sse xss ys tree theta = err
   where
     (Sz m) = M.size ys
@@ -75,7 +76,7 @@ sse xss ys tree theta = err
     yhat   = evalTree xss theta tree
     err    = M.sum $ (delay ys - yhat) ^ (2 :: Int)
 
-sseError :: SRMatrix -> PVector -> PVector -> Fix SRTree -> PVector -> Double
+sseError :: SRMatrix -> PVector -> PVector -> Fix IndexedTree -> PVector -> Double
 sseError xss ys yErr tree theta = err
   where
     (Sz m) = M.size ys
@@ -84,7 +85,7 @@ sseError xss ys yErr tree theta = err
     err    = M.sum $ ((delay ys - yhat) ^ (2 :: Int) / (delay yErr))
 
 -- | Total Sum-of-squares
-sseTot :: SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
+sseTot :: SRMatrix -> PVector -> Fix IndexedTree -> PVector -> Double
 sseTot xss ys tree theta = err
   where
     (Sz m) = M.size ys
@@ -93,15 +94,15 @@ sseTot xss ys tree theta = err
     err    = M.sum $ (M.map (subtract ym) ys) ^ (2 :: Int)
         
 -- | Mean squared errors
-mse :: SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
+mse :: SRMatrix -> PVector -> Fix IndexedTree -> PVector -> Double
 mse xss ys tree theta = let (Sz m) = M.size ys in sse xss ys tree theta / fromIntegral m
 
 -- | Root of the mean squared errors
-rmse :: SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
+rmse :: SRMatrix -> PVector -> Fix IndexedTree -> PVector -> Double
 rmse xss ys tree = sqrt . mse xss ys tree
 
 -- | Coefficient of determination
-r2 :: SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
+r2 :: SRMatrix -> PVector -> Fix IndexedTree -> PVector -> Double
 r2 xss ys tree theta = 1 - sse xss ys tree theta / sseTot  xss ys tree theta
 
 -- | logistic function
@@ -123,7 +124,7 @@ negSum = negate . M.sum
 {-# inline negSum #-}
 
 -- | Negative log-likelihood
-nll :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> Double
+nll :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix IndexedTree -> PVector -> Double
 
 -- | Mean Squared error (not a distribution)
 nll MSE _ xss ys t theta = mse xss ys t theta
@@ -262,7 +263,7 @@ buildNLL ROXY m tree = neglogP
 buildNLLEGraph MSE m egraph root = runIdentity $ addToEg  `runStateT` egraph
   where
     addToEg :: EGraphST Identity EClassId
-    addToEg = do v  <- add myCost (Var (-1))
+    addToEg = do v  <- add myCost (Var "-1")
                  c1 <- add myCost (Const 2)
                  c2 <- add myCost (Const m)
                  x <- add myCost (Bin Sub root v)
@@ -274,7 +275,7 @@ buildNLLEGraph Gaussian m egraph root = runIdentity (addToEg `runStateT` egraph)
   where
     p      = 11 -- countParamsUniqEg egraph root
     addToEg :: EGraphST Identity EClassId
-    addToEg = do v <- add myCost (Var (-1))
+    addToEg = do v <- add myCost (Var "-1")
                  p <- add myCost (Param p)
                  sp <- add myCost (Uni Square p)
                  lsp <- add myCost (Uni Log sp)
@@ -286,8 +287,8 @@ buildNLLEGraph Gaussian m egraph root = runIdentity (addToEg `runStateT` egraph)
 buildNLLEGraph HGaussian m egraph root = runIdentity $ addToEg `runStateT` egraph
   where
     addToEg :: EGraphST Identity EClassId
-    addToEg = do v1 <- add myCost (Var (-1))
-                 v2 <- add myCost (Var (-2))
+    addToEg = do v1 <- add myCost (Var "-1")
+                 v2 <- add myCost (Var "-2")
                  c1 <- add myCost (Const (2*pi))
                  c2 <- add myCost (Const m)
                  x <- add myCost (Bin Sub root v1)
@@ -302,7 +303,7 @@ buildNLLEGraph HGaussian m egraph root = runIdentity $ addToEg `runStateT` egrap
 buildNLLEGraph Poisson m egraph root = runIdentity $ addToEg `runStateT` egraph
   where
     addToEg :: EGraphST Identity EClassId
-    addToEg = do v1 <- add myCost (Var (-1))
+    addToEg = do v1 <- add myCost (Var "-1")
                  lv <- add myCost (Uni Log v1)
                  x  <- add myCost (Bin Mul v1 lv)
                  y  <- add myCost (Uni Exp root)
@@ -313,7 +314,7 @@ buildNLLEGraph Poisson m egraph root = runIdentity $ addToEg `runStateT` egraph
 buildNLLEGraph Bernoulli m egraph root = runIdentity $ addToEg `runStateT` egraph
   where
     addToEg :: EGraphST Identity EClassId
-    addToEg = do v <- add myCost (Var (-1))
+    addToEg = do v <- add myCost (Var "-1")
                  c1 <- add myCost (Const 1)
                  c2 <- add myCost (Const (-1))
                  mr <- add myCost (Bin Mul c2 root)
@@ -327,7 +328,7 @@ buildNLLEGraph Bernoulli m egraph root = runIdentity $ addToEg `runStateT` egrap
 buildNLLEGraph ROXY m egraph root = error "ROXY not supported with cache"
 
 -- | Prediction for different distributions
-predict :: Distribution -> Fix SRTree -> PVector -> SRMatrix -> SRVector
+predict :: Distribution -> Fix IndexedTree -> PVector -> SRMatrix -> SRVector
 predict MSE       tree theta xss = evalTree xss theta tree
 predict Gaussian  tree theta xss = evalTree xss theta tree
 predict Bernoulli tree theta xss = logistic $ evalTree xss theta tree
@@ -335,7 +336,7 @@ predict Poisson   tree theta xss = exp $ evalTree xss theta tree
 predict ROXY      tree theta xss = evalTree xss theta tree
 
 -- | Gradient of the negative log-likelihood
-gradNLL :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> (Double, SRVector)
+gradNLL :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix IndexedTree -> PVector -> (Double, SRVector)
 gradNLL dist mYerr xss ys tree theta = (f, delay grad) -- gradNLLArr dist xss ys mYerr treeArr j2ix (toStorableVector theta)
   where
     grad :: PVector
@@ -448,7 +449,7 @@ gradNLLEGraph ROXY xss ys mYerr egraph cache root theta =
     grad'                = VS.map nanTo0 grad
 
 -- | Fisher information of negative log-likelihood
-fisherNLL :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> SRVector
+fisherNLL :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix IndexedTree -> PVector -> SRVector
 fisherNLL ROXY mYerr xss ys tree theta = makeArray cmp (Sz p) finiteDiff
   where
     cmp    = getComp xss
@@ -515,7 +516,7 @@ fisherNLL dist mYerr xss ys tree theta = makeArray cmp (Sz p) build
 --
 -- Note, though the Fisher is just the diagonal of the return of this function
 -- it is better to keep them as different functions for efficiency
-hessianNLL :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> SRMatrix
+hessianNLL :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix IndexedTree -> PVector -> SRMatrix
 hessianNLL ROXY mYerr xss ys tree theta = undefined
 hessianNLL dist mYerr xss ys tree theta = makeArray cmp (Sz (p :. p)) build
   where
@@ -547,7 +548,7 @@ hessianNLL dist mYerr xss ys tree theta = makeArray cmp (Sz (p :. p)) build
                     Bernoulli -> (logistic yhat, phi*(M.replicate cmp (Sz m) 1 - phi))
                     Poisson   -> (exp yhat, phi)
 
-tree2arr :: Fix SRTree -> IntMap.IntMap (Int, Int, Int, Double)
+tree2arr :: Fix IndexedTree -> IntMap.IntMap (Int, Int, Int, Double)
 tree2arr tree = IntMap.fromList listTree
   where
     height = cata alg

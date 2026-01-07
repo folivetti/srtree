@@ -1,4 +1,5 @@
 {-# language ConstraintKinds #-}
+{-# language MultiParamTypeClasses #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.Random 
@@ -45,7 +46,7 @@ import System.Random (Random (random, randomR), StdGen, mkStdGen)
 import Data.Massiv.Array as MA hiding (forM_, forM, P)
 import Data.SRTree.Eval
 import Control.Monad
-
+import Data.Text ( Text )
 
 -- * Class definition of properties that a certain parameter type has.
 --
@@ -53,8 +54,8 @@ import Control.Monad
 -- HasVals: does `p` provides a range of values for the constants?
 -- HasExps: does `p` provides a range for the integral exponentes?
 -- HasFuns: does `p` provides a list of allowed functions?
-class HasVars p where
-  _vars :: p -> [Int]
+class HasVars p v where
+  _vars :: p -> [v]
 class HasVals p where
   _range :: p -> (Double, Double)
 class HasExps p where
@@ -63,12 +64,13 @@ class HasFuns p where
   _funs :: p -> [Function]
 
 -- | Constraint synonym for all properties.
-type HasEverything p = (HasVars p, HasVals p, HasExps p, HasFuns p)
+type HasEverything p v = (HasVars p v, HasVals p, HasExps p, HasFuns p)
 
 -- | A structure with every property
 data FullParams = P [Int] (Double, Double) (Int, Int) [Function]
+data NamedFullParams = NP [Text] (Double, Double) (Int, Int) [Function]
 
-instance HasVars FullParams where
+instance HasVars FullParams Int where
   _vars (P ixs _ _ _) = ixs
 instance HasVals FullParams where
   _range (P _ r _ _) = r
@@ -76,6 +78,15 @@ instance HasExps FullParams where
   _exponents (P _ _ e _) = e
 instance HasFuns FullParams where
   _funs (P _ _ _ fs) = fs
+
+instance HasVars NamedFullParams Text where
+  _vars (NP ixs _ _ _) = ixs
+instance HasVals NamedFullParams where
+  _range (NP _ r _ _) = r
+instance HasExps NamedFullParams where
+  _exponents (NP _ _ e _) = e
+instance HasFuns NamedFullParams where
+  _funs (NP _ _ _ fs) = fs
 
 type Rng m a = StateT StdGen m a
 
@@ -103,44 +114,44 @@ randomRange rng = state (randomR rng)
 {-# INLINE randomRange #-}
 
 -- Replace the child of a unary tree.
-replaceChild :: Fix SRTree -> Fix SRTree -> Maybe (Fix SRTree)
+replaceChild :: Fix (SRTree var) -> Fix (SRTree var) -> Maybe (Fix (SRTree var))
 replaceChild (Fix (Uni f _)) t = Just $ Fix (Uni f t)
 replaceChild _         _ = Nothing 
 {-# INLINE replaceChild #-}
 
 -- Replace the children of a binary tree.
-replaceFixChildren :: Fix SRTree -> Fix SRTree -> Fix SRTree -> Maybe (Fix SRTree)
+replaceFixChildren :: Fix (SRTree var) -> Fix (SRTree var) -> Fix (SRTree var) -> Maybe (Fix (SRTree var))
 replaceFixChildren (Fix (Bin f _ _)) l r = Just $ Fix (Bin f l r)
 replaceFixChildren _             _ _ = Nothing
 {-# INLINE replaceFixChildren #-}
 
 -- | RndTree is a Monad Transformer to generate random trees of type `SRTree ix val` 
 -- given the parameters `p ix val` using the random number generator `StdGen`.
-type RndTree m p = ReaderT p (StateT StdGen m) (Fix SRTree)
+type RndTree m p var = ReaderT p (StateT StdGen m) (Fix (SRTree var))
 
 -- | Returns a random variable, the parameter `p` must have the `HasVars` property
-randomVar :: Monad m => HasVars p => RndTree m p
+randomVar :: Monad m => HasVars p var => RndTree m p var
 randomVar = do vars <- asks _vars
                lift $ Fix . Var <$> randomFrom vars
 
 -- | Returns a random constant, the parameter `p` must have the `HasConst` property
-randomConst :: (HasVals p, Monad m) => RndTree m p
+randomConst :: (HasVals p, Monad m) => RndTree m p var
 randomConst = do rng <- asks _range
                  lift $ Fix . Const <$> randomRange rng
 
 -- | Returns a random integer power node, the parameter `p` must have the `HasExps` property
-randomPow :: (HasExps p, Monad m) => RndTree m p
+randomPow :: (HasExps p, Monad m) => RndTree m p var
 randomPow = do rng <- asks _exponents
                lift $ Fix . Bin Power 0 . Fix . Const . fromIntegral <$> randomRange rng
 
 -- | Returns a random function, the parameter `p` must have the `HasFuns` property
-randomFunction :: (HasFuns p, Monad m) => RndTree m p
+randomFunction :: (HasFuns p, Monad m) => RndTree m p var
 randomFunction = do funs <- asks _funs
                     f <- lift $ randomFrom funs
                     lift $ pure $ Fix (Uni f 0)
 
 -- | Returns a random node, the parameter `p` must have every property.
-randomNode :: (HasEverything p, Monad m) => RndTree m p
+randomNode :: (HasEverything p var, Monad m) => RndTree m p var
 randomNode = do
   choice <- lift $ randomRange (0, 8 :: Int)
   case choice of
@@ -155,7 +166,7 @@ randomNode = do
     8 -> pure . Fix $ Bin Power 0 0
 
 -- | Returns a random non-terminal node, the parameter `p` must have every property.
-randomNonTerminal :: (HasEverything p, Monad m) => RndTree m p
+randomNonTerminal :: (HasEverything p var, Monad m) => RndTree m p var
 randomNonTerminal = do
   choice <- lift $ randomRange (0, 6 :: Int)
   case choice of
@@ -173,7 +184,7 @@ randomNonTerminal = do
 -- >>> tree <- evalStateT treeGen (mkStdGen 52)
 -- >>> showExpr tree
 -- "(-2.7631152121655838 / Exp((x0 / ((x0 * -7.681722660704317) - Log(3.378309080134594)))))"
-randomTreeTemplate :: (HasEverything p, Monad m) => Int -> RndTree m p
+randomTreeTemplate :: (HasEverything p var, Monad m) => Int -> RndTree m p var
 randomTreeTemplate 0      = do
   coin <- lift toss
   if coin
@@ -192,7 +203,7 @@ randomTreeTemplate budget = do
 -- >>> tree <- evalStateT treeGen (mkStdGen 42)
 -- >>> showExpr tree
 -- "Exp(Log((((7.784360517385774 * x0) - (3.6412224491658223 ^ x1)) ^ ((x0 ^ -4.09764995657091) + Log(-7.710216839988497)))))"
-randomTreeBalanced :: (HasEverything p, Monad m) => Int -> RndTree m p
+randomTreeBalanced :: (HasEverything p var, Monad m) => Int -> RndTree m p var
 randomTreeBalanced n | n <= 1 = do
   coin <- lift toss
   if coin
@@ -208,7 +219,7 @@ randomTreeBalanced n = do
 randomVec :: Monad m => Int -> Rng m PVector
 randomVec n = MA.fromList compMode <$> replicateM n (randomRange (-1, 1))
 
-randomTree :: Monad m => Int -> Int -> Int -> Rng m (Fix SRTree) -> Rng m (SRTree ()) -> Bool -> Rng  m (Fix SRTree)
+randomTree :: Monad m => Int -> Int -> Int -> Rng m (Fix (SRTree var)) -> Rng m (SRTree var ()) -> Bool -> Rng  m (Fix (SRTree var))
 randomTree minDepth maxDepth maxSize genTerm genNonTerm grow
   | noSpaceLeft = genTerm
   | needNonTerm = genRecursion

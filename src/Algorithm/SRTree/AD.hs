@@ -51,6 +51,7 @@ import qualified Data.Vector.Storable as VS
 import Control.Scheduler 
 import Data.Maybe ( fromJust, isJust )
 import Algorithm.EqSat.Egraph
+import Data.Text ( unpack )
 
 import Control.Monad.State.Strict
 import Control.Monad.Identity
@@ -98,7 +99,8 @@ evalCache xss egraph cache root' theta = cache'
             getVal key
 
         evalKey :: ENode -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
-        evalKey (Var ix)     = pure $ (M.computeAs S $ xss <! ix, False)
+        evalKey (Var ix')    = do let ix = (Prelude.read . unpack) ix' 
+                                  pure $ (M.computeAs S $ xss <! ix, False)
         evalKey (Const v)    = pure $ (M.replicate comp m v, False)
         evalKey (Param ix)   = pure $ (M.replicate comp m (theta VS.! ix), True)
         evalKey (Uni f t)    = do (v, b) <- getVal t
@@ -180,9 +182,10 @@ reverseModeEGraph xss ys mYErr egraph cache root' theta =
             getVal key
 
         evalKey :: ENode -> State ((ECache, ECache), Map.Map ENode PVector) (PVector, Bool)
-        evalKey (Var ix)     = pure $ if | ix == -1  -> (ys, False)
-                                         | ix == -2  -> (yErr, False)
-                                         | otherwise -> (M.computeAs S $ xss <! ix, False)
+        evalKey (Var ix')    = do let ix = Prelude.read . unpack $ ix'
+                                  pure $ if | ix == -1  -> (ys, False)
+                                            | ix == -2  -> (yErr, False)
+                                            | otherwise -> (M.computeAs S $ xss <! ix, False)
         evalKey (Const v)    = pure $ (M.replicate comp m v, False)
         evalKey (Param ix)   = pure $ (M.replicate comp m (theta VS.! ix), True)
         evalKey (Uni f t)    = do (v, b) <- getVal t
@@ -224,7 +227,7 @@ reverseModeEGraph xss ys mYErr egraph cache root' theta =
 
         ((cache'', localcache'), cachedGrad) = calcGrad root one `execState` ((cache', localcache), Map.empty)
 
-        calcGrad :: Int -> Array S Ix1 Double -> State ((IntMap.IntMap (Array S Ix1 Double), IntMap.IntMap (Array S Ix1 Double)), Map.Map (SRTree Int) (Array S Ix1 Double)) ()
+        calcGrad :: Int -> Array S Ix1 Double -> State ((IntMap.IntMap (Array S Ix1 Double), IntMap.IntMap (Array S Ix1 Double)), Map.Map (NamedTree Int) (Array S Ix1 Double)) ()
         calcGrad rt v = do let node = getNode rt
                            case node of
                               Bin op l r -> do xl <- fst <$> getVal l
@@ -269,7 +272,7 @@ reverseModeEGraph xss ys mYErr egraph cache root' theta =
         fixNaN x = if isNaN x then 0 else x
 
 
-reverseModeGraph :: SRMatrix -> PVector -> Maybe PVector -> VS.Vector Double -> Fix SRTree -> (Array D Ix1 Double, VS.Vector Double)
+reverseModeGraph :: SRMatrix -> PVector -> Maybe PVector -> VS.Vector Double -> Fix IndexedTree -> (Array D Ix1 Double, VS.Vector Double)
 reverseModeGraph xss ys mYErr theta tree = (delay $ cachedVal' IntMap.! root
                                             , VS.fromList [M.sum $ cachedGrad Map.! (Param ix) | ix <- [0..p-1]])
     where
@@ -283,7 +286,7 @@ reverseModeGraph xss ys mYErr theta tree = (delay $ cachedVal' IntMap.! root
         (key2int, int2key, cachedVal, (subtract 1) -> root) = cataM leftToRight alg tree `execState` (Map.empty, IntMap.empty, IntMap.empty, 0)
         (key2int', int2key', cachedVal', cachedGrad) = calcGrad root one `execState` (key2int, int2key, cachedVal, Map.empty)
 
-        calcGrad :: Int -> Array S Ix1 Double -> State (Map.Map (SRTree Int) Int, IntMap.IntMap (SRTree Int), IntMap.IntMap (Array S Ix1 Double), Map.Map (SRTree Int) (Array S Ix1 Double)) ()
+        calcGrad :: Int -> Array S Ix1 Double -> State (Map.Map (IndexedTree Int) Int, IntMap.IntMap (IndexedTree Int), IntMap.IntMap (Array S Ix1 Double), Map.Map (IndexedTree Int) (Array S Ix1 Double)) ()
         calcGrad key v = do node <- gets ((IntMap.! key) . _int2key)
                             case node of
                               Bin op l r -> do xl <- gets (getVal l)
@@ -530,7 +533,7 @@ reverseModeArr xss ys mYErr theta t j2ix =
       {-# INLINE combine #-}
 
 -- | The function `forwardModeUnique` calculates the numerical gradient of the tree and evaluates the tree at the same time. It assumes that each parameter has a unique occurrence in the expression. This should be significantly faster than `forwardMode`.
-forwardModeUniqueJac  :: SRMatrix -> PVector -> Fix SRTree -> [PVector]
+forwardModeUniqueJac  :: SRMatrix -> PVector -> Fix IndexedTree -> [PVector]
 forwardModeUniqueJac xss theta = snd . second (map (M.computeAs M.S) . DL.toList) . cata alg
   where
       (Sz n) = M.size theta

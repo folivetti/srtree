@@ -37,7 +37,7 @@ import Debug.Trace
 
 -- A Pattern is either a fixed-point of a tree or an
 -- index to a pattern variable. The pattern variable matches anything. 
-data Pattern = Fixed (SRTree Pattern) | VarPat Char deriving (Show, Eq, Ord) -- Fixed structure of a pattern or a variable that matches anything
+data Pattern = Fixed (NamedTree Pattern) | VarPat Char deriving (Show, Eq, Ord) -- Fixed structure of a pattern or a variable that matches anything
 
 -- The instance for `IsString` for a `Pattern` is 
 -- valid only for a single letter char from a-zA-Z. 
@@ -48,7 +48,7 @@ instance IsString Pattern where
   fromString [c] | n >= 65 && n <= 122 = VarPat c where n = fromEnum c
   fromString s      = error $ "invalid string in VarPat: " <> s
 
-tree2pat :: Fix SRTree -> Pattern
+tree2pat :: Fix NamedTree -> Pattern
 tree2pat = cata alg
   where
     alg (Param ix) = if ix >= 100 then VarPat (toEnum $ ix - 100 + 65) else Fixed $ Param ix
@@ -80,9 +80,9 @@ type Condition = Map ClassOrVar ClassOrVar -> EGraph -> Bool
 -- An Atom is composed of either an e-class id or pattern variable id
 -- and the tree that generated that pattern. Left is e-class id and Right is a VarPat.
 type ClassOrVar = Either EClassId Int
-data Atom = Atom ClassOrVar (SRTree ClassOrVar) deriving Show
+data Atom = Atom ClassOrVar (NamedTree ClassOrVar) deriving Show
 
-unFixPat :: Pattern -> SRTree Pattern
+unFixPat :: Pattern -> NamedTree Pattern
 unFixPat (Fixed p) = p
 {-# INLINE unFixPat #-}
 
@@ -217,7 +217,7 @@ getInt (Right a) = a
 {-# INLINE getInt #-}
 
 -- | returns the list of the children values
-getElems :: SRTree a -> [a]
+getElems :: NamedTree a -> [a]
 getElems (Bin _ l r) = [l,r]
 getElems (Uni _ t)   = [t]
 getElems _           = []
