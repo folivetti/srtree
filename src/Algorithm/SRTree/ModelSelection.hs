@@ -18,7 +18,7 @@ module Algorithm.SRTree.ModelSelection where
 
 import Algorithm.Massiv.Utils ( det )
 import Algorithm.SRTree.Likelihoods
-    ( PVector, SRMatrix, fisherNLL, hessianNLL, nll, Distribution )
+    ( PVector, SRMatrix, fisherNLL, hessianNLL, nll, Distribution(..) )
 import Data.Massiv.Array (Ix2 (..), Sz (..), (!-!))
 import qualified Data.Massiv.Array as A
 import Data.SRTree
@@ -54,8 +54,10 @@ evidence dist mYerr xss ys theta tree = (1 - b) * nll dist mYerr xss ys tree the
 {-# INLINE evidence #-}
 
 fractionalBayesFactor :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> PVector -> Fix SRTree -> Double
-fractionalBayesFactor dist mYerr xss ys theta tree = (1 - b) * nll dist mYerr xss ys tree theta - p / 2 * log b + f_compl + p / 2 * log(2*pi*nup)
+fractionalBayesFactor dist mYerr xss ys theta tree = (1 - b) * nll' - p / 2 * log b + f_compl + p / 2 * log(2*pi*nup)
   where
+    nll_val = nll dist mYerr xss ys tree theta 
+    nll' = if dist == MSE then log nll_val else nll_val
     (A.Sz (fromIntegral -> p)) = A.size theta
     (A.Sz (fromIntegral -> n)) = A.size ys
     b = 1 / sqrt n
