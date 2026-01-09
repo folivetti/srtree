@@ -134,7 +134,7 @@ nll Gaussian mYerr xss ys t theta
   | nParams == (p'-1) = error "For Gaussian distribution theta must contain the variance as its last value."
   | otherwise     = 0.5*(sse xss ys t theta / s + m*log (2*pi*s))
   where
-    s       = sqrt $ mse xss ys t (M.init theta) -- theta M.! (p' - 1)
+    s       = sqrt $ mse xss ys t theta -- theta M.! (p' - 1)
     (Sz m') = M.size ys 
     (Sz p') = M.size theta
     nParams = countParamsUniq t
