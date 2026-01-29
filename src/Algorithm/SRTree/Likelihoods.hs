@@ -130,11 +130,12 @@ nll MSE _ xss ys t theta = mse xss ys t theta
 
 nll LOG10 _ xss ys t theta = traceShow ("LOG10" <> show res) res -- $ M.sum $ (f (delay ys) - f yhat) ^ (2 :: Int)
   where
-    res = M.sum $ (f (delay ys) - f yhat) ^ (2 :: Int)
+    res = M.sum $ M.map (`logBase` 10) $ (f (delay ys) / f yhat) ^ (2 :: Int)
     yhat   = evalTree xss theta t
     (Sz m) = M.size ys
     f :: Array D Ix1 Double -> Array D Ix1 Double
-    f z    = M.map (`logBase` 10) (z + M.map sqrt (z^2 + 1))
+    f z    =  (z + M.map (\zi -> sqrt (zi^2 + 1)) z)
+    -- log ys - log y = log (ys/y)
 
 -- | Gaussian distribution, theta must contain an additional parameter corresponding
 -- to variance.
