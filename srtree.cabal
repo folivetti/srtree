@@ -1,11 +1,11 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.37.0.
+-- This file has been generated from package.yaml by hpack version 0.38.1.
 --
 -- see: https://github.com/sol/hpack
 
 name:           srtree
-version:        2.0.1.5
+version:        2.0.1.7
 synopsis:       A general library to work with Symbolic Regression expression trees.
 description:    A Symbolic Regression Tree data structure to work with mathematical expressions with support to first order derivative and simplification;
 category:       Math, Data, Data Structures
@@ -34,6 +34,7 @@ library
       Algorithm.EqSat.Info
       Algorithm.EqSat.Queries
       Algorithm.EqSat.SearchSR
+      Algorithm.EqSat.SearchSRCache
       Algorithm.EqSat.Simplify
       Algorithm.Massiv.Utils
       Algorithm.SRTree.AD

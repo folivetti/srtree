@@ -42,7 +42,7 @@ packages:
     git: https://github.com/muesli4/table-layout.git
 snapshots:
 - completed:
-    sha256: 0d0e0969dda2916e4b3744e6c72fd7a193c7d57a05610b3df5227c8618e298e8
-    size: 692221
-    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/nightly/2025/5/18.yaml
-  original: nightly-2025-05-18
+    sha256: fab6a1992f7bc4198c7f8dfbb32f87be1f0866ec5123c4bb59972d5a3b89ff5a
+    size: 704692
+    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/nightly/2025/10/26.yaml
+  original: nightly-2025-10-26

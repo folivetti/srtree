@@ -63,7 +63,7 @@ import Data.SRTree.Print
 -- | Supported distributions for negative log-likelihood
 -- MSE refers to mean squared error
 -- HGaussian is Gaussian with heteroscedasticity, where the error should be provided
-data Distribution = MSE | Gaussian | HGaussian | Bernoulli | Poisson | ROXY
+data Distribution = MSE | Gaussian | HGaussian | Bernoulli | Poisson | ROXY | LOG10
     deriving (Show, Read, Enum, Bounded, Eq)
 
 -- | Sum-of-square errors or Sum-of-square residues
@@ -127,6 +127,13 @@ nll :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVe
 
 -- | Mean Squared error (not a distribution)
 nll MSE _ xss ys t theta = mse xss ys t theta
+
+nll LOG10 _ xss ys t theta = M.sum $ (f (delay ys) - f yhat) ^ (2 :: Int)
+  where
+    yhat   = evalTree xss theta t
+    (Sz m) = M.size ys
+    f :: Array D Ix1 Double -> Array D Ix1 Double
+    f z    = M.map (`logBase` 10) (z + M.map sqrt (z^2 + 1))
 
 -- | Gaussian distribution, theta must contain an additional parameter corresponding
 -- to variance.
@@ -230,6 +237,11 @@ nll ROXY mYerr xss ys tree theta
 -- WARNING: pass tree with parameters
 -- TODO: handle error similar to ROXY
 buildNLL MSE m tree = ((tree - var (-1)) ** 2) / constv m
+buildNLL LOG10 m tree = ((tree' - y) ** 2) / constv m
+  where
+    tree' = log (tree + sqrt(tree^2 + 1)) / log (constv 10)
+    y     = log (var (-1) + sqrt(var (-1) ^ 2 + 1)) / log (constv 10)
+
 buildNLL Gaussian m tree =  (square(tree - var (-1)) / square (param p)) + log ((square (param p)))
   where
     square = Fix . Uni Square
@@ -268,7 +280,33 @@ buildNLLEGraph MSE m egraph root = runIdentity $ addToEg  `runStateT` egraph
                  x <- add myCost (Bin Sub root v)
                  y <- add myCost (Bin Power x c1)
                  add myCost (Bin Div y c2)
+buildNLLEGraph LOG10 m egraph root = runIdentity $ addToEg  `runStateT` egraph
+  where
+    addToEg :: EGraphST Identity EClassId
+    addToEg = do v  <- add myCost (Var (-1))
+                 c1 <- add myCost (Const 2)
+                 c2 <- add myCost (Const m)
+                 c3 <- add myCost (Const 10)
+                 c4 <- add myCost (Const 1)
+                 -- log (x + sqrt (x^2 + 1)) / log 10
+                 log10 <- add myCost (Uni Log c3)
+                 t2 <- add myCost (Uni Square root)
+                 t2p1 <- add myCost (Bin Add t2 c4)
+                 sqt <- add myCost (Uni Sqrt t2p1)
+                 tpt <- add myCost (Bin Add root sqt)
+                 logt <- add myCost (Uni Log tpt)
+                 log10t <- add myCost (Bin Div logt log10)
+                 -- same with y
+                 y2 <- add myCost (Uni Square v)
+                 y2p1 <- add myCost (Bin Add y2 c4)
+                 sqy <- add myCost (Uni Sqrt y2p1)
+                 ypy <- add myCost (Bin Add v sqy)
+                 logy <- add myCost (Uni Log ypy)
+                 log10y <- add myCost (Bin Div logy log10)
 
+                 x <- add myCost (Bin Sub log10t log10y)
+                 y <- add myCost (Bin Power x c1)
+                 add myCost (Bin Div y c2)
 
 buildNLLEGraph Gaussian m egraph root = runIdentity (addToEg `runStateT` egraph)
   where
@@ -329,6 +367,7 @@ buildNLLEGraph ROXY m egraph root = error "ROXY not supported with cache"
 -- | Prediction for different distributions
 predict :: Distribution -> Fix SRTree -> PVector -> SRMatrix -> SRVector
 predict MSE       tree theta xss = evalTree xss theta tree
+predict LOG10     tree theta xss = evalTree xss theta tree
 predict Gaussian  tree theta xss = evalTree xss theta tree
 predict Bernoulli tree theta xss = logistic $ evalTree xss theta tree
 predict Poisson   tree theta xss = exp $ evalTree xss theta tree
@@ -366,6 +405,11 @@ gradNLLArr MSE xss ys mYerr tree j2ix theta =
   where
     (yhat, grad) = reverseModeArr xss ys mYerr theta tree j2ix
     grad'        = M.map nanTo0 grad
+gradNLLArr LOG10 xss ys mYerr tree j2ix theta =
+  (M.sum yhat, delay grad')
+  where
+    (yhat, grad) = reverseModeArr xss ys mYerr theta tree j2ix
+    grad'        = M.map nanTo0 grad
 gradNLLArr Gaussian xss ys mYerr tree j2ix theta =
   (M.sum yhat, delay grad')
   where
@@ -391,6 +435,11 @@ gradNLLArr ROXY xss ys mYerr tree j2ix theta =
 
 -- | Gradient of the negative log-likelihood
 gradNLLGraph MSE xss ys mYerr tree theta =
+  (M.sum yhat, grad')
+  where
+    (yhat, grad) = reverseModeGraph xss ys mYerr theta tree
+    grad'        = VS.map nanTo0 grad
+gradNLLGraph LOG10 xss ys mYerr tree theta =
   (M.sum yhat, grad')
   where
     (yhat, grad) = reverseModeGraph xss ys mYerr theta tree
@@ -424,6 +473,11 @@ gradNLLEGraph MSE xss ys mYerr egraph cache root theta =
   where
     (yhat, grad) = reverseModeEGraph xss ys mYerr egraph cache root theta
     grad'                = VS.map nanTo0 grad
+gradNLLEGraph LOG10 xss ys mYerr egraph cache root theta =
+  (M.sum yhat, grad')
+  where
+    (yhat, grad) = reverseModeEGraph xss ys mYerr egraph cache root theta
+    grad'        = VS.map nanTo0 grad
 gradNLLEGraph Gaussian xss ys mYerr egraph cache root theta =
   (M.sum yhat, grad')
   where
@@ -543,6 +597,7 @@ hessianNLL dist mYerr xss ys tree theta = makeArray cmp (Sz (p :. p)) build
 
     (phi, phi') = case dist of
                     MSE       -> (yhat, M.replicate cmp (Sz m) 1)
+                    LOG10     -> (yhat, M.replicate cmp (Sz m) 1)
                     Gaussian  -> (yhat, M.replicate cmp (Sz m) 1)
                     Bernoulli -> (logistic yhat, phi*(M.replicate cmp (Sz m) 1 - phi))
                     Poisson   -> (exp yhat, phi)

@@ -1,5 +1,13 @@
 # Changelog for srtree
 
+## 2.0.1.7 
+
+- Added log10 MSE fitness function 
+
+## 2.0.1.6
+
+- Added Fractional Bayes model selection
+
 ## 2.0.1.5
 
 - Fix `refit` to only replace the fitness if it improves the fitness 
