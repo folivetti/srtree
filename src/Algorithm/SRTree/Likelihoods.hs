@@ -128,7 +128,7 @@ nll :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVe
 -- | Mean Squared error (not a distribution)
 nll MSE _ xss ys t theta = mse xss ys t theta
 
-nll LOG10 _ xss ys t theta = traceShow ("LOG10" <> show res) -- $ M.sum $ (f (delay ys) - f yhat) ^ (2 :: Int)
+nll LOG10 _ xss ys t theta = traceShow ("LOG10" <> show res) res -- $ M.sum $ (f (delay ys) - f yhat) ^ (2 :: Int)
   where
     res = M.sum $ (f (delay ys) - f yhat) ^ (2 :: Int)
     yhat   = evalTree xss theta t
