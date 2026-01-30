@@ -128,12 +128,12 @@ nll :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVe
 -- | Mean Squared error (not a distribution)
 nll MSE _ xss ys t theta = mse xss ys t theta
 
-nll LOG10 _ xss ys t theta = M.sum $ M.map (`logBase` 10) $ (f (delay ys) / f yhat) ^ (2 :: Int)
+nll LOG10 _ xss ys t theta = M.sum $ M.map (`logBase` 10) $ (f yhat / f (delay ys)) ^ (2 :: Int)
   where
     yhat   = evalTree xss theta t
     (Sz m) = M.size ys
     f :: Array D Ix1 Double -> Array D Ix1 Double
-    f z    =  (z + M.map (\zi -> sqrt (zi^2 + 1)) z)
+    f z    =  (z + M.map (\zi -> sqrt (zi^2 + 1e-6)) z)
     -- log ys - log y = log (ys/y)
 
 -- | Gaussian distribution, theta must contain an additional parameter corresponding
@@ -238,10 +238,10 @@ nll ROXY mYerr xss ys tree theta
 -- WARNING: pass tree with parameters
 -- TODO: handle error similar to ROXY
 buildNLL MSE m tree = ((tree - var (-1)) ** 2) / constv m
-buildNLL LOG10 m tree = (((log (tree' / y)) / log 10) ** 2) / constv m
+buildNLL LOG10 m tree = (((log (y / tree')) / log 10) ** 2) / constv m
   where
-    tree' = (tree + sqrt(tree^2 + 1))
-    y     = (var (-1) + sqrt(var (-1) ^ 2 + 1))
+    tree' = (tree + sqrt(tree^2 + 1e-6))
+    y     = (var (-1) + sqrt(var (-1) ^ 2 + 1e-6))
 
 buildNLL Gaussian m tree =  (square(tree - var (-1)) / square (param p)) + log ((square (param p)))
   where
@@ -288,7 +288,7 @@ buildNLLEGraph LOG10 m egraph root = runIdentity $ addToEg  `runStateT` egraph
                  c1 <- add myCost (Const 2)
                  c2 <- add myCost (Const m)
                  c3 <- add myCost (Const 10)
-                 c4 <- add myCost (Const 1)
+                 c4 <- add myCost (Const 1e-6)
                  -- log (x + sqrt (x^2 + 1)) / log 10
                  log10 <- add myCost (Uni Log c3)
                  t2 <- add myCost (Uni Square root)
@@ -302,13 +302,13 @@ buildNLLEGraph LOG10 m egraph root = runIdentity $ addToEg  `runStateT` egraph
                  sqy <- add myCost (Uni Sqrt y2p1)
                  ypy <- add myCost (Bin Add v sqy)
 
-                 tptypy <- add myCost (Bin Div tpt ypy)
+                 tptypy <- add myCost (Bin Div ypy tpt)
 
                  logy <- add myCost (Uni Log tptypy)
                  log10y <- add myCost (Bin Div logy log10)
 
                  --x <- add myCost (Bin Sub log10t v)
-                 y <- add myCost (Bin Power log10y c1)
+                 y <- add myCost (Bin Power tptypy c1)
                  add myCost (Bin Div y c2)
 
 buildNLLEGraph Gaussian m egraph root = runIdentity (addToEg `runStateT` egraph)
@@ -397,7 +397,7 @@ gradNLL dist mYerr xss ys tree theta = (f, delay grad) -- gradNLLArr dist xss ys
     treeArr   = IntMap.toAscList $ tree2arr tree'
     j2ix      = IntMap.fromList $ Prelude.zip (Prelude.map fst treeArr) [0..]
     flog :: Array D Ix1 Double -> Array D Ix1 Double
-    flog z    = M.map (`logBase` 10) (z + M.map sqrt (z^2 + 1))
+    flog z    = M.map (`logBase` 10) (z + M.map sqrt (z^2 + 1e-6))
     ys'       = (if dist==LOG10 then id else id) (delay ys)
 
 
@@ -415,7 +415,6 @@ gradNLLArr LOG10 xss ys mYerr tree j2ix theta =
   where
     (yhat, grad) = reverseModeArr xss ys mYerr theta tree j2ix
     grad'     = M.map nanTo0 grad
-    ys'       = M.computeAs M.S $ M.map (`logBase` 10) (delay ys + M.map sqrt (delay ys^2 + 1))
 gradNLLArr Gaussian xss ys mYerr tree j2ix theta =
   (M.sum yhat, delay grad')
   where
@@ -450,8 +449,6 @@ gradNLLGraph LOG10 xss ys mYerr tree theta =
   where
     (yhat, grad) = reverseModeGraph xss ys mYerr theta tree
     grad'        = VS.map nanTo0 grad
-    ys' :: PVector
-    ys'       = M.computeAs M.S $ M.map (`logBase` 10) (delay ys + M.map sqrt (delay ys^2 + 1))
 gradNLLGraph Gaussian xss ys mYerr tree theta =
   (M.sum yhat, grad')
   where
@@ -487,7 +484,7 @@ gradNLLEGraph LOG10 xss ys mYerr egraph cache root theta =
     (yhat, grad) = reverseModeEGraph xss ys mYerr egraph cache root theta
     grad'        = VS.map nanTo0 grad
     ys' :: PVector
-    ys'       = M.computeAs M.S $ M.map (`logBase` 10) (delay ys + M.map sqrt (delay ys^2 + 1))
+    ys'       = M.computeAs M.S $ M.map (`logBase` 10) (delay ys + M.map sqrt (delay ys^2 + 1e-6))
 gradNLLEGraph Gaussian xss ys mYerr egraph cache root theta =
   (M.sum yhat, grad')
   where
