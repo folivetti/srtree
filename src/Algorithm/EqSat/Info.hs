@@ -30,6 +30,7 @@ import qualified Data.IntSet as IntSet
 import Algorithm.EqSat.Egraph
 import Data.AEq (AEq ((~==)))
 import Algorithm.EqSat.Queries
+
 import Data.Maybe
 import qualified Data.Set as TrueSet
 import Data.Sequence (Seq(..), (><))
@@ -170,6 +171,8 @@ combineConsts (Bin op l r) = evalOp' l r
 insertFitness :: Monad m => EClassId -> Double -> [PVector] -> EGraphST m ()
 insertFitness eId' fit params = do
   eId <- canonical eId'
+  tree <- getBestExpr' eId
+  let f_compl = countNodes tree * log (countUniqueTokens tree)
   ec <- gets ((IntMap.! eId) . _eClass)
   let oldFit  = _fitness . _info $ ec
   --when (oldFit < Just fit) $ do
@@ -181,6 +184,7 @@ insertFitness eId' fit params = do
     then modify' $ over (eDB . unevaluated) (IntSet.delete eId)
                  . over (eDB . fitRangeDB) (insertRange eId fit)
                  . over (eDB . sizeFitDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith (><) sz Empty)
+                 . over (eDB . dlRangeDB) (insertRange eId f_compl)
     else modify' $ over (eDB . fitRangeDB) (insertRange eId fit . removeRange eId (fromJust oldFit))
 
 insertDL :: Monad m => EClassId -> Double -> EGraphST m ()
@@ -193,3 +197,11 @@ insertDL eId fit' = do
   modify' $ over eClass (IntMap.insert eId newEc)
   modify' $ over (eDB . dlRangeDB) (insertRange eId fit)
           . over (eDB . sizeDLDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith (><) sz Empty)
+
+-- | TODO: remove from here gets the best expression given the default cost function
+getBestExpr' :: Monad m => EClassId -> EGraphST m (Fix SRTree)
+getBestExpr' eid = do eid' <- canonical eid
+                      best <- gets (_best . _info . (IntMap.! eid') . _eClass)
+                      childs <- mapM getBestExpr' $ childrenOf best
+                      pure . Fix $ replaceChildren childs best
+
