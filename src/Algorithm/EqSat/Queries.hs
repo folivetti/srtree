@@ -80,6 +80,33 @@ getTopECLassThat b n p = do
                                               then go (m-1) (ecId:bests) t
                                               else go m bests t
 
+getTopECLassInRange :: Monad m => Bool -> Int -> (EClass -> Double) -> [(Double, Double)] -> EGraphST m [EClassId]
+getTopECLassInRange b n p range = do
+  let f = if b then _fitRangeDB else _dlRangeDB
+  gets (f . _eDB)
+    >>= go n [] range
+  where
+    inRange v (x, y)
+      | v >= x && v <= y = 0
+      | v < x = -1
+      | v > y = 1
+      | otherwise = 1 
+
+    go :: Monad m => Int -> [EClassId] -> [(Double, Double)] -> RangeTree Double -> EGraphST m [EClassId]
+    go 0 bests _ rt = pure bests
+    go m bests (r:rs) rt = case rt of
+                             Empty   -> pure bests
+                             t :|> y -> do let x = snd y
+                                           ecId <- canonical x
+                                           ec <- gets ((IntMap.! ecId) . _eClass)
+                                           if (isInfinite . fromJust . _fitness . _info $ ec)
+                                             then go m bests (r:rs) t
+                                             else do let v = p ec 
+                                                     case (v `inRange` r) of
+                                                       0  -> go (m-1) (ecId:bests) rs t -- it is in range, go to the next range 
+                                                       -1 -> go m bests rs (t :|> y) -- it is smaller than the range, keep looking in the right side of the tree
+                                                       1  -> go m bests (r:rs) t -- y is still greater than the range, keep looking in the same range
+
 getTopECLassIn :: Monad m => Bool -> Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
 getTopECLassIn b n p ecs' = do
   let f = if b then _fitRangeDB else _dlRangeDB
