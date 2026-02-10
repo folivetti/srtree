@@ -80,8 +80,8 @@ getTopECLassThat b n p = do
                                               then go (m-1) (ecId:bests) t
                                               else go m bests t
 
-getTopECLassInRange :: Monad m => Bool -> Int -> (EClass -> Double) -> [(Double, Double)] -> EGraphST m [EClassId]
-getTopECLassInRange b n p range = do
+getTopEClassInRange :: Monad m => Bool -> Int -> (EClass -> Double) -> [(Double, Double)] -> EGraphST m [EClassId]
+getTopEClassInRange b n p range = do
   let f = if b then _fitRangeDB else _dlRangeDB
   gets (f . _eDB)
     >>= go n [] range
@@ -93,7 +93,8 @@ getTopECLassInRange b n p range = do
       | otherwise = 1 
 
     go :: Monad m => Int -> [EClassId] -> [(Double, Double)] -> RangeTree Double -> EGraphST m [EClassId]
-    go 0 bests _ rt = pure bests
+    go _ bests []      _ = pure bests 
+    go 0 bests (r:rs) rt = go n bests rs rt
     go m bests (r:rs) rt = case rt of
                              Empty   -> pure bests
                              t :|> y -> do let x = snd y
@@ -103,8 +104,8 @@ getTopECLassInRange b n p range = do
                                              then go m bests (r:rs) t
                                              else do let v = p ec 
                                                      case (v `inRange` r) of
-                                                       0  -> go (m-1) (ecId:bests) rs t -- it is in range, go to the next range 
-                                                       -1 -> go m bests rs (t :|> y) -- it is smaller than the range, keep looking in the right side of the tree
+                                                       0  -> go (m-1) (ecId:bests) (r:rs) t -- it is in range, go to the next range 
+                                                       -1 -> go n bests rs (t :|> y) -- it is smaller than the range, get the first n of the next range
                                                        1  -> go m bests (r:rs) t -- y is still greater than the range, keep looking in the same range
 
 getTopECLassIn :: Monad m => Bool -> Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
