@@ -172,7 +172,8 @@ insertFitness :: Monad m => EClassId -> Double -> [PVector] -> EGraphST m ()
 insertFitness eId' fit params = do
   eId <- canonical eId'
   tree <- getBestExpr' eId
-  let f_compl = countNodes tree * log (countUniqueTokens tree)
+  let p = fromIntegral (length params)
+  let f_compl = countNodes tree * log (countUniqueTokens tree) + p * (log (2 * pi * exp(1 - log 3)) - log p) / 2.0
   ec <- gets ((IntMap.! eId) . _eClass)
   let oldFit  = _fitness . _info $ ec
   --when (oldFit < Just fit) $ do
