@@ -551,6 +551,21 @@ getAllChildBestEClasses eId' = do
                 else do eids' <- mapM go eids
                         pure ((n : eids) <> concat eids')
 
+getAllChildBestEClassesRep :: Monad m => EClassId -> EGraphST m [EClassId]
+getAllChildBestEClassesRep eId' = do
+  eId <- canonical eId'
+  go eId
+
+  where
+    go :: Monad m => Int -> EGraphST m [Int]
+    go n = do node <- gets (_best . _info . (IntMap.! n) . _eClass)
+              let hasTerminal = (null . childrenOf) node
+              eids <- mapM canonical $ childrenOf node
+              if hasTerminal
+                then pure [n]
+                else do eids' <- mapM go eids
+                        pure ((n : eids) <> concat eids')
+
 -- | returns a random expression rooted at e-class `eId`
 getRndExpressionFrom :: EClassId -> EGraphST (State StdGen) (Fix SRTree)
 getRndExpressionFrom eId' = do
