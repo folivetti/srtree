@@ -564,7 +564,7 @@ getAllChildBestEClassesRep eId' = do
               if hasTerminal
                 then pure [n]
                 else do eids' <- mapM go eids
-                        pure ((n : eids) <> concat eids')
+                        pure (n : concat eids')
 
 -- | returns a random expression rooted at e-class `eId`
 getRndExpressionFrom :: EClassId -> EGraphST (State StdGen) (Fix SRTree)
