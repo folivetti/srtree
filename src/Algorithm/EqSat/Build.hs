@@ -508,6 +508,35 @@ getNExpressionsFrom' n d eId' = do
           else do ts <- go n'' (d-1) ns
                   pure (tt:ts)
 
+getNEclassFrom :: Monad m => Int -> EClassId -> EGraphST m [[EClassId]]
+getNEclassFrom n eid = getNEclassFrom' n 15 eid
+
+getNEclassFrom' :: Monad m => Int -> Int -> EClassId -> EGraphST m [[EClassId]]
+getNEclassFrom' _ 0 _ = pure []
+getNEclassFrom' n d eId' = do
+  eId <- canonical eId'
+  nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! eId) . _eClass)
+  (Prelude.map (eId:) <$> go n d nodes)
+  where
+    --go :: Int -> Int -> [ENode] -> EGraphST m [[EClassId]]
+    go n' _ []     = pure []
+    go n' 0 ts     = pure []
+    go n' d (node:ns) = do
+        tt <- case node of
+                Bin op l r -> do l' <- getNEclassFrom' n' (d-1) l
+                                 r' <- getNEclassFrom' n' (d-1) r
+                                 pure $ Prelude.take n [li <> ri | li <- l', ri <- r']
+                Uni f t    -> getNEclassFrom' n' (d-1) t -- [[eid2:eid1]]
+                Var ix     -> pure [[]]
+                Const x    -> pure [[]]
+                Param ix   -> pure [[]]
+        pure tt
+        --let n'' = n' - length tt
+        --if n'' <= 0
+        --  then pure [tt]
+        --  else do ts <- go n'' (d-1) ns
+        --          pure (tt:ts)
+
 getAllChildEClasses :: Monad m => EClassId -> EGraphST m [EClassId]
 getAllChildEClasses eId' = do
   eId <- canonical eId'
