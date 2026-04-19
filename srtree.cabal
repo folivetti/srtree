@@ -67,7 +67,7 @@ library
     , base >=4.19 && <5
     , binary >=0.8.9.1 && <0.9
     , bytestring >=0.11 && <0.13
-    , containers >=0.6.7 && <0.8
+    , containers >=0.6.7 && <0.9
     , dlist ==1.0.*
     , exceptions >=0.10.7 && <0.11
     , filepath >=1.4.0.0 && <1.6
@@ -102,7 +102,7 @@ executable srsimplify
     , base >=4.19 && <5
     , binary >=0.8.9.1 && <0.9
     , bytestring >=0.11 && <0.13
-    , containers >=0.6.7 && <0.8
+    , containers >=0.6.7 && <0.9
     , dlist ==1.0.*
     , exceptions >=0.10.7 && <0.11
     , filepath >=1.4.0.0 && <1.6
@@ -142,7 +142,7 @@ executable srtools
     , base >=4.19 && <5
     , binary >=0.8.9.1 && <0.9
     , bytestring >=0.11 && <0.13
-    , containers >=0.6.7 && <0.8
+    , containers >=0.6.7 && <0.9
     , dlist ==1.0.*
     , exceptions >=0.10.7 && <0.11
     , filepath >=1.4.0.0 && <1.6
@@ -182,7 +182,7 @@ executable tinygp
     , base >=4.19 && <5
     , binary >=0.8.9.1 && <0.9
     , bytestring >=0.11 && <0.13
-    , containers >=0.6.7 && <0.8
+    , containers >=0.6.7 && <0.9
     , dlist ==1.0.*
     , exceptions >=0.10.7 && <0.11
     , filepath >=1.4.0.0 && <1.6
@@ -222,7 +222,7 @@ test-suite srtree-test
     , base >=4.19 && <5
     , binary >=0.8.9.1 && <0.9
     , bytestring >=0.11 && <0.13
-    , containers >=0.6.7 && <0.8
+    , containers >=0.6.7 && <0.9
     , dlist ==1.0.*
     , exceptions >=0.10.7 && <0.11
     , filepath >=1.4.0.0 && <1.6
