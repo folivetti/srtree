@@ -15,6 +15,7 @@ import Control.Arrow
 import Data.List(unfoldr)
 
 import Data.SRTree.Eval
+import Debug.Trace (traceShow)
 
 type MMassArray m = MMA.MArray (PrimState m) S Ix2 Double
 
@@ -264,7 +265,8 @@ chunkBy n = unfoldr go
           go x  = Just $ splitAt n x
 
 genSplineFun :: [(Double, Double)] -> Double -> Double
-genSplineFun pts x = go xs $ zip coefs (tail coefs)
+genSplineFun pts x | length xs < 2 = x
+                   | otherwise     = go xs $ zip coefs (tail coefs)
   where
     xs    = map fst pts
     coefs = cubicSplineCoefficients pts
@@ -276,3 +278,4 @@ genSplineFun pts x = go xs $ zip coefs (tail coefs)
       | x < x1 = evalAt c1 c2 x
       | x >= x1 && x <= x2 = evalAt c1 c2 x
       | otherwise          = go (x2:xs) cs
+    --go _ _ = x

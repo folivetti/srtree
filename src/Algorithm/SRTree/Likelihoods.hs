@@ -139,10 +139,14 @@ nll LOG10 _ xss ys t theta = M.sum $ (M.map (logBase 10) $ (f (delay ys) / f yha
 -- | Gaussian distribution, theta must contain an additional parameter corresponding
 -- to variance.
 nll Gaussian mYerr xss ys t theta
-  | nParams == (p'-1) = error "For Gaussian distribution theta must contain the variance as its last value."
-  | otherwise     = 0.5*(sse xss ys t theta / s + m*log (2*pi*s))
+  -- | nParams == p' = error "For Gaussian distribution theta must contain the variance as its last value."
+  | otherwise     = if nParams < p'
+                       then 0.5*(sse xss ys t theta / s + m*log (2*pi*s))
+                       else 0.5*(sse xss ys t theta * (exp $ negate s') + m*log(2*pi) + m*s')
   where
-    s       = sqrt $ mse xss ys t theta -- theta M.! (p' - 1)
+    s       = mse xss ys t theta
+    s'      = (theta M.! (p' - 1))
+    -- s       = (theta M.! (p' - 1))
     (Sz m') = M.size ys 
     (Sz p') = M.size theta
     nParams = countParamsUniq t
@@ -243,9 +247,12 @@ buildNLL LOG10 m tree = (((log (y / tree')) / log 10) ** 2) / constv m
     tree' = (tree + sqrt(tree^2 + 1e-10))
     y     = (var (-1) + sqrt(var (-1) ^ 2 + 1e-10))
 
-buildNLL Gaussian m tree =  (square(tree - var (-1)) / square (param p)) + log ((square (param p)))
+buildNLL Gaussian m tree =  (square(tree - var (-1)) * (e (negate (param p)))) + (((param p)))
   where
+    -- (f(x) - y)^2 / s^2 + log(s^2)
     square = Fix . Uni Square
+    e = Fix. Uni Exp
+
     p = countParamsUniq tree
 buildNLL HGaussian m tree = (tree - var (-1)) ** 2 / var (-2) + constv m * log (2*pi* var (-2))
 buildNLL Poisson m tree = var (-1) * log (var (-1)) + exp tree - var (-1) * tree
@@ -418,8 +425,9 @@ gradNLLArr LOG10 xss ys mYerr tree j2ix theta =
 gradNLLArr Gaussian xss ys mYerr tree j2ix theta =
   (M.sum yhat, delay grad')
   where
+    p = VS.length theta
     (yhat, grad) = reverseModeArr xss ys mYerr theta tree j2ix
-    grad'        = M.map nanTo0 grad
+    grad'        = M.map nanTo0 grad -- (M.imap (\ix v -> if ix==p-1 then 0 else v) grad)
 gradNLLArr Bernoulli xss ys mYerr tree j2ix theta
   | M.any (\x -> x /= 0 && x /= 1) ys = error "For Bernoulli distribution the output must be either 0 or 1."
   | otherwise                         = (M.sum yhat, delay grad')
@@ -452,8 +460,9 @@ gradNLLGraph LOG10 xss ys mYerr tree theta =
 gradNLLGraph Gaussian xss ys mYerr tree theta =
   (M.sum yhat, grad')
   where
+    p = VS.length theta
     (yhat, grad) = reverseModeGraph xss ys mYerr theta tree
-    grad'        = VS.map nanTo0 grad
+    grad'        = VS.map nanTo0 grad -- (grad VS.// [(p-1,0)])
 gradNLLGraph Bernoulli xss ys mYerr tree theta
   | M.any (\x -> x /= 0 && x /= 1) ys = error "For Bernoulli distribution the output must be either 0 or 1."
   | otherwise                         = (M.sum yhat, grad')
@@ -578,6 +587,31 @@ fisherNLL dist mYerr xss ys tree theta = makeArray cmp (Sz p) build
 -- it is better to keep them as different functions for efficiency
 hessianNLL :: Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> SRMatrix
 hessianNLL ROXY mYerr xss ys tree theta = undefined
+hessianNLL Gaussian mYerr xss ys tree theta = makeArray cmp (Sz (p :. p)) build
+  where
+    build (ix :. iy) = let dtdix   = deriveByParam ix tree
+                           dtdiy   = deriveByParam iy tree
+                           d2tdixy = deriveByParam iy dtdix
+                           fx      = eval dtdix
+                           fy      = eval dtdiy
+                           fxy     = eval d2tdixy
+                       in if ix < p-1 && iy < p-1
+                            then M.sum . (/delay yErr) $ fx * fy - res * fxy
+                            else if ix == p-1 && iy == p-1
+                                   then (*0.5) . M.sum . (/ delay yErr ) $ res*res
+                                   else if ix == p-1
+                                          then M.sum . (/delay yErr) $ res * fy
+                                          else M.sum . (/delay yErr) $ res * fx
+    (Sz m) = M.size ys
+    (Sz p) = M.size theta
+    cmp = getComp xss
+    yErr :: Array S Ix1 Double
+    yErr = M.replicate compMode (Sz m)  $ exp (theta M.! (p-1)) / est
+    yhat   = eval tree
+    res    = delay ys - yhat
+    eval   = evalTree xss theta
+    est    = fromIntegral (m - p + 1)
+
 hessianNLL dist mYerr xss ys tree theta = makeArray cmp (Sz (p :. p)) build
   where
     build (ix :. iy) = let dtdix   = deriveByParam ix t' 

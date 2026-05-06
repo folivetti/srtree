@@ -108,11 +108,12 @@ minimizeNLLWithFixedParam' alg dist mYerr niter xss ys tree ix t0
     (Sz n)     = size t0
     (Sz m)     = size ys
     setTo0     = (VS.// [(ix, 0.0)])
-    funAndGrad = second (setTo0 . toStorableVector . computeAs S) . gradNLLArr dist xss ys mYerr treeArr j2ix
+    --funAndGrad = second (setTo0 . toStorableVector . computeAs S) . gradNLLArr dist xss ys mYerr treeArr j2ix
+    funAndGrad = second (setTo0) . gradNLLGraph dist xss ys mYerr tree'
+    --(f, _)     = gradNLL dist mYerr xss ys tree t0 -- if there's no parameter or no iterations
+    (f, _)     = gradNLLGraph dist xss ys mYerr tree' t0'
 
-    (f, _)     = gradNLL dist mYerr xss ys tree t0 -- if there's no parameter or no iterations
-
-    algorithm  = alg funAndGrad Nothing -- PRAXIS (fst . funAndGrad) [] Nothing -- TNEWTON funAndGrad Nothing
+    algorithm  = alg funAndGrad (Just $ VectorStorage $ fromIntegral n) -- PRAXIS (fst . funAndGrad) [] Nothing -- TNEWTON funAndGrad Nothing
     stop       = ObjectiveRelativeTolerance 1e-8 :| [ObjectiveAbsoluteTolerance 1e-8, MaximumEvaluations (fromIntegral niter)]
     problem    = LocalProblem (fromIntegral n) stop algorithm
     (t_opt, nEvs) = case minimizeLocal problem t0' of

@@ -27,6 +27,7 @@ data Args = Args
       , sigma       :: Double
       , alpha       :: Double
       , ptype       :: PType
+      , contour     :: Bool
     } deriving Show
 
 -- parser of command line arguments
@@ -142,6 +143,9 @@ opt = Args
         <> value Constrained
         <> help "Profile Likelihood method. Default: Constrained. NOTE: Constrained method only calculates the endpoint."
         )
+    <*> switch
+       ( long "contour"
+       <> help "display contour plot points.")
 
 -- helper functions to show the possible options
 mkDescription :: Show a => [a] -> [String]

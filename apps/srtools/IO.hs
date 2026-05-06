@@ -1,11 +1,13 @@
 {-# language BlockArguments #-}
 {-# language LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 module IO where
 
 import System.IO ( hClose, hPutStrLn, openFile, stderr, stdout, IOMode(WriteMode), Handle )
 import qualified Data.Massiv.Array as A
 import Data.List ( intercalate )
-import Control.Monad ( unless, forM_ )
+import Control.Monad ( unless, forM_, when, forM )
 import System.Random ( StdGen )
 
 import Data.SRTree ( SRTree (..), Fix (..), var, floatConstsToParam, relabelVars )
@@ -14,9 +16,14 @@ import Algorithm.SRTree.ConfidenceIntervals ( printCI, BasicStats(_stdErr, _corr
 import qualified Data.SRTree.Print as P
 import Data.SRTree.Eval ( compMode )
 
-import Args ( Args(outfile, alpha,dist,niter,sigma) )
+import Args ( Args(outfile, alpha,dist,niter,sigma,contour) )
 import Report
 import Data.SRTree.Recursion ( cata )
+
+import Graphics.Gnuplot.Simple
+import Graphics.Gnuplot.Terminal.PostScript
+
+
 
 import Debug.Trace ( trace, traceShow )
 
@@ -35,13 +42,80 @@ openWriteWithDefault dflt ""    = pure dflt
 openWriteWithDefault _    fname = openFile fname WriteMode
 {-# INLINE openWriteWithDefault #-}
 
+type PointWithBand = (Double, Double, Double, Double)
+
+plotWithBand :: [PointWithBand] -> IO ()
+plotWithBand pts =
+  plotPathsStyle
+    [
+    -- , Custom "terminal" ["postscript eps enhanced color solid"]
+      Custom "terminal" ["postscript font 'Arial,22'"]
+    , Title "Prediction Intervals"
+    , EPS "pis.eps"
+    , Custom "border" []
+    , Custom "xtics" ["nomirror"]
+    , Custom "ytics" ["nomirror"]
+    , Custom "tics" ["out"]
+    , XLabel "x"
+    , YLabel "y"
+    , Key Nothing
+
+
+    -- transparent fill
+    , Custom "style" ["fill transparent solid 0.35 noborder"]
+    ]
+    [ -- confidence band
+      ( defaultStyle
+      , bandPolygon pts
+      )
+
+      -- fitted line
+    , ( defaultStyle
+          { plotType = Lines
+          }
+      , fitLine pts
+      )
+
+      -- points
+    , ( defaultStyle
+          { plotType = Points
+          }
+      , fitLine pts
+      )
+    ]
+
+
+-- Main fitted curve: (x, y)
+fitLine :: [PointWithBand] -> [(Double, Double)]
+fitLine xs =
+  [ (x, y)
+  | (x, y, _, _) <- xs
+  ]
+
+-- Confidence band polygon:
+-- upper path + reversed lower path
+bandPolygon :: [PointWithBand] -> [(Double, Double)]
+bandPolygon xs =
+  upper ++ reverse lower
+  where
+    upper =
+      [ (x, yhigh)
+      | (x, _, _, yhigh) <- xs
+      ]
+
+    lower =
+      [ (x, ylow)
+      | (x, _, ylow, _) <- xs
+      ]
+
+
 -- procecss a single tree and return all the available stats
 processTree :: Args        -- command line arguments
             -> StdGen      -- random number generator
             -> Datasets    -- datasets
             -> Fix SRTree  -- expression in tree format
             -> Int         -- index of the parsed expression 
-            -> (BasicInfo, SSE, SSE, Info, (BasicStats, [CI], [CI], [CI], [CI]))
+            -> (BasicInfo, SSE, SSE, Info, (BasicStats, [CI], [CI], [CI], [CI], Plot))
 processTree args seed dset t ix = (basic, sseOrig, sseOpt, info, cis)
   where
     (tree, theta0')  = floatConstsToParam t
@@ -178,7 +252,7 @@ printResultsScreen args seed dset varnames targt exprs = do
     nplaces   = 4
 
 
-    printToScreen ix (basic, _, sseOpt, info, (sts, cis, pis_tr, pis_val, pis_te)) =
+    printToScreen ix (basic, _, sseOpt, info, (sts, cis, pis_tr, pis_val, pis_te, plots)) =
       do let (transformedT, newvars) = getTransformedFeatures (_expr basic)
              varnames' = ['z': show ix | ix <- [0 .. length newvars - 1]]
          putStrLn $ "=================== EXPR " <> show ix <> " =================="
@@ -227,4 +301,30 @@ printResultsScreen args seed dset varnames targt exprs = do
          unless (null pis_te) do
            putStrLn "\nConfidence intervals (predictions test):\n\nlower <= val <= upper"
            mapM_ (printCI nplaces) pis_te
+         -- putStrLn "\nContour of 0,1:"
+         -- mapM_ (\(x,y) -> putStrLn $ show x <> " " <> show y) conts
+         when (contour args) do
+           let conts = _contours plots
+           forM_ conts $ \(ix, iy, cs) -> do
+             let xlbl  = "{/Symbol q}" <> show ix
+                 ylbl  = "{/Symbol q}" <> show iy
+                 title = "Contour of " <> xlbl <> " and " <> ylbl
+                 fname = "contour_" <> show ix <> "_" <> show iy <> ".eps"
+             plotPath [Custom "terminal" ["postscript font 'Arial,22'"], Title title, XLabel xlbl, YLabel ylbl, Key Nothing, EPS fname] cs
+             putStr "\nPlot to "
+             putStrLn fname
+           let theta_tau = _theta_tau plots
+           forM_ (zip [0..] theta_tau) $ \(ix, cs) -> do
+             let xlbl  = "{/Symbol q}" <> show ix
+                 ylbl  = "{/Symbol t}"
+                 title = xlbl <> " x {/Symbol t}"
+                 fname = "tau_" <> show ix <> ".eps"
+             plotPath [Custom "terminal" ["postscript font 'Arial,30'"], Title title, XLabel xlbl, YLabel ylbl, Key Nothing, EPS fname] cs
+             putStr "\nPlot to "
+             putStrLn fname
+           plotWithBand $ _piplot plots
+
+
+           putStr "\nPlot to pis.eps\n"
+
          putStrLn "============================================================="

@@ -34,6 +34,11 @@ data Datasets = DS { _xTr     :: SRMatrix
                    , _yErrTe  :: Maybe PVector
                    }
 
+data Plot = Plot { _contours  :: [(Int, Int, [(Double, Double)])]
+                 , _theta_tau :: [[(Double, Double)]]
+                 , _piplot    :: [(Double, Double, Double, Double)]
+                 }
+
 -- basic fields name
 basicFields :: [String]
 basicFields = [ "Index"
@@ -233,8 +238,8 @@ getInfo args dset tree treeVal =
                          (_, Nothing)           -> 0.0
                          (Just xTe, Just yTe) -> nll dist' (_yErrTe dset) xTe yTe tOpt (A.fromList compMode thetaOpt)
 
-getCI :: Args -> Datasets -> BasicInfo -> Double -> (BasicStats, [CI], [CI], [CI], [CI])
-getCI args dset basic alpha' = (stats', cis, pis_tr, pis_val, pis_te)
+getCI :: Args -> Datasets -> BasicInfo -> Double -> (BasicStats, [CI], [CI], [CI], [CI], Plot)
+getCI args dset basic alpha' = (stats', cis, pis_tr, pis_val, pis_te, Plot contours taus piplots)
   where
     (Sz n)     = A.size yTr
     (tree, _)  = floatConstsToParam (_expr basic)
@@ -242,6 +247,9 @@ getCI args dset basic alpha' = (stats', cis, pis_tr, pis_val, pis_te)
     tau_max    = (quantile (fDistribution (_nParams basic) (n - _nParams basic)) (1 - 0.01))
     tau_max'   = sqrt $ quantile (fDistribution (_nParams basic) (n - _nParams basic)) (1 - alpha')
     (xTr, yTr) = (_xTr dset, _yTr dset)
+    xTe        = case _xTe dset of
+                      Nothing -> xTr
+                      Just x -> x
     dist'      = dist args
     stats'     = getStatsFromModel dist' (_yErrTr dset) xTr yTr tree (A.fromList compMode theta)
     profiles   = getAllProfiles (ptype args) dist' (_yErrTr dset) xTr yTr tree (A.fromList compMode theta) (_stdErr stats') estCIs alpha'
@@ -269,7 +277,7 @@ getCI args dset basic alpha' = (stats', cis, pis_tr, pis_val, pis_te)
 
     estPIS_tr  = predictionCI (Laplace stats') dist' predFun jac prof xTr tree (A.fromList compMode theta) alpha' []
     estPIS_val = predictionCI (Laplace stats') dist' predFun jac prof xTr tree (A.fromList compMode theta) alpha' []
-    estPIS_te  = predictionCI (Laplace stats') dist' predFun jac prof xTr tree (A.fromList compMode theta) alpha' []
+    estPIS_te  = predictionCI (Laplace stats') dist' predFun jac prof xTe tree (A.fromList compMode theta) alpha' []
 
     pis_tr    = predictionCI method dist' predFun jac prof xTr tree (A.fromList compMode theta) alpha' estPIS_tr
     pis_val   = case (_xVal dset, _yVal dset) of
@@ -278,3 +286,13 @@ getCI args dset basic alpha' = (stats', cis, pis_tr, pis_val, pis_te)
     pis_te    = case (_xTe dset, _yTe dset) of
                   (Nothing, _)  -> []
                   (Just xTe, _) -> predictionCI method dist' predFun jac prof xTe tree (A.fromList compMode theta) alpha' estPIS_te
+
+    n_true_params = if dist'==Gaussian then length theta - 1 else length theta
+    contours      = [(ix, iy, approximateContour n_true_params n profiles ix iy alpha') | ix <- [0 .. n_true_params-2], iy <- [ix+1 .. n_true_params-1]]
+    getPts l u ps = [(x, _theta2tau ps x) | x <- [l,l+0.01 .. u]]
+    taus          = case method of
+                         Profile _ pfs -> [ getPts (lower_ ci) (upper_ ci) (pfs !! ix)| (ix, ci) <- zip [0..] cis]
+                         _             -> []
+    x0            = if null pis_te then A.toList (xTr A.<! 0) else A.toList (xTe A.<! 0)
+    piplots       = [(xi, yi, yl, yu) | (xi, CI yi yl yu) <- zip x0 (if null pis_te then pis_tr else pis_te)]
+

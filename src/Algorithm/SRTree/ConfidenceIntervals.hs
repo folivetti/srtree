@@ -37,7 +37,7 @@ import Debug.Trace ( trace, traceShow )
 
 -- | profile likelihood algorithms: Bates (classical), ODE (faster), Constrained (fastest)
 -- The Constrained approach returns only the endpoints.
-data PType = Bates | ODE | Constrained deriving (Show, Read)
+data PType = Bates | ODE | Constrained deriving (Show, Read, Eq)
 
 -- | Confidence Interval using Laplace approximation or profile likelihood.
 data CIType = Laplace BasicStats | Profile BasicStats [ProfileT]
@@ -108,12 +108,12 @@ predictionCI (Laplace stats) _ predFun jacFun _ xss tree theta alpha _ = zipWith
     n        = length yhat
     (A.Sz k) = A.size theta
     t        = quantile (studentT . fromIntegral $ n - k) (1 - alpha / 2.0)
-    covs     = A.toList $ A.outerSlices $ _cov stats
+    covs     = Prelude.map (A.init) $ Prelude.init $ A.toList $ A.outerSlices $ _cov stats
     lows     = zipWith (-) yhat $ map (*t) resStdErr
     highs    = zipWith (+) yhat $ map (*t) resStdErr
 
     getResStdError row = sqrt $ (A.!.!) row $ A.fromList compMode $ map (row A.!.!) covs
-    resStdErr          = map getResStdError jac
+    resStdErr          = map (getResStdError . A.init) jac
 
 predictionCI (Profile _ _) dist predFun _ profFun xss tree theta alpha estPIs = zipWith3 f estPIs yhat xss' -- $ take 10 xss'
   where
@@ -181,7 +181,7 @@ calcTheta0 dist tree = case cata alg tree of
 
 -- calculate the profile likelihood of every parameter 
 getAllProfiles :: PType -> Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> PVector -> [CI] -> Double -> [ProfileT]
-getAllProfiles ptype dist mYerr xss ys tree theta stdErr estCIs alpha = reverse (getAll 0 [])
+getAllProfiles ptype dist mYerr xss ys tree theta stdErr estCIs alpha = getAll 0 []
   where
     (A.Sz k)   = A.size theta
     (A.Sz n)   = A.size ys
@@ -194,9 +194,12 @@ getAllProfiles ptype dist mYerr xss ys tree theta stdErr estCIs alpha = reverse 
                     Constrained -> getProfileCnstr dist mYerr xss ys tree theta (stdErr A.! ix) tau_max' ix
 
     getAll ix acc | ix == k   = acc
+                  | ix == k-1 && ptype == Constrained && dist == Gaussian = case getProfileODE   dist mYerr xss ys tree theta (stdErr A.! ix) (estCIs !! ix) tau_max ix of
+                                  Left t  -> getAllProfiles ptype dist mYerr xss ys tree t stdErr estCIs alpha
+                                  Right p -> getAll (ix + 1) (acc <> [p])
                   | otherwise = case profFun ix of
                                   Left t  -> getAllProfiles ptype dist mYerr xss ys tree t stdErr estCIs alpha
-                                  Right p -> getAll (ix + 1) (p : acc)
+                                  Right p -> getAll (ix + 1) (acc <> [p])
 
 -- calculates the profile likelihood of a single parameter 
 getProfile :: Distribution
@@ -274,7 +277,7 @@ getEndPoint :: Distribution -> Maybe PVector -> A.Array A.S Ix2 Double -> A.Arra
 getEndPoint dist mYerr xss ys tree theta tau_max ix isLeft =
   case minimizeAugLag problem (A.toStorableVector theta_opt) of
             Right sol -> solutionParams sol VS.! ix
-            Left e    -> traceShow e $ theta_opt A.! ix
+            Left e    -> theta_opt A.! ix
   where
     (A.Sz1 n) = A.size theta
 
@@ -285,7 +288,7 @@ getEndPoint dist mYerr xss ys tree theta tau_max ix isLeft =
     loss      = subtract loss_crit . nll dist mYerr xss ys tree . A.fromStorableVector compMode
     obj       = (if isLeft then id else negate) . (VS.! ix)
 
-    stop       = ObjectiveRelativeTolerance 1e-4 :| []
+    stop       = ObjectiveRelativeTolerance 1e-4 :| [MaximumEvaluations 1000]
     localAlg   = NELDERMEAD obj [] Nothing
     local      = LocalProblem (fromIntegral n) stop localAlg
     constraint = InequalityConstraint (Scalar loss) 1e-6
@@ -338,6 +341,7 @@ getProfileODE dist mYerr xss ys tree theta stdErr_i estCI tau_max ix
             v        = A.computeAs A.S $ A.snoc (A.map (*(-gamma)) grad) 1
             dotTheta = unsafePerformIO $ luSolve m v
         in A.fromStorableVector compMode $ VS.init $ A.toStorableVector dotTheta
+
     tsHi = linSpace 50 (optTh, upper_ estCI)
     tsLo = linSpace 50 (optTh, lower_ estCI)
     scanOn sig = foldMap (calcTau sig) . f . scanl (rk (odeFun sig)) (optTh, theta_opt)
@@ -346,7 +350,7 @@ getProfileODE dist mYerr xss ys tree theta stdErr_i estCI tau_max ix
     solLeft  = scanOn (-1) tsLo
     calcTau s t = let nll_i = nll dist mYerr xss ys tree $ snd t
                       z     = signum ((snd t A.! ix) - optTh) * sqrt (2 * nll_i - 2 * nll_opt)
-                   in if z == 0 || isNaN z then ([], []) else ([z], [snd t])
+                  in if z == 0 || isNaN z then ([], []) else ([z], [snd t])
 
 rk :: (Double -> PVector -> PVector) -> (Double, PVector) -> Double -> (Double, PVector)
 rk f (t, y) t' = (t', y !+! ((1.0/6.0) *. h' !*! (k1 !+! (2.0 *. k2) !+! (2.0 *. k3) !+! k4)))
@@ -377,8 +381,8 @@ getStatsFromModel dist mYerr xss ys tree theta = MkStats cov corr stdErr
     hess    = hessianNLL dist mYerr xss ys tree theta
     -- cov     = catch (unsafePerformIO (invChol hess)) (\e -> trace "cov NegDef" $ pure ident)
     fexcept :: (A.PrimMonad m, A.MonadThrow m, A.MonadIO m) => A.SomeException -> m SRMatrix
-    fexcept e = trace "cov NegDef" $ pure ident
-    cov     = unsafePerformIO $ catch (invChol hess) fexcept
+    fexcept e = trace ("cov NegDef" <> show hess) $ pure ident
+    cov     =  unsafePerformIO $ catch (invChol hess) fexcept
 
     stdErr   = A.makeArray compMode (A.Sz1 k) (\ix -> sqrt $ cov A.! (ix :. ix))
     stdErrSq = case outer stdErr stdErr of
@@ -413,7 +417,7 @@ splinesSketches tauScale (A.toList -> tau) (A.toList -> theta) theta2tau
   | otherwise      = genSplineFun gpq
   where
     gpq = sortOn fst [(x, acos y') | (x, y) <- zip tau theta
-                                   , let y' = theta2tau y / tauScale
+                                   , let y' = theta2tau y / (tauScale)
                                    , abs y' < 1 ]
 
 approximateContour :: Int -> Int -> [ProfileT] -> Int -> Int -> Double -> [(Double, Double)]
@@ -426,22 +430,25 @@ approximateContour nParams nPoints profs ix1 ix2 alpha = go 0
 
     -- calculate the spline for A-D
     tauScale = sqrt (fromIntegral nParams * quantile (fDistribution nParams (nPoints - nParams)) (1 - alpha))
-    splineG1 = splinesSketches tauScale (_taus prof1) (getCol ix2 (_thetas prof1)) theta2tau2
-    splineG2 = splinesSketches tauScale (_taus prof2) (getCol ix1 (_thetas prof2)) theta2tau1
-    angles   = [ (0, splineG1 1), (splineG2 1, 0), (pi, splineG1 (-1)), (splineG2 (-1), pi) ]
-    splineAD = genSplineFun points
+    splineG1 = splinesSketches tauScale (_taus prof2) (getCol ix1 (_thetas prof2)) theta2tau1
+    splineG2 = splinesSketches tauScale (_taus prof1) (getCol ix2 (_thetas prof1)) theta2tau2
+    angles   = [ (0, splineG2 1), (splineG1 1, 0), (pi, splineG2 (-1)), (splineG1 (-1), pi) ]
+
 
     applyIfNeg (x, y) = if y < 0 then (-x, -y) else (x ,y)
-    points   = sortOn fst
-             $ [applyIfNeg ((x+y)/2, x - y) | (x, y) <- angles]
-            <> (\(x,y) -> [(x + 2*pi, y)]) (head points)
+    points'  = [applyIfNeg ((x+y)/2, x - y) | (x, y) <- angles]
+    points   = sortOn fst $ (points' <> (\(x,y) -> [(x + 2*pi, y)]) (head points'))
+    splineAD = genSplineFun points
+
+    fmod a b = a - b * fromIntegral (truncate (a / b))
 
     -- generate the points of the curve
+    tot = 100
     go 100 = []
     go ix  = (p, q) : go (ix+1)
       where
         ai = ix * 2 * pi / 99 - pi
-        di = splineAD ai
+        di = splineAD ai -- fmod (splineAD ai) (2*pi)
         taup = cos (ai + di / 2) * tauScale
         tauq = cos (ai - di / 2) * tauScale
         p = tau2theta1 taup
