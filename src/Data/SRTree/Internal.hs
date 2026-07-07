@@ -66,6 +66,7 @@ data SRTree val =
    Var Int     -- ^ index of the variables
  | Param Int   -- ^ index of the parameter
  | Const Double -- ^ constant value, can be converted to a parameter
+ | Y Int -- ^ index of the target variable, always 0 for now
  -- | IConst Int   -- TODO: integer constant
  -- | RConst Ratio  -- TODO: rational constant
  | Uni Function val -- ^ univariate function

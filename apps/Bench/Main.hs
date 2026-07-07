@@ -74,6 +74,7 @@ main = do
     -- is not included in the runtime benchmark.
     putStrLn "Compiling tree..."
     let !compiledFn = [compile dataset tree | tree <- trees]
+        evalTree x th t = compile x t th
         -- Mock theta (parameter vector) to pass into the closures
         !theta = V.fromList [1.0, 0.5, 0.2, 0.3, 0.1, 0.5, 0.9, 0.3, 0.2, 0.4]
         !theta1 = V.fromList [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
@@ -87,8 +88,8 @@ main = do
     _ <- evaluate (force theta1)
     print $ sum $ map (\t ->  V.sum $ naiveEval t) trees
     print $ sum $ map (\t ->  V.sum $ t theta) compiledFn
-    --print $ sum $ map (\t -> getF $ minimizeNLL MSE Nothing 0 dataset y t theta1) trees
-    --print $ sum $ map (\t -> getF $ minimizeNLLO MSE Nothing 0 dataset y t theta1) trees
+    print $ sum $ map (\t -> getF $ minimizeNLL MSE Nothing 0 dataset y t theta1) trees
+    print $ sum $ map (\t -> getF $ minimizeNLLAcc MSE Nothing 0 dataset y t theta1) trees
     --print $ sum $ map (\t -> getF $ minimizeNLLCompiled MSE Nothing 0 dataset y t theta1) trees
 
     --print $ sum $ map (\t -> VS.sum . snd $ gradNLLGraph MSE dataset' y' Nothing t theta1') trees
@@ -105,14 +106,14 @@ main = do
     defaultMain [
           bgroup "Tree Evaluation (Fixed Dataset)" [
 
-            -- The slow version: dynamically traversing the AST at runtime
-           -- bench "evalTree (Naive AST Traversal)" $
-           --     nf (\ts -> sum [V.sum $ evalTree dataset theta1 t | t <- ts]) trees,
+           -- The slow version: dynamically traversing the AST at runtime
+           bench "evalTree (Naive AST Traversal)" $
+                nf (\ts -> sum [V.sum $ evalTree dataset theta1 t | t <- ts]) trees,
 
 
             -- The fast version: executing the pre-compiled, stream-fused closure
-            --bench "compile (Compiled Closure)" $
-            --    nf (\t -> sum [V.sum (ct t) | ct <- compiledFn]) theta1,
+            bench "compile (Compiled Closure)" $
+                nf (\t -> sum [V.sum (ct t) | ct <- compiledFn]) theta1,
 
             -- The fast version: executing the pre-compiled, stream-fused closure
             bench "minimizeNLLCompiled (Compiled Closure)" $

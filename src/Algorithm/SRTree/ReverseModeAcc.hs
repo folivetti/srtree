@@ -152,7 +152,7 @@ buildAccGraph ct xss ys theta = A.lift (obj, gradPacked)
       where
         step acc key
           | Prelude.not (dyn VU.! key) =
-              let statVec = ctStatic ct IntMap.! key
+              let statVec = ctStatic ct VB.! key
               in IntMap.insert key (A.use (A.fromList (Z :. m) (VU.toList statVec))) acc
           | otherwise =
               IntMap.insert key (evalNode key acc) acc

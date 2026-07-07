@@ -28,7 +28,8 @@ source-repository head
 library
     exposed-modules:
           Algorithm.SRTree.AD
-          Algorithm.SRTree.ConfidenceIntervals
+          Algorithm.SRTree.Compile
+           Algorithm.SRTree.ConfidenceIntervals
           Algorithm.SRTree.Likelihoods
           Algorithm.SRTree.ModelSelection
           Algorithm.SRTree.NonlinearOpt

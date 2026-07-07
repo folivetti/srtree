@@ -14,8 +14,7 @@
 -----------------------------------------------------------------------------
 {-# LANGUAGE FlexibleInstances #-}
 module Data.SRTree.Eval
-        ( evalTree
-        , evalOp
+        ( evalOp
         , evalFun
         , cbrt
         , inverseFunc
@@ -26,6 +25,7 @@ module Data.SRTree.Eval
         , replicateAs
         , Target, Theta, Columns
         , compile
+        , compileLoss
         )
         where
 
@@ -46,6 +46,34 @@ type Target  = Vector Double
 type Theta   = Vector Double
 -- | Matrix of features values 
 type Columns = [Vector Double]
+
+-- A multi-threaded replacement for V.sum
+sumParallel :: Int -> (Int -> Double) -> Double
+sumParallel n f = unsafePerformIO $ do
+    numThreads <- getNumCapabilities
+    let chunkSize  = n `quot` numThreads
+
+    -- 1. Allocate a single block of unboxed memory EXACTLY ONCE
+    out <- VM.unsafeNew numThreads
+
+    -- 2. Spawn threads. Each thread gets a unique ID and a slice of memory.
+    forConcurrently_ [0 .. numThreads - 1] $ \tId -> do
+        let !start = tId * chunkSize
+            -- The last thread cleans up the remainder
+            !end   = if tId == numThreads - 1 then n else start + chunkSize
+
+        -- 3. The inner thread loop. Strict, unboxed, and bounds-check free.
+        let loop !i !acc
+              | i >= end  = return acc
+              | otherwise = loop (i + 1) (acc + f i)
+
+        total <- loop start 0.0
+        VM.unsafeWrite out tId total
+
+    -- 4. Instantly cast the mutable memory to an immutable Vector (O(1) cost)
+    totals <- V.unsafeFreeze out
+    return (V.sum totals)
+{-# NOINLINE sumParallel #-}
 
 -- Improve quality of life with Num and Floating instances for our matrices 
 instance Num Target where
@@ -115,14 +143,14 @@ generateParallel n f = unsafePerformIO $ do
     V.unsafeFreeze out
 {-# NOINLINE generateParallel #-}
 
-compile :: [Vector Double] -> Fix SRTree -> (Vector Double -> Vector Double)
-compile dataset tree =
+compileLoss :: [Vector Double] -> Fix SRTree -> Target -> (Vector Double -> Double)
+compileLoss dataset tree y =
     case cata alg tree of
-        Scl c     -> \_  -> V.replicate n c
-        Static v  -> \_  -> v
+        Scl c     -> \_  -> V.sum $ V.replicate n c
+        Static v  -> \_  -> V.sum v
         -- We only allocate memory EXACTLY ONCE here at the top level
         --Dynamic f -> \th -> V.generate n (f th)
-        Dynamic f -> \th -> generateParallel n (f th)
+        Dynamic f -> \th -> sumParallel n (f th)
   where
     n = V.length (head dataset)
 
@@ -133,6 +161,7 @@ compile dataset tree =
     alg (Var i)   = Static (dataset !! i)
     -- Look at this! No more V.replicate. It just fetches the scalar directly.
     alg (Param i) = Dynamic (\th !idx -> th `V.unsafeIndex` i)
+    alg (Y i)     = Static y
 
     -- 2. Univariate Functions
     alg (Uni f (Scl c))     = Scl (evalFun f c)
@@ -166,6 +195,60 @@ compile dataset tree =
     alg (Bin op (Dynamic g1) (Dynamic g2)) =
         let !rawOp = evalOp op in Dynamic (\th !i -> rawOp (g1 th i) (g2 th i))
 
+
+compile :: [Vector Double] -> Fix SRTree -> (Vector Double -> Vector Double)
+compile dataset tree =
+    case cata alg tree of
+        Scl c     -> \_  -> V.replicate n c
+        Static v  -> \_  -> v
+        -- We only allocate memory EXACTLY ONCE here at the top level
+        --Dynamic f -> \th -> V.generate n (f th)
+        Dynamic f -> \th -> generateParallel n (f th)
+  where
+    n = V.length (head dataset)
+
+    alg :: SRTree Staged -> Staged
+
+    -- 1. Base Cases
+    alg (Const c) = Scl c
+    alg (Var i)   = Static (dataset !! i)
+    -- Look at this! No more V.replicate. It just fetches the scalar directly.
+    alg (Param i) = Dynamic (\th !idx -> th `V.unsafeIndex` i)
+    alg (Y i)     = undefined -- this shouldn't be called
+
+    -- 2. Univariate Functions
+    alg (Uni f (Scl c))     = Scl (evalFun f c)
+    alg (Uni f (Static v))  = Static (V.map (evalFun f) v)
+
+    -- We map the function over the scalar result of the inner closure
+    alg (Uni f (Dynamic g)) = let !rawFun = evalFun f in Dynamic (\th !i -> rawFun (g th i))
+
+    -- 3. Binary Functions
+    alg (Bin op (Scl c1) (Scl c2))       = Scl (evalOp op c1 c2)
+    alg (Bin op (Scl c) (Static v))      = Static (V.map (evalOp op c) v)
+    alg (Bin op (Static v) (Scl c))      = Static (V.map (\c2 -> evalOp op c2 c) v)
+    alg (Bin op (Static v1) (Static v2)) = Static (V.zipWith (evalOp op) v1 v2)
+
+    -- 4. Dynamic Combinations (The Core Optimization)
+
+    alg (Bin op (Scl c) (Dynamic g)) =
+        let !rawOp = evalOp op in Dynamic (\th !i -> rawOp c (g th i))
+
+    alg (Bin op (Dynamic g) (Scl c)) =
+        let !rawOp = evalOp op in Dynamic (\th !i -> rawOp (g th i) c)
+
+    -- When combining a Static array with a Dynamic closure,
+    -- we use unsafeIndex to fetch the static value at row 'i' directly.
+    alg (Bin op (Static v) (Dynamic g)) =
+        let !rawOp = evalOp op in Dynamic (\th !i -> rawOp (v `V.unsafeIndex` i) (g th i))
+
+    alg (Bin op (Dynamic g) (Static v)) =
+        let !rawOp = evalOp op in Dynamic (\th !i -> rawOp (g th i) (v `V.unsafeIndex` i))
+
+    alg (Bin op (Dynamic g1) (Dynamic g2)) =
+        let !rawOp = evalOp op in Dynamic (\th !i -> rawOp (g1 th i) (g2 th i))
+
+
 -- returns a vector with the same number of rows as xss and containing a single repeated value.
 replicateAs :: Columns -> Double -> Target
 replicateAs xss c = let m = V.length (head xss) in V.replicate m c
@@ -175,11 +258,12 @@ replicateAs xss c = let m = V.length (head xss) in V.replicate m c
 evalTree :: Columns -> Theta -> Fix SRTree -> Target
 evalTree xss params = cata $ 
     \case 
-      Var ix     -> xss !! ix
-      Param ix   -> replicateAs xss $ params V.! ix
-      Const c    -> replicateAs xss c
-      Uni g t    -> evalFun g t
-      Bin op l r -> evalOp op l r
+       Var ix     -> xss !! ix
+       Param ix   -> replicateAs xss $ params V.! ix
+       Const c    -> replicateAs xss c
+       Y _        -> undefined
+       Uni g t    -> evalFun g t
+       Bin op l r -> evalOp op l r
 {-# INLINE evalTree #-}
 
 -- evaluates an operator 

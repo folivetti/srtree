@@ -30,6 +30,7 @@ module Algorithm.SRTree.AD
 
 import Control.Monad (forM_, foldM, when, unless)
 import Control.Monad.ST
+import Data.STRef (newSTRef, readSTRef, modifySTRef')
 import Data.Bifunctor (bimap, first, second)
 import Data.SRTree.Derivative ( derivative )
 import Data.SRTree.Eval
@@ -68,13 +69,13 @@ data CompiledTree = CompiledTree
   { ctNodes  :: !(VB.Vector (SRTree Int))            -- id -> node, children already resolved to ids
   , ctRoot   :: !Int
   , ctDyn    :: !(VU.Vector Bool)                    -- id -> depends on theta?
-  , ctStatic :: !(IntMap.IntMap (VU.Vector Double))   -- precomputed values, only for non-dynamic ids
+  , ctStatic :: !(VB.Vector (VU.Vector Double))       -- precomputed values; empty vector for dynamic ids
   , ctM      :: !Int
   }
 
 compileTree :: [VU.Vector Double] -> VU.Vector Double -> Maybe (VU.Vector Double) -> Fix SRTree -> CompiledTree
 compileTree xss ys mYErr tree =
-    CompiledTree { ctNodes = nodes, ctRoot = root, ctDyn = dynArr, ctStatic = static, ctM = m }
+    CompiledTree { ctNodes = nodes, ctRoot = root, ctDyn = dynArr, ctStatic = staticArr, ctM = m }
   where
     yErr = fromJust mYErr
     m    = VU.length ys
@@ -84,8 +85,11 @@ compileTree xss ys mYErr tree =
         cataM leftToRight alg tree
           `execState` (Map.empty, IntMap.empty, IntMap.empty, IntMap.empty, 0)
 
-    nodes  = VB.fromList (IntMap.elems int2key)
-    dynArr = VU.fromList (IntMap.elems dynMap)
+    nodes     = VB.fromList (IntMap.elems int2key)
+    dynArr    = VU.fromList (IntMap.elems dynMap)
+    -- dense array indexed by node id (0..root), O(1) access in the hot loop;
+    -- dynamic ids get an empty placeholder since they're recomputed per-theta.
+    staticArr = VB.generate (root + 1) (\i -> IntMap.findWithDefault VU.empty i static)
 
     leftToRight (Uni f mt)    = Uni f <$> mt
     leftToRight (Bin f ml mr) = Bin f <$> ml <*> mr
@@ -144,72 +148,102 @@ compileTree xss ys mYErr tree =
 -- has no Param in it, so it can never contribute to the gradient.
 -- ---------------------------------------------------------------------
 
+-- Row-fused evaluation: instead of storing one full length-m array per
+-- node (which meant ~2 * #nodes large allocations per objective/gradient
+-- call), we walk the m data rows one at a time and, for each row, run the
+-- forward pass and the reverse-mode backward pass over small per-node
+-- scratch arrays of Double (length root+1). This mirrors what the fused
+-- Accelerate/LLVM kernel does (one pass per row, no big intermediate
+-- arrays) while staying in plain ST: allocation drops from O(nodes * m)
+-- to O(nodes + params), and the tight inner loops are all unboxed.
 evalGrad :: CompiledTree -> V.Vector Double -> (Double, V.Vector Double)
-evalGrad ct theta = (VU.sum $ vals IntMap.! root, grad)
+evalGrad ct theta = runST $ do
+    fwd   <- VUM.new (root + 1)   -- node id -> forward value, current row
+    adj   <- VUM.new (root + 1)   -- node id -> adjoint (dL/dnode), current row
+    gradM <- VUM.replicate p 0    -- accumulated per-parameter gradient
+    objRef <- newSTRef 0
+
+    let -- forward pass for a single row: fills `fwd` for ids 0..root
+        forwardLoop !row !key
+          | key > root = pure ()
+          | otherwise  = do
+              v <- if not (VU.unsafeIndex dyn key)
+                     then pure (VU.unsafeIndex (VB.unsafeIndex static key) row)
+                     else case VB.unsafeIndex nodes key of
+                            Param ix   -> pure (V.unsafeIndex theta ix)
+                            Uni f t    -> evalFun f <$> VUM.unsafeRead fwd t
+                            Bin op l r -> evalOp op <$> VUM.unsafeRead fwd l <*> VUM.unsafeRead fwd r
+                            _          -> error "evalGrad: unreachable"
+              VUM.unsafeWrite fwd key v
+              forwardLoop row (key + 1)
+
+        -- backward pass for a single row: ids are visited from root down
+        -- to 0, which is a valid reverse-topological order since every
+        -- child id is smaller than its parent's id by construction.
+        backwardLoop !key
+          | key < 0 = pure ()
+          | otherwise = do
+              when (VU.unsafeIndex dyn key) $ do
+                v <- VUM.unsafeRead adj key
+                case VB.unsafeIndex nodes key of
+                  Bin op l r -> do
+                    xl <- VUM.unsafeRead fwd l
+                    xr <- VUM.unsafeRead fwd r
+                    fg <- VUM.unsafeRead fwd key
+                    let (dl, dr) = diffScalar op v xl xr fg
+                    VUM.unsafeModify adj (+ dl) l
+                    VUM.unsafeModify adj (+ dr) r
+                  Uni f t -> do
+                    x <- VUM.unsafeRead fwd t
+                    VUM.unsafeModify adj (+ v * derivative f x) t
+                  Param ix -> VUM.unsafeModify gradM (+ v) ix
+                  _        -> pure ()
+              backwardLoop (key - 1)
+
+        rowLoop !row
+          | row >= m = pure ()
+          | otherwise = do
+              forwardLoop row 0
+              rootVal <- VUM.unsafeRead fwd root
+              modifySTRef' objRef (+ rootVal)
+              when (VU.unsafeIndex dyn root) $ do
+                VUM.set adj 0
+                VUM.unsafeWrite adj root 1
+                backwardLoop root
+              rowLoop (row + 1)
+
+    rowLoop 0
+
+    obj        <- readSTRef objRef
+    gradFrozen <- VU.unsafeFreeze gradM
+    pure (obj, V.convert gradFrozen)
   where
-    root  = ctRoot ct
-    m     = ctM ct
-    p     = V.length theta
-    nodes = ctNodes ct
-    dyn   = ctDyn ct
-    one   = VU.replicate m 1
+    root   = ctRoot ct
+    m      = ctM ct
+    p      = V.length theta
+    nodes  = ctNodes ct
+    dyn    = ctDyn ct
+    static = ctStatic ct
 
-    vals = foldl' step (ctStatic ct) [0 .. root]
-      where
-        step acc key
-          | not (dyn VU.! key) = acc          -- static value already present, nothing to do
-          | otherwise          = IntMap.insert key (evalDyn key acc) acc
-        evalDyn key acc = case nodes VB.! key of
-          Param ix   -> VU.replicate m (theta V.! ix)
-          Uni f t    -> VU.map (evalFun f) (acc IntMap.! t)
-          Bin op l r -> VU.zipWith (evalOp op) (acc IntMap.! l) (acc IntMap.! r)
-          _          -> error "evalGrad: unreachable"
-
-    gradMap = calcGrad root one `execState` IntMap.empty
-
-    calcGrad :: Int -> VU.Vector Double -> State (IntMap.IntMap Double) ()
-    calcGrad key v
-      | not (dyn VU.! key) = pure ()   -- no Param below here: prune, nothing to accumulate
-      | otherwise =
-          case nodes VB.! key of
-            Bin op l r -> do
-              let xl       = vals IntMap.! l
-                  xr       = vals IntMap.! r
-                  fg       = vals IntMap.! key   -- this node's own cached forward value
-                  (dl, dr) = diffPure op v xl xr fg
-              calcGrad l dl
-              calcGrad r dr
-            Uni f t -> do
-              let x = vals IntMap.! t
-              calcGrad t (VU.zipWith (*) v (VU.map (derivative f) x))
-            Param ix -> modify' (IntMap.insertWith (+) ix (VU.sum v))
-            _        -> pure ()
-
-    grad = V.generate p (\ix -> IntMap.findWithDefault 0 ix gradMap)
-
--- Pure local-derivative rules (same math as your `diff`, no State/Map
--- plumbing needed since `fg` -- the node's own value -- is already just
--- a plain lookup in `vals`, not something that needs re-deriving).
-diffPure :: Op -> VU.Vector Double -> VU.Vector Double -> VU.Vector Double -> VU.Vector Double
-         -> (VU.Vector Double, VU.Vector Double)
-diffPure Add dx _  _  _  = (dx, dx)
-diffPure Sub dx _  _  _  = (dx, VU.map negate dx)
-diffPure Mul dx fx gy _  = (VU.zipWith (*) dx gy, VU.zipWith (*) dx fx)
-diffPure Div dx _  gy fg =
-    ( VU.zipWith (/) dx gy
-    , VU.zipWith (*) dx (VU.zipWith (\l r -> negate l / r) fg gy) )
-diffPure Power dx fx gy fg =
-    ( VU.zipWith4 (\d f g v -> fixNaN $ d * g * v / f) dx fx gy fg
-    , VU.zipWith3 (\d f v   -> fixNaN $ d * v * log f) dx fx fg )
-diffPure PowerAbs dx fx gy fg =
-    -- v2/v3 inlined directly (see earlier note) instead of materialized as separate arrays
-    ( VU.zipWith4 (\d f g v -> let v2 = abs f in fixNaN $ d * (f * g) * v / (v2 * v2)) dx fx gy fg
-    , VU.zipWith4 (\d f _ v -> fixNaN $ d * v * log (abs f))                          dx fx gy fg )
-diffPure AQ dx fx gy _ =
-    let dxl = VU.zipWith (\g d -> d * (recip . sqrt . (+1) . (^(2::Int))) g) gy dx
-        dxy = VU.zipWith3 (\f g dl -> f * g * dl ^ (3::Int)) fx gy dxl
+-- Pure local-derivative rules, scalar version (same math as the original
+-- vectorized `diffPure`, applied per-row in the fused loop above).
+diffScalar :: Op -> Double -> Double -> Double -> Double -> (Double, Double)
+diffScalar Add dx _  _  _  = (dx, dx)
+diffScalar Sub dx _  _  _  = (dx, negate dx)
+diffScalar Mul dx fx gy _  = (dx * gy, dx * fx)
+diffScalar Div dx _  gy fg = (dx / gy, dx * (negate fg / gy))
+diffScalar Power dx fx gy fg =
+    ( fixNaN (dx * gy * fg / fx)
+    , fixNaN (dx * fg * log fx) )
+diffScalar PowerAbs dx fx gy fg =
+    let v2 = abs fx
+    in ( fixNaN (dx * (fx * gy) * fg / (v2 * v2))
+       , fixNaN (dx * fg * log (abs fx)) )
+diffScalar AQ dx fx gy _ =
+    let dxl = dx * (recip . sqrt . (+1) . (^(2::Int))) gy
+        dxy = fx * gy * dxl ^ (3::Int)
     in (dxl, dxy)
-{-# INLINE diffPure #-}
+{-# INLINE diffScalar #-}
 
 fixNaN :: Double -> Double
 fixNaN x = if isNaN x then 0 else x

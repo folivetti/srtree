@@ -70,14 +70,14 @@ sse :: Columns -> Target -> Fix SRTree -> Target -> Double
 sse xss ys tree theta = err
   where
     m      = V.length ys
-    yhat   = evalTree xss theta tree
+    yhat   = compile xss tree theta
     err    = V.sum $ (ys - yhat) ^ (2 :: Int)
 
 sseError :: Columns -> Target -> Target -> Fix SRTree -> Target -> Double
 sseError xss ys yErr tree theta = err
   where
     m      = V.length ys
-    yhat   = evalTree xss theta tree
+    yhat   = compile xss tree theta
     err    = V.sum $ ((ys - yhat) ^ (2 :: Int) / yErr)
 
 -- | Total Sum-of-squares
@@ -126,7 +126,7 @@ nll MSE _ xss ys t theta = mse xss ys t theta
 
 nll LOG10 _ xss ys t theta = V.sum $ (V.map (logBase 10) $ (f ys / f yhat)) ^ (2 :: Int)
   where
-    yhat   = evalTree xss theta t
+    yhat   = compile xss t theta
     m      = V.length ys
     f :: Target -> Target
     f z    =  (z + V.map (\zi -> sqrt (zi^2 + 1e-10)) z)
@@ -167,7 +167,7 @@ nll Bernoulli _ xss ys tree theta
   | otherwise   = V.sum $ (V.map (1-) ys) * yhat + log (V.map (1+) $ exp (V.map negate yhat))
   where
     m        = V.length ys
-    yhat     = evalTree xss theta tree
+    yhat     = compile xss tree theta
     notValid = V.any (\x -> x /= 0 && x /= 1)
 
 nll Poisson _ xss ys tree theta
@@ -175,7 +175,7 @@ nll Poisson _ xss ys tree theta
   -- | V.any isNaN yhat = error $ "NaN predictions " <> show theta
   | otherwise   = negate . V.sum $ ys * yhat - ys * log ys - exp yhat
   where
-    yhat     = evalTree xss theta tree
+    yhat     = compile xss tree theta
     notValid = V.any (<0)
 
 nll ROXY mYerr xss ys tree theta
@@ -277,12 +277,12 @@ buildNLL ROXY m tree = neglogP
 
 -- | Prediction for different distributions
 predict :: Distribution -> Fix SRTree -> Target -> Columns -> Target
-predict MSE       tree theta xss = evalTree xss theta tree
-predict LOG10     tree theta xss = evalTree xss theta tree
-predict Gaussian  tree theta xss = evalTree xss theta tree
-predict Bernoulli tree theta xss = logistic $ evalTree xss theta tree
-predict Poisson   tree theta xss = exp $ evalTree xss theta tree
-predict ROXY      tree theta xss = evalTree xss theta tree
+predict MSE       tree theta xss = compile xss tree theta
+predict LOG10     tree theta xss = compile xss tree theta
+predict Gaussian  tree theta xss = compile xss tree theta
+predict Bernoulli tree theta xss = logistic $ compile xss tree theta
+predict Poisson   tree theta xss = exp $ compile xss tree theta
+predict ROXY      tree theta xss = compile xss tree theta
 
 -- | Gradient of the negative log-likelihood
 gradNLL :: Distribution -> Maybe Target -> Columns -> Target -> Fix SRTree -> Target -> (Double, Target)
@@ -360,7 +360,7 @@ fisherNLL dist mYerr xss ys tree theta = V.generate p build
     m      = V.length ys
     p      = V.length theta
     t'     = fst $ floatConstsToParam tree
-    eval   = evalTree xss theta
+    eval   = \t -> compile xss t theta
     yhat   = eval t'
     res    = ys - phi
     yErr   = case mYerr of
@@ -401,7 +401,7 @@ hessianNLL Gaussian mYerr xss ys tree theta = [V.generate p (build iy) | iy <- [
     yErr = V.replicate m $ exp (theta V.! (p-1)) / est
     yhat = eval tree
     res  = ys - yhat
-    eval = evalTree xss theta
+    eval = \t -> compile xss t theta
     est  = fromIntegral (m - p + 1)
 
 hessianNLL dist mYerr xss ys tree theta = [V.generate p (build iy) | iy <- [0..p-1]]
@@ -419,7 +419,7 @@ hessianNLL dist mYerr xss ys tree theta = [V.generate p (build iy) | iy <- [0..p
     m           = V.length ys
     p           = V.length theta
     t'          = tree -- relabelParams tree -- $ floatConstsToParam tree
-    eval        = evalTree xss theta
+    eval        = \t -> compile xss t theta
     yErr        = case mYerr of
                    Nothing -> V.replicate m est
                    Just e  -> e
