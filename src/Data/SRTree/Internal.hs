@@ -3,6 +3,7 @@
 {-# language RankNTypes #-}
 {-# language OverloadedStrings #-}
 {-# language LambdaCase #-}
+{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.Internal 
@@ -56,6 +57,8 @@ import Data.String (IsString (..))
 import Text.Read (readMaybe)
 import qualified Data.IntMap as IntMap
 import Data.List ( nub )
+import GHC.Generics (Generic)
+import Control.DeepSeq (NFData)
 
 -- | Tree structure to be used with Symbolic Regression algorithms.
 -- This structure is a fixed point of a n-ary tree. 
@@ -67,11 +70,11 @@ data SRTree val =
  -- | RConst Ratio  -- TODO: rational constant
  | Uni Function val -- ^ univariate function
  | Bin Op val val -- ^ binary operator
- deriving (Show, Eq, Ord, Functor)
+ deriving (Show, Eq, Ord, Functor, Generic, NFData)
 
 -- | Supported operators
 data Op = Add | Sub | Mul | Div | Power | PowerAbs | AQ
-    deriving (Show, Read, Eq, Ord, Enum)
+    deriving (Show, Read, Eq, Ord, Enum, Generic, NFData)
 
 -- | Supported functions
 data Function =
@@ -98,7 +101,7 @@ data Function =
   | Exp
   | Recip
   | Cube
-     deriving (Show, Read, Eq, Ord, Enum)
+     deriving (Show, Read, Eq, Ord, Enum, Generic, NFData)
 
 removeProtectedOps :: Fix SRTree -> Fix SRTree 
 removeProtectedOps = cata alg 

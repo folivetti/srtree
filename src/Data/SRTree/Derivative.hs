@@ -16,6 +16,7 @@ module Data.SRTree.Derivative
         , doubleDerivative
         , deriveByVar
         , deriveByParam
+        , derivOp
         )
         where
 
@@ -115,6 +116,18 @@ doubleDerivative LogAbs  = negate . recip . (^2)
 doubleDerivative Recip   = (*2) . recip . (^3)
 doubleDerivative Cube    = (6*)
 {-# INLINE doubleDerivative #-}
+
+-- | Returns (d(Output)/d(Left), d(Output)/d(Right))
+-- used for AD
+derivOp :: Op -> Double -> Double -> (Double, Double)
+derivOp Add _  _  = (1.0, 1.0)
+derivOp Sub _  _  = (1.0, -1.0)
+derivOp Mul v1 v2 = (v2, v1)
+derivOp Div v1 v2 = (1.0 / v2, -(v1) / (v2 * v2))
+-- e.g., Power: d(x^y)/dx = y*x^(y-1), d(x^y)/dy = x^y * ln(x)
+derivOp Power v1 v2 = (v2 * (v1 ** (v2 - 1)), (v1 ** v2) * log v1)
+derivOp _ _ _ = (0.0, 0.0) -- Add remaining ops
+{-# INLINE derivOp #-}
 
 -- | Symbolic derivative by a variable
 deriveByVar :: Int -> Fix SRTree -> Fix SRTree

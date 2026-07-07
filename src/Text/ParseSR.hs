@@ -11,7 +11,7 @@
 -- Functions to parse a string representing an expression
 --
 -----------------------------------------------------------------------------
-module Text.ParseSR ( parseSR, parsePat, parseNonTerms, showOutput, SRAlgs(..), Output(..) )
+module Text.ParseSR ( parseSR, parseNonTerms, showOutput, SRAlgs(..), Output(..) ) -- parsePat,
     where
 
 import Control.Applicative ((<|>))
@@ -21,7 +21,7 @@ import qualified Data.ByteString.Char8 as B
 import Data.Char (toLower)
 import Data.List (sortOn)
 import Data.SRTree
-import Algorithm.EqSat.DB
+--import Algorithm.EqSat.DB
 import qualified Data.SRTree.Print as P
 import qualified Data.Map.Strict as Map
 import Data.List.Split ( splitOn )
@@ -34,7 +34,7 @@ import Debug.Trace (trace, traceShow)
 -- numerical values represented as `Double`. The numerical values type
 -- can be changed with `fmap`.
 type ParseTree = Parser (Fix SRTree)
-type ParsePat  = Parser Pattern
+--type ParsePat  = Parser Pattern
 
 -- * Data types and caller functions
 
@@ -65,8 +65,8 @@ parseSR SBP    header reparam = eitherResult . (`feed` "") . parse (parseGOMEA T
 parseSR EPLEX  header reparam = eitherResult . (`feed` "") . parse (parseGOMEA True reparam $ splitHeader header) . putEOL . B.strip
 parseSR PYSR   header reparam = eitherResult . (`feed` "") . parse (parsePySR True reparam $ splitHeader header) . putEOL .  B.strip
 
-parsePat :: B.ByteString -> Either String Pattern
-parsePat = eitherResult . (`feed` "") . parse parsePatExpr . putEOL . B.strip
+--parsePat :: B.ByteString -> Either String Pattern
+--parsePat = eitherResult . (`feed` "") . parse parsePatExpr . putEOL . B.strip
 
 eitherResult' :: Show r => Result r -> Either String r
 eitherResult' res = trace (show res) $ eitherResult res
@@ -325,7 +325,7 @@ parsePySR b = parseExpr b (prefixOps : binOps) binFuns var
              ix <- decimal
              pure $ Fix $ Var ix
           <?> "var"
-
+{-
 -- parse a pattern expression
 parsePatExpr ::  ParsePat
 parsePatExpr = parsePattern (prefixOps : binOps) binFuns var
@@ -387,7 +387,7 @@ parsePattern table binFuns var =
     getParserVar k v = (string k <|> enveloped k) >> pure (Fix $ Var v)
     enveloped s      = (char ' ' <|> char '(') >> string s >> (char ' ' <|> char ')') >> pure ""
 
-
+    -}
 -- * Parse the non-terminal nodes into a SRTree () value
 parseNonTerms :: String -> [SRTree ()]
 parseNonTerms = Prelude.map toNonTerm . splitOn ","

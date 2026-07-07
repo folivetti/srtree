@@ -1,6 +1,11 @@
 {-# language ImportQualifiedPost #-}
 {-# language ViewPatterns #-}
 {-# language OverloadedStrings #-}
+{-# language BlockArguments #-}
+{-# language ExplicitForAll #-}
+{-# language BangPatterns #-}
+{-# language LambdaCase #-}
+{-# language RankNTypes, ScopedTypeVariables #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.Datasets
@@ -20,33 +25,26 @@ module Data.SRTree.Datasets ( loadDataset, loadTrainingOnly, getX, splitData, Da
 import Codec.Compression.GZip (decompress)
 import Data.ByteString.Char8 qualified as B
 import Data.ByteString.Lazy qualified as BS
-import Data.List (delete, find, intercalate)
-import Data.Massiv.Array
-  ( Array,
-    Comp (Seq, Par),
-    Ix2 ((:.)),
-    S (..),
-    Sz (Sz1),
-    (<!),
-  )
-import Data.Massiv.Array qualified as M
+import Data.List (delete, find, intercalate, transpose)
 import Data.Maybe (fromJust)
-import Data.SRTree.Eval (PVector, SRMatrix, compMode)
-import Data.Vector qualified as V
+import Data.Vector.Unboxed (Vector)
+import qualified Data.Vector.Unboxed as V
 import System.FilePath (takeExtension)
 import Text.Read (readMaybe)
-import Data.Massiv.Array as MA hiding (forM_, forM, map, take, tail, zip, replicate, all, read)
 import Control.Monad.State.Strict
 import System.Random
-import List.Shuffle ( shuffle )
-
+import qualified Data.Vector.Primitive as VP
+import Data.Foldable qualified as Foldable
+import Data.Primitive.Array qualified as Array
+import Control.Monad.ST (runST)
+import Control.Monad.ST.Strict (ST)
 
 -- a dataset is a triple (X, y, y_error)
-type DataSet = (SRMatrix, PVector, Maybe PVector)
+type DataSet = ([Vector Double], Vector Double, Maybe (Vector Double))
 
 -- | Loads a list of list of bytestrings to a matrix of double
-loadMtx :: [[B.ByteString]] -> Array S Ix2 Double
-loadMtx = M.fromLists' compMode . map (map (read . B.unpack))
+loadMtx :: [[B.ByteString]] -> [Vector Double]
+loadMtx = map V.fromList . transpose . map (map (read . B.unpack))
 {-# INLINE loadMtx #-}
 
 -- | Returns true if the extension is .gz
@@ -188,7 +186,7 @@ getRows (B.unpack -> start) (B.unpack -> end) nRows
 -- of the target variable
 -- **features** is a comma separated list of SRMatrix names or indices to be used as
 -- input variables of the regression model.
-loadDataset :: FilePath -> Bool -> IO ((SRMatrix, PVector, SRMatrix, PVector), (Maybe PVector, Maybe PVector), String, String)
+loadDataset :: FilePath -> Bool -> IO (([Vector Double], Vector Double, [Vector Double], Vector Double), (Maybe (Vector Double), Maybe (Vector Double)), String, String)
 loadDataset filename hasHeader = do  
   csv <- readFileToLines fname
   pure $ processData csv params hasHeader
@@ -196,7 +194,7 @@ loadDataset filename hasHeader = do
     (fname, params) = splitFileNameParams filename
 
 -- support function that does everything for loadDataset
-processData :: [[B.ByteString]] -> [B.ByteString] -> Bool -> ((SRMatrix, PVector, SRMatrix, PVector), (Maybe PVector, Maybe PVector), String, String)
+processData :: [[B.ByteString]] -> [B.ByteString] -> Bool -> (([Vector Double], Vector Double, [Vector Double], Vector Double), (Maybe (Vector Double), Maybe (Vector Double)), String, String)
 processData csv params hasHeader = ((x_train, y_train, x_val, y_val) , (y_err_train, y_err_val), varnames, targetname)
   where
     ncols             = length $ head csv
@@ -209,24 +207,24 @@ processData csv params hasHeader = ((x_train, y_train, x_val, y_val) , (y_err_tr
                                         ]
     targetname        = if hasHeader then (B.unpack . fst . fromJust . find ((==iy).snd) $ header) else "y"
     -- get rows and SRMatrix indices
-    (st, end)                  = getRows (params !! 0) (params !! 1) nrows
+    (st, end)         = getRows (params !! 0) (params !! 1) nrows
     (ixs, iy, iy_err) = getColumns header (params !! 2) (params !! 3) (params !! 4)
 
     -- load data and split sets
     datum   = loadMtx content
     p       = length ixs
 
-    x       = M.computeAs S $ M.throwEither $ M.stackInnerSlicesM $ map (datum <!) ixs
-    y       = datum <! iy
-    y_err   = datum <! iy_err
+    x       = map (datum !!) ixs
+    y       = datum !! iy
+    y_err   = datum !! iy_err
 
-    x_train = M.computeAs S $ M.extractFromTo' (st :. 0) (end+1 :. p) x
-    y_train = M.computeAs S $ M.extractFromTo' st (end+1) y 
-    x_val   = M.computeAs S $ M.throwEither $ M.deleteRowsM st (Sz1 $ end - st + 1) x
-    y_val   = M.computeAs S $ M.throwEither $ M.deleteColumnsM st (Sz1 $ end - st + 1) y
+    x_train = map (V.take end . V.drop st) x
+    y_train = V.take end . V.drop st $ y
+    x_val   = map (V.drop (st + end - 1)) x
+    y_val   = V.drop (st + end - 1) y
 
-    y_err_train = if iy_err == -1 then Nothing else Just $ M.computeAs S $ M.extractFromTo' st (end+1) y_err
-    y_err_val   = if iy_err == -1 then Nothing else Just $ M.computeAs S $ M.throwEither $ M.deleteColumnsM st (Sz1 $ end - st + 1) y_err
+    y_err_train = if iy_err == -1 then Nothing else Just $ (V.take end . V.drop st) y_err
+    y_err_val   = if iy_err == -1 then Nothing else Just $ (V.take end . V.drop st) y_err
 {-# inline processData #-}
 
 chunksOf :: Int -> [e] -> [[e]]
@@ -238,7 +236,7 @@ chunksOf i ls = Prelude.map (Prelude.take i) (build (splitter ls))
   build :: ((a -> [a] -> [a]) -> [a] -> [a]) -> [a]
   build g = g (:) []
 
-splitData :: DataSet ->Int -> State StdGen (DataSet, DataSet)
+splitData :: DataSet -> Int -> State StdGen (DataSet, DataSet)
 splitData (x, y, mYErr) k = do
   if k == 1
     then pure ((x, y, mYErr), (x, y, mYErr))
@@ -246,36 +244,83 @@ splitData (x, y, mYErr) k = do
       ixs' <- (state . shuffle) [0 .. sz-1]
       let ixs = chunksOf k ixs'
 
-      let (x_tr, x_te) = getX ixs x
-          (y_tr, y_te) = getY ixs y
-          mY = fmap (getY ixs) mYErr
+      let tr_ix  = [ix | ixs_i <- ixs, ix <- Prelude.tail ixs_i]
+          val_ix = [ix | ixs_i <- ixs, let ix = Prelude.head ixs_i]
+          (x_tr, x_te) = getX tr_ix val_ix x
+          (y_tr, y_te) = getY tr_ix val_ix y
+
+          mY = fmap (getY tr_ix val_ix) mYErr
           (y_err_tr, y_err_te) = (fmap fst mY, fmap snd mY)
       pure ((x_tr, y_tr, y_err_tr), (x_te, y_te, y_err_te))
   where
-    (MA.Sz sz) = MA.size y
-    comp_x     = MA.getComp x
-    comp_y     = MA.getComp y
+    sz = V.length y
 
-    getX :: [[Int]] -> SRMatrix -> (SRMatrix, SRMatrix)
-    getX ixs xs' = let xs = MA.toLists xs' :: [MA.ListItem MA.Ix2 Double]
-                    in ( MA.fromLists' comp_x [xs !! ix | ixs_i <- ixs, ix <- Prelude.tail ixs_i]
-                       , MA.fromLists' comp_x [xs !! ix | ixs_i <- ixs, let ix = Prelude.head ixs_i]
-                       )
-    getY :: [[Int]] -> PVector -> (PVector, PVector)
-    getY ixs ys  = ( MA.fromList comp_y [ys MA.! ix | ixs_i <- ixs, ix <- Prelude.tail ixs_i]
-                   , MA.fromList comp_y [ys MA.! ix | ixs_i <- ixs, let ix = Prelude.head ixs_i]
+    getX :: [Int] -> [Int] -> [Vector Double] -> ([Vector Double], [Vector Double])
+    getX tr_ix val_ix  xs = ( [ V.fromList [x V.! ix | ix <- tr_ix] | x <- xs ]
+                  , [ V.fromList [x V.! ix | ix <- val_ix] | x <- xs ]
+                  )
+    getY :: [Int] -> [Int] -> Vector Double -> (Vector Double, Vector Double)
+    getY tr_ix val_ix  ys  = ( V.fromList [ys V.! ix | ix <- tr_ix]
+                   , V.fromList [ys V.! ix | ix <- val_ix]
                    )
 
 getTrain :: ((a, b1, c1, d1), (c2, b2), c3, d2) -> (a, b1, c2)
 getTrain ((a, b, _, _), (c, _), _, _) = (a,b,c)
 
-getX :: DataSet -> SRMatrix
+getX :: DataSet -> [Vector Double]
 getX (a, _, _) = a
 
-getTarget :: DataSet -> PVector
+getTarget :: DataSet -> Vector Double
 getTarget (_, b, _) = b
 
-getError :: DataSet -> Maybe PVector
+getError :: DataSet -> Maybe (Vector Double)
 getError (_, _, c) = c
 
 loadTrainingOnly fname b = getTrain <$> loadDataset fname b
+
+-- | Shuffles a list, taken from list-shuffle
+shuffle :: (RandomGen g) => [a] -> g -> ([a], g)
+shuffle list gen0 =
+  runST do
+    array <- listToMutableArray list
+    gen1 <- shuffleN (Array.sizeofMutableArray array - 1) array gen0
+    array1 <- Array.unsafeFreezeArray array
+    pure (Foldable.toList array1, gen1)
+
+listToMutableArray :: forall a s. [a] -> ST s (Array.MutableArray s a)
+listToMutableArray list = do
+  array <- Array.newArray (length list) undefined
+  let writeElems :: Int -> [a] -> ST s ()
+      writeElems !i = \case
+        [] -> pure ()
+        x : xs -> do
+          Array.writeArray array i x
+          writeElems (i + 1) xs
+  writeElems 0 list
+  pure array
+{-# INLINE listToMutableArray #-}
+
+shuffleN :: forall a g s. (RandomGen g) => Int -> Array.MutableArray s a -> g -> ST s g
+shuffleN n0 array =
+  go 0
+  where
+    go :: Int -> g -> ST s g
+    go !i gen0
+      | i >= n = pure gen0
+      | otherwise = do
+          let (j, gen1) = uniformR (i, m) gen0
+          swapArrayElems i j array
+          go (i + 1) gen1
+
+    n = min n0 m
+    m = Array.sizeofMutableArray array - 1
+{-# SPECIALIZE shuffleN :: Int -> Array.MutableArray s a -> StdGen -> ST s StdGen #-}
+
+-- Swap two elements in a mutable array.
+swapArrayElems :: Int -> Int -> Array.MutableArray s a -> ST s ()
+swapArrayElems i j array = do
+  x <- Array.readArray array i
+  y <- Array.readArray array j
+  Array.writeArray array i y
+  Array.writeArray array j x
+{-# INLINE swapArrayElems #-}

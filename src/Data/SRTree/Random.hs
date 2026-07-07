@@ -42,9 +42,9 @@ import Control.Monad.State.Strict ( MonadState(state), MonadTrans(lift), StateT 
 import Data.Maybe (fromJust)
 import Data.SRTree.Internal
 import System.Random (Random (random, randomR), StdGen, mkStdGen)
-import Data.Massiv.Array as MA hiding (forM_, forM, P)
 import Data.SRTree.Eval
 import Control.Monad
+import qualified Data.Vector.Unboxed as V
 
 
 -- * Class definition of properties that a certain parameter type has.
@@ -205,8 +205,8 @@ randomTreeBalanced n = do
     2 -> replaceFixChildren node <$> randomTreeBalanced (n `div` 2) <*> randomTreeBalanced (n `div` 2)    
 
 
-randomVec :: Monad m => Int -> Rng m PVector
-randomVec n = MA.fromList compMode <$> replicateM n (randomRange (-1, 1))
+randomVec :: Monad m => Int -> Rng m Theta
+randomVec n = V.fromList <$> replicateM n (randomRange (-1, 1))
 
 randomTree :: Monad m => Int -> Int -> Int -> Rng m (Fix SRTree) -> Rng m (SRTree ()) -> Bool -> Rng  m (Fix SRTree)
 randomTree minDepth maxDepth maxSize genTerm genNonTerm grow

@@ -15,7 +15,7 @@ module Text.ParseSR.IO ( withInput, withOutput, withOutputDebug )
     where
 
 -- import Data.SRTree.EqSat1
-import Algorithm.EqSat.Simplify ( simplifyEqSatDefault )
+--import Algorithm.EqSat.Simplify ( simplifyEqSatDefault )
 import Control.Monad (forM_, unless)
 import qualified Data.ByteString.Char8 as B
 import Data.SRTree
@@ -35,7 +35,7 @@ withInput fname sr hd param simpl = do
   contents <- hGetLines h 
   let myParserFun = parseSR sr (B.pack hd) param . B.pack
       -- myParser = if simpl then fmap simplifyEqSat . myParserFun else myParserFun
-      myParser = if simpl then fmap simplifyEqSatDefault . myParserFun else myParserFun
+      myParser = myParserFun -- if simpl then fmap simplifyEqSatDefault . myParserFun else myParserFun
       es = map myParser $ filter (not . null) contents
   unless (null fname) $ hClose h
   pure es

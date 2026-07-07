@@ -1,4 +1,5 @@
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE LambdaCase, BangPatterns #-}
+
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.SRTree.Eval 
@@ -23,70 +24,159 @@ module Data.SRTree.Eval
         , invright
         , invleft
         , replicateAs
-        , SRVector, PVector, SRMatrix
-        , compMode
+        , Target, Theta, Columns
+        , compile
         )
         where
 
-import Data.Massiv.Array
-import qualified Data.Massiv.Array as M
 import Data.SRTree.Internal
 import Data.SRTree.Recursion (Fix (..), cata)
+import Data.Vector.Unboxed (Vector)
+import qualified Data.Vector.Unboxed as V
+import Control.Monad.ST (runST)
+import qualified Data.Vector as VB        -- Boxed vector for instructions
+import qualified Data.Vector.Unboxed.Mutable as VM
+import Control.Concurrent.Async (forConcurrently_)
+import System.IO.Unsafe (unsafePerformIO)
+import Control.Concurrent (getNumCapabilities)
 
 -- | Vector of target values 
-type SRVector = M.Array D Ix1 Double
+type Target  = Vector Double
 -- | Vector of parameter values. Needs to be strict to be readily accesible.
-type PVector  = M.Array S Ix1 Double
+type Theta   = Vector Double
 -- | Matrix of features values 
-type SRMatrix = M.Array S Ix2 Double
-
-compMode :: M.Comp
-compMode = M.Seq
+type Columns = [Vector Double]
 
 -- Improve quality of life with Num and Floating instances for our matrices 
-instance Index ix => Num (M.Array D ix Double) where
-    (+) = (!+!)
-    (-) = (!-!)
-    (*) = (!*!)
-    abs = absA
-    signum = signumA 
-    fromInteger = fromInteger
-    negate = negateA
+instance Num Target where
+    (+) = V.zipWith (+)
+    (-) = V.zipWith (-)
+    (*) = V.zipWith (*)
+    abs = V.map abs
+    signum = V.map signum
+    fromInteger = V.singleton . fromInteger
+    negate = V.map negate
 
-instance Index ix => Floating (M.Array D ix Double) where
-    pi = pi 
-    exp = expA 
-    log = logA 
-    sqrt = sqrtA 
-    sin = sinA 
-    cos = cosA
-    tan = tanA 
-    asin = asinA 
-    acos = acosA 
-    atan = atanA 
-    sinh = sinhA 
-    cosh = coshA
-    tanh = tanhA 
-    asinh = asinhA 
-    acosh = acoshA 
-    atanh = atanhA 
-    (**) = (.**)
-instance Index ix => Fractional (M.Array D ix Double) where
-    fromRational = fromRational
-    (/) = (!/!)
-    recip = recipA
+instance Floating Target where
+    pi = V.singleton pi
+    exp = V.map exp
+    log = V.map log
+    sqrt = V.map sqrt
+    sin = V.map sin
+    cos = V.map cos
+    tan = V.map tan
+    asin = V.map asin
+    acos = V.map acos
+    atan = V.map atan
+    sinh = V.map sinh
+    cosh = V.map cosh
+    tanh = V.map tanh
+    asinh = V.map asinh
+    acosh = V.map acosh
+    atanh = V.map atanh
+    (**) = V.zipWith (**)
+instance Fractional Target where
+    fromRational = V.singleton . fromRational
+    (/) = V.zipWith (/)
+    recip = V.map recip
+
+-- We change the Dynamic type to evaluate a single scalar at a specific row index (Int)
+data Staged =
+    Scl Double
+  | Static (Vector Double)
+  | Dynamic (Vector Double -> Int -> Double) -- (Theta -> RowIndex -> Result)
+
+-- A multi-threaded replacement for V.generate
+generateParallel :: Int -> (Int -> Double) -> V.Vector Double
+generateParallel n f = unsafePerformIO $ do
+    numThreads <- getNumCapabilities
+    let chunkSize  = n `quot` numThreads
+
+    -- 1. Allocate a single block of unboxed memory EXACTLY ONCE
+    out <- VM.unsafeNew n
+
+    -- 2. Spawn threads. Each thread gets a unique ID and a slice of memory.
+    forConcurrently_ [0 .. numThreads - 1] $ \tId -> do
+        let !start = tId * chunkSize
+            -- The last thread cleans up the remainder
+            !end   = if tId == numThreads - 1 then n else start + chunkSize
+
+        -- 3. The inner thread loop. Strict, unboxed, and bounds-check free.
+        let loop !i
+              | i >= end  = return ()
+              | otherwise = do
+                  -- Write directly to the shared memory pointer
+                  VM.unsafeWrite out i (f i)
+                  loop (i + 1)
+
+        loop start
+
+    -- 4. Instantly cast the mutable memory to an immutable Vector (O(1) cost)
+    V.unsafeFreeze out
+{-# NOINLINE generateParallel #-}
+
+compile :: [Vector Double] -> Fix SRTree -> (Vector Double -> Vector Double)
+compile dataset tree =
+    case cata alg tree of
+        Scl c     -> \_  -> V.replicate n c
+        Static v  -> \_  -> v
+        -- We only allocate memory EXACTLY ONCE here at the top level
+        --Dynamic f -> \th -> V.generate n (f th)
+        Dynamic f -> \th -> generateParallel n (f th)
+  where
+    n = V.length (head dataset)
+
+    alg :: SRTree Staged -> Staged
+
+    -- 1. Base Cases
+    alg (Const c) = Scl c
+    alg (Var i)   = Static (dataset !! i)
+    -- Look at this! No more V.replicate. It just fetches the scalar directly.
+    alg (Param i) = Dynamic (\th !idx -> th `V.unsafeIndex` i)
+
+    -- 2. Univariate Functions
+    alg (Uni f (Scl c))     = Scl (evalFun f c)
+    alg (Uni f (Static v))  = Static (V.map (evalFun f) v)
+
+    -- We map the function over the scalar result of the inner closure
+    alg (Uni f (Dynamic g)) = let !rawFun = evalFun f in Dynamic (\th !i -> rawFun (g th i))
+
+    -- 3. Binary Functions
+    alg (Bin op (Scl c1) (Scl c2))       = Scl (evalOp op c1 c2)
+    alg (Bin op (Scl c) (Static v))      = Static (V.map (evalOp op c) v)
+    alg (Bin op (Static v) (Scl c))      = Static (V.map (\c2 -> evalOp op c2 c) v)
+    alg (Bin op (Static v1) (Static v2)) = Static (V.zipWith (evalOp op) v1 v2)
+
+    -- 4. Dynamic Combinations (The Core Optimization)
+
+    alg (Bin op (Scl c) (Dynamic g)) =
+        let !rawOp = evalOp op in Dynamic (\th !i -> rawOp c (g th i))
+
+    alg (Bin op (Dynamic g) (Scl c)) =
+        let !rawOp = evalOp op in Dynamic (\th !i -> rawOp (g th i) c)
+
+    -- When combining a Static array with a Dynamic closure,
+    -- we use unsafeIndex to fetch the static value at row 'i' directly.
+    alg (Bin op (Static v) (Dynamic g)) =
+        let !rawOp = evalOp op in Dynamic (\th !i -> rawOp (v `V.unsafeIndex` i) (g th i))
+
+    alg (Bin op (Dynamic g) (Static v)) =
+        let !rawOp = evalOp op in Dynamic (\th !i -> rawOp (g th i) (v `V.unsafeIndex` i))
+
+    alg (Bin op (Dynamic g1) (Dynamic g2)) =
+        let !rawOp = evalOp op in Dynamic (\th !i -> rawOp (g1 th i) (g2 th i))
 
 -- returns a vector with the same number of rows as xss and containing a single repeated value.
-replicateAs :: SRMatrix -> Double -> SRVector
-replicateAs xss c = let (Sz (m :. _)) = M.size xss in M.replicate (getComp xss) (Sz m) c
+replicateAs :: Columns -> Double -> Target
+replicateAs xss c = let m = V.length (head xss) in V.replicate m c
 {-# INLINE replicateAs #-}
 
 -- | Evaluates the tree given a vector of variable values, a vector of parameter values and a function that takes a Double and change to whatever type the variables have. This is useful when working with datasets of many values per variables.
-evalTree :: SRMatrix -> PVector -> Fix SRTree -> SRVector
+evalTree :: Columns -> Theta -> Fix SRTree -> Target
 evalTree xss params = cata $ 
     \case 
-      Var ix     -> xss <! ix
-      Param ix   -> replicateAs xss $ params ! ix
+      Var ix     -> xss !! ix
+      Param ix   -> replicateAs xss $ params V.! ix
       Const c    -> replicateAs xss c
       Uni g t    -> evalFun g t
       Bin op l r -> evalOp op l r
