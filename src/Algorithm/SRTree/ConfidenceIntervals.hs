@@ -135,7 +135,6 @@ predictionCI (Profile _ _) dist predFun _ profFun xss tree theta alpha estPIs = 
 
 -- inverse function of the distributions
 inverseDist :: Floating p => Distribution -> p -> p
-inverseDist MSE y = y
 inverseDist Gaussian y = y
 inverseDist Bernoulli y = log (y/(1-y))
 inverseDist Poisson y = log y
@@ -187,7 +186,7 @@ getStatsFromModel dist mYerr xss ys tree theta = MkStats cov corr stdErr
     k = U.length theta
     n = U.length ys
     nParams = fromIntegral k
-    ssr = sse xss ys tree theta
+    ssr = compileLoss xss (buildLoss MSE (fromIntegral n) tree) ys theta
     ident = fromRowMajor k k (U.generate (k * k) (\ix -> let (i, j) = ix `divMod` k in if i == j then 1.0 else 0.0))
 
     hess = hessianNLL dist mYerr xss ys tree theta

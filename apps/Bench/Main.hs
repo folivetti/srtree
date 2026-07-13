@@ -18,7 +18,7 @@ import System.Random
 import Control.Monad.State.Strict
 import Algorithm.SRTree.Opt
 import Algorithm.SRTree.Likelihoods
-import Algorithm.SRTree.ReverseModeAcc
+import Algorithm.SRTree.AD
 
 -- Assuming these are exported by your project modules:
 -- import SRTree
@@ -88,8 +88,8 @@ main = do
     _ <- evaluate (force theta1)
     print $ sum $ map (\t ->  V.sum $ naiveEval t) trees
     print $ sum $ map (\t ->  V.sum $ t theta) compiledFn
-    print $ sum $ map (\t -> getF $ minimizeNLL MSE Nothing 0 dataset y t theta1) trees
-    print $ sum $ map (\t -> getF $ minimizeNLLAcc MSE Nothing 0 dataset y t theta1) trees
+    print $ sum $ map (\t -> getF $ minimizeNLL MultiThread MSE Nothing 0 dataset y t theta1) trees
+    print $ sum $ map (\t -> getF $ minimizeNLL Accelerate MSE Nothing 0 dataset y t theta1) trees
     --print $ sum $ map (\t -> getF $ minimizeNLLCompiled MSE Nothing 0 dataset y t theta1) trees
 
     --print $ sum $ map (\t -> VS.sum . snd $ gradNLLGraph MSE dataset' y' Nothing t theta1') trees
@@ -117,16 +117,16 @@ main = do
 
             -- The fast version: executing the pre-compiled, stream-fused closure
             bench "minimizeNLLCompiled (Compiled Closure)" $
-                nf (\ts -> sum [V.sum . getT $ minimizeNLL MSE Nothing 100 dataset' y' t theta1' | t <- ts]) trees,
+                nf (\ts -> sum [V.sum . getT $ minimizeNLL MultiThread MSE Nothing 100 dataset' y' t theta1' | t <- ts]) trees,
             bench "minimizeNLLCompiled (accelerate)" $
-                nf (\ts -> sum [V.sum . getT $ minimizeNLLAcc MSE Nothing 100 dataset' y' t theta1' | t <- ts]) trees
+                nf (\ts -> sum [V.sum . getT $ minimizeNLL Accelerate MSE Nothing 100 dataset' y' t theta1' | t <- ts]) trees
 
             --bench "minimizeNLLO (Naive optimized AST Traversal)" $
             --    nf (\ts -> sum [V.sum . getT $ minimizeNLLO MSE Nothing 100 dataset y t theta1 | t <- ts]) trees
 
             -- The slow version: dynamically traversing the AST at runtime
             --bench "minimizeNLL (Naive AST Traversal)" $
-            --    nf (\ts -> sum [V.sum . getT $ minimizeNLL MSE Nothing 100 dataset y t theta1 | t <- ts]) trees
+            --    nf (\ts -> sum [V.sum . getT $ minimizeNLL (NLL MSE) Nothing 100 dataset y t theta1 | t <- ts]) trees
 
         ]
       ]

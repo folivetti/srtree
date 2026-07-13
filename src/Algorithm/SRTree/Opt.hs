@@ -30,7 +30,6 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.SRTree.Recursion
 import Control.Monad.State.Strict
 import Control.Monad.Identity
-import Algorithm.SRTree.ReverseModeAcc
 
 import Debug.Trace
 
@@ -55,49 +54,23 @@ minimizeNLLWith funAndGrad alg niter t0
 {-# INLINE minimizeNLLWith #-}
 
 -- | minimizes the negative log-likelihood of the expression
-minimizeNLL' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> Distribution -> Maybe Target -> Int -> Columns -> Target -> Fix SRTree -> Target -> (Target, Double, Int)
-minimizeNLL' alg dist mYerr niter xss ys tree t0 = minimizeNLLWith funAndGrad alg niter t0
+minimizeNLL' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> ADBackEnd -> Loss -> Maybe Target -> Int -> Columns -> Target -> Fix SRTree -> Target -> (Target, Double, Int)
+minimizeNLL' alg backend dist mYerr niter xss ys tree t0 = minimizeNLLWith funAndGrad alg niter t0
   where
     m          = V.length ys
-    tree'      = buildNLL dist (fromIntegral m) tree
-    ct         = compileTreeMulti xss ys mYerr tree'
-    funAndGrad = evalGradMulti ct
+    tree'      = buildLoss dist (fromIntegral m) tree
+    funAndGrad = compileFunAndGrad backend xss ys mYerr tree'
 
--- | minimizes the negative log-likelihood of the expression
-minimizeNLLAcc' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> Distribution -> Maybe Target -> Int -> Columns -> Target -> Fix SRTree -> Target -> (Target, Double, Int)
-minimizeNLLAcc' alg dist mYerr niter xss ys tree t0 = minimizeNLLWith funAndGrad alg niter t0
-  where
-    m          = V.length ys
-    tree'      = buildNLL dist (fromIntegral m) tree
-    ct         = compileTree xss ys mYerr tree'
-    funAndGrad = compileAccelerateTree ct xss ys
-
-minimizeNLL :: Distribution -> Maybe Target -> Int -> Columns -> Target -> Fix SRTree -> Target -> (Target, Double, Int)
+minimizeNLL :: ADBackEnd -> Loss -> Maybe Target -> Int -> Columns -> Target -> Fix SRTree -> Target -> (Target, Double, Int)
 minimizeNLL = minimizeNLL' TNEWTON
 
-minimizeNLLAcc :: Distribution -> Maybe Target -> Int -> Columns -> Target -> Fix SRTree -> Target -> (Target, Double, Int)
-minimizeNLLAcc = minimizeNLLAcc' TNEWTON
-
 -- | minimizes the function while keeping the parameter ix fixed (used to calculate the profile)
-minimizeNLLWithFixedParam' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> Distribution -> Maybe Target -> Int -> Columns -> Target -> Fix SRTree -> Int -> Target -> Target
-minimizeNLLWithFixedParam' alg dist mYerr' niter xss' ys' tree ix t0 = t
+minimizeNLLWithFixedParam' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> ADBackEnd -> Loss -> Maybe Target -> Int -> Columns -> Target -> Fix SRTree -> Int -> Target -> Target
+minimizeNLLWithFixedParam' alg backend dist mYerr' niter xss' ys' tree ix t0 = t
   where
     m          = V.length ys'
-    tree'      = buildNLL dist (fromIntegral m) tree
-    ct         = compileTreeMulti xss' ys' mYerr' tree'
-    funAndGrad = second (VS.// [(ix, 0.0)]) . evalGradMulti ct
+    tree'      = buildLoss dist (fromIntegral m) tree
+    funAndGrad = second (VS.// [(ix, 0.0)]) . compileFunAndGrad backend xss' ys' mYerr' tree'
     (t,_,_)    = minimizeNLLWith funAndGrad alg niter t0
 
 minimizeNLLWithFixedParam = minimizeNLLWithFixedParam' TNEWTON
-
--- | minimizes using Gaussian likelihood 
-minimizeGaussian :: Int -> Columns -> Target -> Fix SRTree -> Target -> (Target, Double, Int)
-minimizeGaussian = minimizeNLL Gaussian Nothing
-
--- | minimizes using Binomial likelihood 
-minimizeBinomial :: Int -> Columns -> Target -> Fix SRTree -> Target -> (Target, Double, Int)
-minimizeBinomial = minimizeNLL Bernoulli Nothing
-
--- | minimizes using Poisson likelihood 
-minimizePoisson :: Int -> Columns -> Target -> Fix SRTree -> Target -> (Target, Double, Int)
-minimizePoisson = minimizeNLL Poisson Nothing

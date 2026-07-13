@@ -23,13 +23,17 @@ module Algorithm.SRTree.ModelSelection
     , mdlFreq
     , logFunctional
     , logFunctionalFreq
+    , ModelEval (..)
     , module Algorithm.SRTree.Compile
     ) where
 
 import Algorithm.SRTree.Utils ( det )
-import Algorithm.SRTree.Likelihoods ( fisherNLL, hessianNLL, nll, Distribution(..) )
+import Algorithm.SRTree.Likelihoods
+    ( fisherNLL, hessianNLL, mae, mape, pinballLoss 
+    , Distribution(..), Loss(..), buildDistLoss
+    )
 import Data.SRTree
-import Data.SRTree.Eval (Target, Columns)
+import Data.SRTree.Eval (Target, Columns, compileLoss)
 import Data.SRTree.Recursion (cata)
 import qualified Data.Vector.Unboxed as U
 import Algorithm.SRTree.Compile
@@ -79,6 +83,49 @@ mdlFreq :: EvaluatedTree -> Double
 mdlFreq et = valLoss et + logFunctionalFreq (valTree et) + valLogParams et
 {-# INLINE mdlFreq #-}
 
+-- | The possible metrics used to evaluate\/select a fitted model,
+-- ranging from plain loss functions ('EvalLoss', wrapping any 'Loss' --
+-- including a distribution's negative log-likelihood via @EvalLoss (NLL
+-- dist)@) to the error metrics and model-selection criteria already
+-- provided by this module ('RMSE', 'R2', 'AIC', 'BIC', 'Evidence', 'FBF',
+-- 'MDL', 'MDLLatt', 'MDLFreq').
+data ModelEval
+  = EvalLoss Loss
+  | RMSE
+  | R2
+  | AIC
+  | BIC
+  | Evidence
+  | FBF
+  | MDL
+  | MDLLatt
+  | MDLFreq
+  deriving (Show, Read, Eq)
+
+-- | Evaluates the requested 'ModelEval' metric.
+--
+-- 'EvalLoss', 'RMSE', and 'R2' need direct access to the data ('xss',
+-- 'ys') and are evaluated at the already-fitted parameters
+-- ('valTheta' et'); the remaining criteria only need the already
+-- computed 'EvaluatedTree' (loss value, parameter count, row count, and
+-- the pre-computed complexity terms).
+{-
+buildEval :: ModelEval -> Columns -> Target -> EvaluatedTree -> Double
+buildEval (EvalLoss MAE)           xss ys et = mae  xss ys (valTree et) (valTheta et)
+buildEval (EvalLoss MAPE)          xss ys et = mape xss ys (valTree et) (valTheta et)
+buildEval (EvalLoss (Pinball tau)) xss ys et = pinballLoss tau xss ys (valTree et) (valTheta et)
+buildEval (EvalLoss (NLL dist))    xss ys et = compileLoss xss (buildDistLoss Gaussian (fromIntegral $ U.length ys) (valTree et)) ys (valTheta et)
+buildEval RMSE                     xss ys et = rmse xss ys (valTree et) (valTheta et)
+buildEval R2                       xss ys et = r2   xss ys (valTree et) (valTheta et)
+buildEval AIC       _   _  et = aic et
+buildEval BIC       _   _  et = bic et
+buildEval Evidence  _   _  et = evidence et
+buildEval FBF       _   _  et = fractionalBayesFactor et
+buildEval MDL       _   _  et = mdl et
+buildEval MDLLatt   _   _  et = mdlLatt et
+buildEval MDLFreq   _   _  et = mdlFreq et
+{-# INLINE buildEval #-}
+-}
 -- log of the functional complexity
 logFunctional :: Fix SRTree -> Double
 logFunctional tree = countNodes tree * log (countUniqueTokens tree') + foldr (\c acc -> log (abs c) + acc) 0 consts  + log(2) * numberOfConsts

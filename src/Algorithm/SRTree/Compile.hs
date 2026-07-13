@@ -20,7 +20,7 @@ data EvalTree = EvalTree {
 compileTree :: Columns -> Target -> Maybe Target -> Fix SRTree -> EvalTree
 compileTree xss ys mYerr tree = EvalTree {
   ctLoss = compileLoss xss tree ys,
-  ctAD   = evalGradMulti (compileTreeMulti xss ys mYerr tree),
+  ctAD   = compileFunAndGrad MultiThread xss ys mYerr tree,
   ctTree = tree,
   ctRows = U.length ys
 }

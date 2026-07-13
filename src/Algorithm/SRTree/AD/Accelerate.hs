@@ -4,7 +4,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 
-module Algorithm.SRTree.ReverseModeAcc
+module Algorithm.SRTree.AD.Accelerate
   ( compileAccelerateTree
   ) where
 
@@ -17,7 +17,7 @@ import Data.Vector.Generic qualified as VG
 import Data.Vector qualified as VB
 import Data.Vector.Storable qualified as VS
 import Prelude hiding (zipWith, replicate, sum, map, log, abs, sqrt, recip)
-import Algorithm.SRTree.AD
+import Algorithm.SRTree.AD.CompiledAD
 
 {-# INLINE diffPureAcc #-}
 diffPureAcc :: Op -> Exp Double -> Exp Double -> Exp Double -> Exp Double -> Exp (Double, Double)
