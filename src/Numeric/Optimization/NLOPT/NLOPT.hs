@@ -46,7 +46,7 @@ Right (Solution {solutionCost = 22.0, solutionParams = [0.0,0.0], solutionResult
 
 -}
 
-module Algorithm.SRTree.NonlinearOpt (
+module Numeric.Optimization.NLOPT (
   -- * Specifying the objective function
   Objective
   , ObjectiveD

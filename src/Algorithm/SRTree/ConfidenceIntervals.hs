@@ -21,7 +21,7 @@ import Data.SRTree
 import Data.SRTree.Eval
 import Data.SRTree.Recursion ( cata )
 import Algorithm.SRTree.Likelihoods
-import Algorithm.SRTree.Opt ( minimizeNLL, minimizeNLLWithFixedParam )
+import Algorithm.SRTree.NonlinearOpt ( minimizeNLL, minimizeNLLWithFixedParam )
 import Data.List ( sortOn, nubBy, transpose )
 import Data.Maybe ( fromMaybe )
 import Algorithm.SRTree.NonlinearOpt

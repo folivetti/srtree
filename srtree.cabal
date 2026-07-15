@@ -34,8 +34,8 @@ library
           Algorithm.SRTree.ConfidenceIntervals
           Algorithm.SRTree.Likelihoods
           Algorithm.SRTree.ModelSelection
+          Numeric.Optimization.NLOPT
           Algorithm.SRTree.NonlinearOpt
-          Algorithm.SRTree.Opt
           Algorithm.SRTree.Utils
           Data.SRTree
           Data.SRTree.Datasets

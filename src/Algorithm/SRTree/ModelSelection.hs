@@ -100,7 +100,7 @@ data ModelEval
   | MDL
   | MDLLatt
   | MDLFreq
-  deriving (Show, Read, Eq)
+  deriving (Show, Read, Eq, Enum)
 
 -- | Evaluates the requested 'ModelEval' metric.
 --
@@ -109,23 +109,23 @@ data ModelEval
 -- ('valTheta' et'); the remaining criteria only need the already
 -- computed 'EvaluatedTree' (loss value, parameter count, row count, and
 -- the pre-computed complexity terms).
-{-
-buildEval :: ModelEval -> Columns -> Target -> EvaluatedTree -> Double
-buildEval (EvalLoss MAE)           xss ys et = mae  xss ys (valTree et) (valTheta et)
-buildEval (EvalLoss MAPE)          xss ys et = mape xss ys (valTree et) (valTheta et)
-buildEval (EvalLoss (Pinball tau)) xss ys et = pinballLoss tau xss ys (valTree et) (valTheta et)
-buildEval (EvalLoss (NLL dist))    xss ys et = compileLoss xss (buildDistLoss Gaussian (fromIntegral $ U.length ys) (valTree et)) ys (valTheta et)
-buildEval RMSE                     xss ys et = rmse xss ys (valTree et) (valTheta et)
-buildEval R2                       xss ys et = r2   xss ys (valTree et) (valTheta et)
-buildEval AIC       _   _  et = aic et
-buildEval BIC       _   _  et = bic et
-buildEval Evidence  _   _  et = evidence et
-buildEval FBF       _   _  et = fractionalBayesFactor et
-buildEval MDL       _   _  et = mdl et
-buildEval MDLLatt   _   _  et = mdlLatt et
-buildEval MDLFreq   _   _  et = mdlFreq et
+
+buildEval :: ModelEval -> EvaluatedTree -> Double
+buildEval (EvalLoss MAE)           et = undefined
+buildEval (EvalLoss MAPE)          et = undefined
+buildEval (EvalLoss (Pinball tau)) et = undefined
+buildEval (EvalLoss (NLL dist))    et = undefined
+buildEval RMSE                     et = undefined
+buildEval R2                       et = undefined
+buildEval AIC       et = aic et
+buildEval BIC       et = bic et
+buildEval Evidence  et = evidence et
+buildEval FBF       et = fractionalBayesFactor et
+buildEval MDL       et = mdl et
+buildEval MDLLatt   et = mdlLatt et
+buildEval MDLFreq   et = mdlFreq et
 {-# INLINE buildEval #-}
--}
+
 -- log of the functional complexity
 logFunctional :: Fix SRTree -> Double
 logFunctional tree = countNodes tree * log (countUniqueTokens tree') + foldr (\c acc -> log (abs c) + acc) 0 consts  + log(2) * numberOfConsts

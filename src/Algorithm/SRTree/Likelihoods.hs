@@ -72,28 +72,6 @@ data Distribution = Gaussian | HGaussian | Bernoulli | Poisson | ROXY
 data Loss = MSE | LOG10 | MAE | MAPE | Pinball Double | NLL Distribution
     deriving (Show, Read, Eq)
 
--- | Mean absolute error
-mae :: Columns -> Target -> Fix SRTree -> Target -> Double
-mae xss ys tree theta = let m = V.length ys in err / fromIntegral m
-  where
-    yhat = compile xss tree theta
-    err  = V.sum . V.map abs $ ys - yhat
-
--- | Mean absolute percentage error
-mape :: Columns -> Target -> Fix SRTree -> Target -> Double
-mape xss ys tree theta = let m = V.length ys in err / fromIntegral m
-  where
-    yhat = compile xss tree theta
-    err  = V.sum . V.map abs $ (ys - yhat) / ys
-
--- | Pinball (quantile) loss for a given quantile @tau@ in @(0, 1)@.
-pinballLoss :: Double -> Columns -> Target -> Fix SRTree -> Target -> Double
-pinballLoss tau xss ys tree theta = let m = V.length ys in err / fromIntegral m
-  where
-    yhat  = compile xss tree theta
-    pin r = if r >= 0 then tau * r else (tau - 1) * r
-    err   = V.sum . V.map pin $ ys - yhat
-
 -- | logistic function
 logistic :: Floating a => a -> a
 logistic x = 1 / (1 + exp (-x))

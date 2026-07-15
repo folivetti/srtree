@@ -11,11 +11,11 @@
 -- Functions to optimize the parameters of an expression.
 --
 -----------------------------------------------------------------------------
-module Algorithm.SRTree.Opt
+module Algorithm.SRTree.NonlinearOpt
     where
 
 import Algorithm.SRTree.Likelihoods
-import Algorithm.SRTree.NonlinearOpt
+import Numeric.Optimization.NLOPT
 import Data.Bifunctor (bimap, second)
 import Data.SRTree (Fix (..), SRTree (..), floatConstsToParam, relabelParams, countNodes, convertProtectedOps)
 import Data.SRTree.Eval

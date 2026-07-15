@@ -16,7 +16,7 @@ import Data.SRTree.Eval
 import Data.SRTree.Random
 import System.Random
 import Control.Monad.State.Strict
-import Algorithm.SRTree.Opt
+import Algorithm.SRTree.NonlinearOpt
 import Algorithm.SRTree.Likelihoods
 import Algorithm.SRTree.AD
 
