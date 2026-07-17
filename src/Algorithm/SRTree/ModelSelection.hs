@@ -29,7 +29,7 @@ module Algorithm.SRTree.ModelSelection
 
 import Algorithm.SRTree.Utils ( det )
 import Algorithm.SRTree.Likelihoods
-    ( fisherNLL, hessianNLL, mae, mape, pinballLoss 
+    ( fisherNLL, hessianNLL
     , Distribution(..), Loss(..), buildDistLoss
     )
 import Data.SRTree
@@ -90,8 +90,7 @@ mdlFreq et = valLoss et + logFunctionalFreq (valTree et) + valLogParams et
 -- provided by this module ('RMSE', 'R2', 'AIC', 'BIC', 'Evidence', 'FBF',
 -- 'MDL', 'MDLLatt', 'MDLFreq').
 data ModelEval
-  = EvalLoss Loss
-  | RMSE
+  = RMSE
   | R2
   | AIC
   | BIC
@@ -100,31 +99,56 @@ data ModelEval
   | MDL
   | MDLLatt
   | MDLFreq
-  deriving (Show, Read, Eq, Enum)
+  | EvalLoss Loss
+  deriving (Show, Read, Eq)
+
+instance Enum ModelEval where
+    fromEnum RMSE         = 0
+    fromEnum R2           = 1
+    fromEnum AIC          = 2
+    fromEnum BIC          = 3
+    fromEnum Evidence     = 4
+    fromEnum FBF          = 5
+    fromEnum MDL          = 6
+    fromEnum MDLLatt      = 7
+    fromEnum MDLFreq      = 8
+    fromEnum (EvalLoss l) = 9 + fromEnum l
+
+    toEnum   0 = RMSE
+    toEnum   1 = R2
+    toEnum   2 = AIC
+    toEnum   3 = BIC
+    toEnum   4 = Evidence
+    toEnum   5 = FBF
+    toEnum   6 = MDL
+    toEnum   7 = MDLLatt
+    toEnum   8 = MDLFreq
+    toEnum   x | x >= 9 = EvalLoss (toEnum (x-9))
+
+instance Bounded ModelEval where
+    minBound = RMSE
+    maxBound = EvalLoss maxBound
 
 -- | Evaluates the requested 'ModelEval' metric.
 --
--- 'EvalLoss', 'RMSE', and 'R2' need direct access to the data ('xss',
--- 'ys') and are evaluated at the already-fitted parameters
--- ('valTheta' et'); the remaining criteria only need the already
--- computed 'EvaluatedTree' (loss value, parameter count, row count, and
--- the pre-computed complexity terms).
+-- for 'RMSE', and 'R2' the tree must have been compiled
+-- with MSE loss.
 
-buildEval :: ModelEval -> EvaluatedTree -> Double
-buildEval (EvalLoss MAE)           et = undefined
-buildEval (EvalLoss MAPE)          et = undefined
-buildEval (EvalLoss (Pinball tau)) et = undefined
-buildEval (EvalLoss (NLL dist))    et = undefined
-buildEval RMSE                     et = undefined
-buildEval R2                       et = undefined
-buildEval AIC       et = aic et
-buildEval BIC       et = bic et
-buildEval Evidence  et = evidence et
-buildEval FBF       et = fractionalBayesFactor et
-buildEval MDL       et = mdl et
-buildEval MDLLatt   et = mdlLatt et
-buildEval MDLFreq   et = mdlFreq et
-{-# INLINE buildEval #-}
+evalModelSelection :: ModelEval -> EvaluatedTree -> Double
+evalModelSelection (EvalLoss MAE)           et = valLoss et
+evalModelSelection (EvalLoss MAPE)          et = valLoss et
+evalModelSelection (EvalLoss (Pinball tau)) et = valLoss et
+evalModelSelection (EvalLoss (NLL dist))    et = valLoss et
+evalModelSelection RMSE                     et = sqrt (valLoss et) -- assumes MSE
+evalModelSelection R2                       et = 1 - (valRows et * valLoss et) / valVar et -- assumes MSE
+evalModelSelection AIC                      et = aic et
+evalModelSelection BIC                      et = bic et
+evalModelSelection Evidence                 et = evidence et
+evalModelSelection FBF                      et = fractionalBayesFactor et
+evalModelSelection MDL                      et = mdl et
+evalModelSelection MDLLatt                  et = mdlLatt et
+evalModelSelection MDLFreq                  et = mdlFreq et
+{-# INLINE evalModelSelection #-}
 
 -- log of the functional complexity
 logFunctional :: Fix SRTree -> Double

@@ -13,16 +13,20 @@ data EvalTree = EvalTree {
   ctLoss :: Theta -> Double,
   ctAD   :: VS.Vector Double -> (Double, VS.Vector Double),
   ctTree :: Fix SRTree,
-  ctRows :: Int
+  ctRows :: Int,
+  ctVar  :: Double
 }
 
 -- | Compile a tree and store it in a CompiledTree data structure
 compileTree :: Columns -> Target -> Maybe Target -> Fix SRTree -> EvalTree
 compileTree xss ys mYerr tree = EvalTree {
-  ctLoss = compileLoss xss tree ys,
+  ctLoss = compileLoss xss tree ys mYerr,
   ctAD   = compileFunAndGrad MultiThread xss ys mYerr tree,
   ctTree = tree,
-  ctRows = U.length ys
+  ctRows = U.length ys,
+  ctVar  = let ym = U.sum ys / fromIntegral (U.length ys)
+           in U.foldr (\yi acc -> acc + (yi - ym)^2) 0 ys
+
 }
 
 data EvaluatedTree = EvaluatedTree {
@@ -32,7 +36,8 @@ data EvaluatedTree = EvaluatedTree {
   valParams           :: Double,
   valTree             :: Fix SRTree,
   valLogParams        :: Double,
-  valLogParamsLattice :: Double
+  valLogParamsLattice :: Double,
+  valVar              :: Double
 }
 
 evaluateTree :: EvalTree -> Target -> [[Double]] -> Theta -> EvaluatedTree
@@ -43,7 +48,8 @@ evaluateTree et fisher hessian theta = EvaluatedTree {
   valParams           = fromIntegral (U.length theta),
   valTree             = ctTree et,
   valLogParams        = logParameters fisher theta,
-  valLogParamsLattice = logParametersLatt hessian fisher theta
+  valLogParamsLattice = logParametersLatt hessian fisher theta,
+  valVar              = ctVar et
 }
 
 

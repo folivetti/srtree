@@ -39,6 +39,7 @@ import qualified Data.Vector.Unboxed.Mutable as VM
 import Control.Concurrent.Async (forConcurrently_)
 import System.IO.Unsafe (unsafePerformIO)
 import Control.Concurrent (getNumCapabilities)
+import Data.Maybe (fromJust)
 
 -- | Vector of target values 
 type Target  = Vector Double
@@ -143,8 +144,8 @@ generateParallel n f = unsafePerformIO $ do
     V.unsafeFreeze out
 {-# NOINLINE generateParallel #-}
 
-compileLoss :: [Vector Double] -> Fix SRTree -> Target -> (Vector Double -> Double)
-compileLoss dataset tree y =
+compileLoss :: [Vector Double] -> Fix SRTree -> Target -> Maybe Target -> (Vector Double -> Double)
+compileLoss dataset tree y mYerr =
     case cata alg tree of
         Scl c     -> \_  -> V.sum $ V.replicate n c
         Static v  -> \_  -> V.sum v
@@ -152,16 +153,17 @@ compileLoss dataset tree y =
         --Dynamic f -> \th -> V.generate n (f th)
         Dynamic f -> \th -> sumParallel n (f th)
   where
-    n = V.length (head dataset)
+    n    = V.length (head dataset)
+    yErr = fromJust mYerr
 
     alg :: SRTree Staged -> Staged
 
     -- 1. Base Cases
-    alg (Const c) = Scl c
-    alg (Var i)   = Static (dataset !! i)
-    -- Look at this! No more V.replicate. It just fetches the scalar directly.
-    alg (Param i) = Dynamic (\th !idx -> th `V.unsafeIndex` i)
-    alg (Y i)     = Static y
+    alg (Const c)  = Scl c
+    alg (Var i)    = Static (dataset !! i)
+    alg (Param i)  = Dynamic (\th !idx -> th `V.unsafeIndex` i)
+    alg (Var (-1)) = Static y
+    alg (Var (-2)) = Static yErr
 
     -- 2. Univariate Functions
     alg (Uni f (Scl c))     = Scl (evalFun f c)

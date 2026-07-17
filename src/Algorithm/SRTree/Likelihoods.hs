@@ -20,9 +20,6 @@ module Algorithm.SRTree.Likelihoods
   , Loss (..)
   , Target
   , Columns
-  , mae
-  , mape
-  , pinballLoss
   , buildDistLoss
   , buildLoss
   , buildPredictor
@@ -71,6 +68,25 @@ data Distribution = Gaussian | HGaussian | Bernoulli | Poisson | ROXY
 -- module).
 data Loss = MSE | LOG10 | MAE | MAPE | Pinball Double | NLL Distribution
     deriving (Show, Read, Eq)
+
+instance Enum Loss where
+    fromEnum MSE         = 0
+    fromEnum LOG10       = 1
+    fromEnum MAE         = 2
+    fromEnum MAPE        = 3
+    fromEnum (Pinball _) = 4
+    fromEnum (NLL dist)  = 5 + fromEnum dist
+
+    toEnum   0 = MSE
+    toEnum   1 = LOG10
+    toEnum   2 = MAE
+    toEnum   3 = MAPE
+    toEnum   4 = Pinball 0.95
+    toEnum   x | x >= 5 = NLL (toEnum (x-5))
+
+instance Bounded Loss where
+    minBound = MSE
+    maxBound = NLL ROXY
 
 -- | logistic function
 logistic :: Floating a => a -> a
@@ -182,7 +198,7 @@ fisherNLL ROXY mYerr xss ys tree theta = V.generate p finiteDiff
   where
     m             = V.length ys
     p             = V.length theta
-    loss          = compileLoss xss (buildDistLoss ROXY (fromIntegral m) tree) ys
+    loss          = compileLoss xss (buildDistLoss ROXY (fromIntegral m) tree) ys mYerr
     f             = loss theta
     eps           = 1e-6
     finiteDiff ix = unsafePerformIO $ do
@@ -199,7 +215,7 @@ fisherNLL Gaussian mYerr xss ys tree theta = V.generate p finiteDiff
   where
     m             = V.length ys
     p             = V.length theta
-    loss          = compileLoss xss (buildDistLoss Gaussian (fromIntegral m) tree) ys
+    loss          = compileLoss xss (buildDistLoss Gaussian (fromIntegral m) tree) ys mYerr
     f             = loss theta
     eps           = 1e-6
     finiteDiff ix = unsafePerformIO $ do

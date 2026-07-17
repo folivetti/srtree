@@ -179,6 +179,192 @@ calcTheta0 dist tree = case cata alg tree of
         Left g -> Left $ g . invleft op vl
         Right vr -> Right $ evalOp op vl vr
 
+-- calculate the profile likelihood of every parameter
+getAllProfiles :: PType -> Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> PVector -> [CI] -> Double -> [ProfileT]
+getAllProfiles ptype dist mYerr xss ys tree theta stdErr estCIs alpha = getAll 0 []
+  where
+    (A.Sz k)   = A.size theta
+    (A.Sz n)   = A.size ys
+    tau_max    = sqrt $ quantile (fDistribution k (n - k)) (1 - 0.01)
+    tau_max'   = sqrt $ quantile (fDistribution k (n - k)) (1 - alpha)
+
+    profFun ix = case ptype of
+                    Bates       -> getProfile      dist mYerr xss ys tree theta (stdErr A.! ix) tau_max ix
+                    ODE         -> getProfileODE   dist mYerr xss ys tree theta (stdErr A.! ix) (estCIs !! ix) tau_max ix
+                    Constrained -> getProfileCnstr dist mYerr xss ys tree theta (stdErr A.! ix) tau_max' ix
+
+    getAll ix acc | ix == k   = acc
+                  | ix == k-1 && ptype == Constrained && dist == Gaussian = case getProfileODE   dist mYerr xss ys tree theta (stdErr A.! ix) (estCIs !! ix) tau_max ix of
+                                  Left t  -> getAllProfiles ptype dist mYerr xss ys tree t stdErr estCIs alpha
+                                  Right p -> getAll (ix + 1) (acc <> [p])
+                  | otherwise = case profFun ix of
+                                  Left t  -> getAllProfiles ptype dist mYerr xss ys tree t stdErr estCIs alpha
+                                  Right p -> getAll (ix + 1) (acc <> [p])
+
+-- calculates the profile likelihood of a single parameter
+getProfile :: Distribution
+           -> Maybe PVector
+           -> SRMatrix
+           -> PVector
+           -> Fix SRTree
+           -> PVector
+           -> Double
+           -> Double
+           -> Int
+           -> Either PVector ProfileT
+getProfile dist mYerr xss ys tree theta stdErr_i tau_max ix
+  | stdErr_i == 0.0 = pure $ ProfileT (A.fromList compMode [-tau_max, tau_max]) (A.fromLists' compMode [theta', theta']) (theta A.! ix) (const (theta A.! ix)) (const tau_max)
+  | otherwise =
+  do negDelta <- go kmax (-stdErr_i / 8) 0 1 mempty
+     posDelta <- go kmax  (stdErr_i / 8) 0 1 p0
+     let (A.fromList compMode -> taus, A.fromLists' compMode. map A.toList -> thetas) = negDelta <> posDelta
+         (tau2theta, theta2tau)                       = createSplines taus thetas stdErr_i tau_max ix
+     pure $ ProfileT taus thetas optTh tau2theta theta2tau
+  where
+    theta'    = A.toList theta
+    p0        = ([0], [theta_opt])
+    kmax      = 300
+    nll_opt   = nll dist mYerr xss ys tree theta_opt
+    (theta_opt, _, _) = minimizeNLL dist mYerr 100 xss ys tree theta
+    optTh     = theta_opt A.! ix
+    minimizer = minimizeNLLWithFixedParam dist mYerr 100 xss ys tree ix
+
+    -- after k iterations, interpolates to the endpoint
+    go 0 delta _ _         acc = Right acc
+    go k delta t inv_slope acc@(taus, thetas)
+      | isNaN inv_slope     = Right acc    -- stop since we cannot move forward on discontinuity
+      | nll_cond < nll_opt  = Left theta_t -- found a better optima
+      | abs tau > tau_max   = Right acc'   -- we reached the endpoint
+      | otherwise           = go (k-1) delta (t + inv_slope) inv_slope' acc'
+      where
+        t_delta     = (theta_opt A.! ix) + delta * (t + inv_slope)
+        theta_delta = updateS theta_opt [(ix, t_delta)]
+        theta_t     = minimizer theta_delta
+        zv          = A.computeAs A.S (snd $ gradNLL dist mYerr xss ys tree theta_t) A.! ix
+        zvs         = snd $ gradNLL dist mYerr xss ys tree theta_t
+        inv_slope'  = min 4.0 . max 0.0625 . abs $ (tau / (stdErr_i * zv))
+        nll_cond    = nll dist mYerr xss ys tree theta_t
+        acc'        = if nll_cond == nll_opt || ( (not.null) taus && tau == head taus ) || isNaN tau
+                         then acc
+                         else (tau:taus, theta_t:thetas)
+        tau         = signum delta * sqrt (2*nll_cond - 2*nll_opt)
+
+-- Based on https://insysbio.github.io/LikelihoodProfiler.jl/latest/
+-- Borisov, Ivan, and Evgeny Metelkin. "Confidence intervals by constrained optimization—An algorithm and software package for practical identifiability analysis in systems biology." PLOS Computational Biology 16.12 (2020): e1008495.
+getProfileCnstr :: Distribution
+                -> Maybe PVector
+                -> SRMatrix
+                -> PVector
+                -> Fix SRTree
+                -> PVector
+                -> Double -> Double
+                -> Int
+                -> Either PVector ProfileT
+getProfileCnstr dist mYerr xss ys tree theta stdErr_i tau_max ix
+  | stdErr_i == 0.0 = pure $ ProfileT taus thetas theta_i (const theta_i) (const tau_max)
+  | otherwise       = pure $ ProfileT taus thetas theta_i tau2theta (const tau_max)
+  where
+    taus     = A.fromList compMode [-tau_max, tau_max]
+    theta'   = A.toList theta
+    thetas   = A.fromLists' compMode [theta', theta']
+    theta_i  = theta A.! ix
+    getPoint = getEndPoint dist mYerr xss ys tree theta tau_max ix
+    leftPt   = getPoint True
+    rightPt  = getPoint False
+    tau2theta tau = if tau < 0 then leftPt else rightPt
+
+getEndPoint :: Distribution -> Maybe PVector -> A.Array A.S Ix2 Double -> A.Array A.S A.Ix1 Double -> Fix SRTree -> A.Array A.S A.Ix1 Double -> Double -> Int -> Bool -> Double
+getEndPoint dist mYerr xss ys tree theta tau_max ix isLeft =
+  case minimizeAugLag problem (A.toStorableVector theta_opt) of
+            Right sol -> solutionParams sol VS.! ix
+            Left e    -> theta_opt A.! ix
+  where
+    (A.Sz1 n) = A.size theta
+
+    (theta_opt, _, _) = minimizeNLL dist mYerr 100 xss ys tree theta
+    nll_opt   = nll dist mYerr xss ys tree theta_opt
+    loss_crit = nll_opt + tau_max
+
+    loss      = subtract loss_crit . nll dist mYerr xss ys tree . A.fromStorableVector compMode
+    obj       = (if isLeft then id else negate) . (VS.! ix)
+
+    stop       = ObjectiveRelativeTolerance 1e-4 :| [MaximumEvaluations 1000]
+    localAlg   = NELDERMEAD obj [] Nothing
+    local      = LocalProblem (fromIntegral n) stop localAlg
+    constraint = InequalityConstraint (Scalar loss) 1e-6
+
+    problem = AugLagProblem [] [] (AUGLAG_LOCAL local [constraint] [])
+{-# INLINE getEndPoint #-}
+
+-- Based on
+-- Jian-Shen Chen & Robert I Jennrich (2002) Simple Accurate Approximation of Likelihood Profiles,
+-- Journal of Computational and Graphical Statistics, 11:3, 714-732, DOI: 10.1198/106186002493
+getProfileODE :: Distribution
+           -> Maybe PVector
+           -> SRMatrix
+           -> PVector
+           -> Fix SRTree
+           -> PVector
+           -> Double
+           -> CI
+           -> Double
+           -> Int
+           -> Either PVector ProfileT
+getProfileODE dist mYerr xss ys tree theta stdErr_i estCI tau_max ix
+  | stdErr_i == 0.0 = pure dflt
+  | otherwise = let (A.fromList compMode -> taus, A.fromLists' compMode . map A.toList -> thetas) = solLeft <> ([0], [theta_opt]) <> solRight
+                    (tau2theta, theta2tau) = createSplines taus thetas stdErr_i tau_max ix
+                in pure $ ProfileT taus thetas optTh tau2theta theta2tau
+  where
+    dflt      = ProfileT (A.fromList compMode [-tau_max, tau_max]) (A.fromLists' compMode [theta', theta']) (theta A.! ix) (const (theta A.! ix)) (const tau_max)
+    minimizer = (\(x, _, _) -> x) . minimizeNLL dist mYerr 100 xss ys tree
+    grader    = snd . gradNLL dist mYerr xss ys tree
+    theta_opt = minimizer theta
+    theta'    = A.toList theta
+    nll_opt   = nll dist mYerr xss ys tree theta_opt
+    optTh     = theta_opt A.! ix
+    p'        = p+1
+    (A.Sz1 p) = A.size theta
+    --sErr      = fromMaybe 1 mSErr
+    getHess   = hessianNLL dist mYerr xss ys tree
+
+    odeFun gamma _ u =
+        let grad     = grader u
+            w        = hessianNLL dist mYerr xss ys tree u
+            m        = A.makeArray compMode (A.Sz (p' :. p'))
+                         (\ (i :. j) -> if | i<p && j<p -> w A.! (i :. j)
+                                           | i==ix      -> 1
+                                           | j==ix      -> 1
+                                           | otherwise  -> 0
+                         )
+
+            v        = A.computeAs A.S $ A.snoc (A.map (*(-gamma)) grad) 1
+            dotTheta = unsafePerformIO $ luSolve m v
+        in A.fromStorableVector compMode $ VS.init $ A.toStorableVector dotTheta
+
+    tsHi = linSpace 50 (optTh, upper_ estCI)
+    tsLo = linSpace 50 (optTh, lower_ estCI)
+    scanOn sig = foldMap (calcTau sig) . f . scanl (rk (odeFun sig)) (optTh, theta_opt)
+                    where f = if sig==1 then id else reverse
+    solRight = scanOn 1 tsHi
+    solLeft  = scanOn (-1) tsLo
+    calcTau s t = let nll_i = nll dist mYerr xss ys tree $ snd t
+                      z     = signum ((snd t A.! ix) - optTh) * sqrt (2 * nll_i - 2 * nll_opt)
+                  in if z == 0 || isNaN z then ([], []) else ([z], [snd t])
+
+rk :: (Double -> PVector -> PVector) -> (Double, PVector) -> Double -> (Double, PVector)
+rk f (t, y) t' = (t', y !+! ((1.0/6.0) *. h' !*! (k1 !+! (2.0 *. k2) !+! (2.0 *. k3) !+! k4)))
+  where
+    h  = t' - t
+    h', k1, k2, k3, k4 :: PVector
+    h' = A.replicate compMode (A.size y) h
+    k1 = f t y
+    k2 = f (t + 0.5*h) (A.computeAs A.S $ A.zipWith3 (g 0.5) y h' k1) -- (y !+! 0.5*.h' A.!*! k1)
+    k3 = f (t + 0.5*h) (A.computeAs A.S $ A.zipWith3 (g 0.5) y h' k2) -- (y !+! 0.5*.h' A.!*! k2)
+    k4 = f (t + 1.0*h) (A.computeAs A.S $ A.zipWith3 (g 1.0) y h' k3) -- (y !+! 1.0*.h'!*!k3)
+    g a yi hi ki = yi + a * hi * ki
+{-# INLINE rk #-}
+
 -- tau0, tau1 theta0, thetaX = tau1 theta0 / tau0
 getStatsFromModel :: Distribution -> Maybe Target -> Columns -> Target -> Fix SRTree -> Target -> BasicStats
 getStatsFromModel dist mYerr xss ys tree theta = MkStats cov corr stdErr
@@ -186,7 +372,7 @@ getStatsFromModel dist mYerr xss ys tree theta = MkStats cov corr stdErr
     k = U.length theta
     n = U.length ys
     nParams = fromIntegral k
-    ssr = compileLoss xss (buildLoss MSE (fromIntegral n) tree) ys theta
+    ssr = compileLoss xss (buildLoss MSE (fromIntegral n) tree) ys mYerr theta
     ident = fromRowMajor k k (U.generate (k * k) (\ix -> let (i, j) = ix `divMod` k in if i == j then 1.0 else 0.0))
 
     hess = hessianNLL dist mYerr xss ys tree theta
