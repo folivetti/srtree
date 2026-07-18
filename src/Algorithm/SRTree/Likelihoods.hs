@@ -55,7 +55,7 @@ import qualified Data.Vector.Generic as G
 
 -- | Supported distributions for negative log-likelihood.
 -- | HGaussian is Gaussian with heteroscedasticity, where the error should be provided.
-data Distribution = Gaussian | HGaussian | Bernoulli | Poisson | ROXY
+data Distribution = Gaussian | HGaussian | Bernoulli | Poisson | ROXY | LeastSquares
     deriving (Show, Read, Enum, Bounded, Eq)
 
 -- | Loss functions used to build the per-row optimization objective (see
@@ -112,7 +112,8 @@ checkAssumptions HGaussian (Just yErr) _  = True
 checkAssumptions HGaussian Nothing     _  = False
 checkAssumptions Bernoulli _           ys = V.all (\x -> x /= 0 && x /= 1) ys
 checkAssumptions Poisson   _           ys = V.all (>0) ys
-checkAssumptions ROXY      mYerr       ys = isJust mYerr
+checkAssumptions LeastSquares _         _  = True
+checkAssumptions ROXY          mYerr       ys = isJust mYerr
 
 -- WARNING: pass tree with parameters
 -- TODO: handle error similar to ROXY
@@ -134,6 +135,7 @@ buildDistLoss Gaussian m tree =  (square(tree - var (-1)) * (e (negate (param p)
 buildDistLoss HGaussian m tree = (tree - var (-1)) ** 2 / var (-2) + constv m * log (2*pi* var (-2))
 buildDistLoss Poisson m tree   = var (-1) * log (var (-1)) + exp tree - var (-1) * tree
 buildDistLoss Bernoulli m tree = log (1 + exp (negate tree)) + (1 - var (-1)) * tree
+buildDistLoss LeastSquares m tree = ((tree - var (-1)) ** 2) / constv m
 buildDistLoss ROXY m tree      = neglogP
   where
     p        = countParamsUniq tree
@@ -250,9 +252,10 @@ fisherNLL dist mYerr xss ys tree theta = V.generate p build
     est    = fromIntegral (m - p)
 
     (phi, phi') = case dist of
-                    Gaussian  -> (yhat, V.replicate m 1)
-                    Bernoulli -> (logistic yhat, phi*(V.replicate m 1 - phi))
-                    Poisson   -> (exp yhat, phi)
+                    Gaussian      -> (yhat, V.replicate m 1)
+                    LeastSquares  -> (yhat, V.replicate m 1)
+                    Bernoulli     -> (logistic yhat, phi*(V.replicate m 1 - phi))
+                    Poisson       -> (exp yhat, phi)
 
 -- | Hessian of negative log-likelihood
 --
@@ -308,7 +311,8 @@ hessianNLL dist mYerr xss ys tree theta = [V.generate p (build iy) | iy <- [0..p
     res         = ys - phi
 
     (phi, phi') = case dist of
-                    Gaussian  -> (yhat, V.replicate m 1)
-                    Bernoulli -> (logistic yhat, phi*(V.replicate m 1 - phi))
-                    Poisson   -> (exp yhat, phi)
+                    Gaussian      -> (yhat, V.replicate m 1)
+                    LeastSquares  -> (yhat, V.replicate m 1)
+                    Bernoulli     -> (logistic yhat, phi*(V.replicate m 1 - phi))
+                    Poisson       -> (exp yhat, phi)
 

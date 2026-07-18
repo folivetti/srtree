@@ -17,19 +17,20 @@ import Statistics.Distribution.StudentT ( studentT )
 import Statistics.Distribution.FDistribution ( fDistribution )
 import qualified Data.Vector.Unboxed as U
 import qualified Data.Vector.Storable as VS
+import qualified Data.Vector.Generic as G
 import Data.SRTree
 import Data.SRTree.Eval
 import Data.SRTree.Recursion ( cata )
 import Algorithm.SRTree.Likelihoods
-import Algorithm.SRTree.NonlinearOpt ( minimizeNLL, minimizeNLLWithFixedParam )
-import Data.List ( sortOn, nubBy, transpose )
-import Data.Maybe ( fromMaybe )
-import Algorithm.SRTree.NonlinearOpt
+import Algorithm.SRTree.Compile
+import Data.List ( sortOn, nubBy )
+import Data.Maybe ( listToMaybe )
 import Algorithm.SRTree.Utils
+import Numeric.Optimization.NLOPT
 import System.IO.Unsafe ( unsafePerformIO )
 import Control.Monad.Catch ( catch, SomeException )
 
-import Debug.Trace ( trace, traceShow )
+import Debug.Trace ( trace )
 
 -- | profile likelihood algorithms: Bates (classical), ODE (faster), Constrained (fastest)
 -- The Constrained approach returns only the endpoints.
@@ -101,43 +102,42 @@ predictionCI (Laplace stats) _ predFun jacFun _ xss tree theta alpha _ = zipWith
   where
     yhat = U.toList $ predFun xss
     jac' = jacFun xss
-    jac = transpose (map U.toList jac')
-
-    n = length yhat
     k = U.length theta
+    n = length yhat
     t = quantile (studentT . fromIntegral $ n - k) (1 - alpha / 2.0)
 
     covMat = toRowMajor (_cov stats)
-    covs = [ [ covMat U.! (i * k + j) | j <- [0 .. k-2] ] | i <- [0 .. k-2] ]
+    nCov = k - 1
 
     lows = zipWith (-) yhat $ map (*t) resStdErr
     highs = zipWith (+) yhat $ map (*t) resStdErr
 
-    -- Manual dot products for std error mapping slices
-    getResStdError row = sqrt $ sum [ row !! i * (sum [ (covs !! i !! j) * (row !! j) | j <- [0 .. length row - 1] ]) | i <- [0 .. length row - 1] ]
-    resStdErr = map (getResStdError . init) jac
+    getResStdError row =
+      sqrt $ U.sum $ U.generate nCov $ \i ->
+        (row U.! i) * U.sum (U.zipWith (*) row (U.slice (i * k) nCov covMat))
+    resStdErr = map (getResStdError . U.slice 0 nCov) (getRows jac')
 
 predictionCI (Profile _ _) dist predFun _ profFun xss tree theta alpha estPIs = zipWith3 f estPIs yhat xss'
   where
     yhat = U.toList $ predFun xss
-    theta' = VS.generate (U.length theta) (\i -> theta U.! i)
     k = U.length theta
     n = length yhat
     t = sqrt $ quantile (fDistribution k (fromIntegral $ n - k)) (1 - alpha)
 
     theta0 = calcTheta0 dist tree
-    xss' = map U.toList (getRows xss)
+    xss' = getRows xss
 
     f estPI yh xs = let
         t' = replaceParam0 tree $ evalVar xs theta0
-        (spline, yh') = profFun estPI (U.generate (VS.length theta') (\i -> if i == 0 then yh else theta' VS.! i)) t'
+        (spline, yh') = profFun estPI (theta U.// [(0, yh)]) t'
       in CI yh' (spline (-t)) (spline t)
 
 -- inverse function of the distributions
 inverseDist :: Floating p => Distribution -> p -> p
-inverseDist Gaussian y = y
+inverseDist Gaussian  y = y
 inverseDist Bernoulli y = log (y/(1-y))
-inverseDist Poisson y = log y
+inverseDist Poisson   y = log y
+inverseDist _         y = y
 
 -- rewrite the tree by fixing theta 0 to optimal value
 replaceParam0 :: Fix SRTree -> Fix SRTree -> Fix SRTree
@@ -147,15 +147,17 @@ replaceParam0 tree t0 = cata alg tree
     alg (Param 0) = t0
     alg (Param ix) = Fix $ Param ix
     alg (Const c) = Fix $ Const c
+    alg (Y ix)    = Fix $ Y ix
     alg (Uni g t) = Fix $ Uni g t
     alg (Bin op l r) = Fix $ Bin op l r
 
-evalVar :: [Double] -> Fix SRTree -> Fix SRTree
+evalVar :: Target -> Fix SRTree -> Fix SRTree
 evalVar xs = cata alg
   where
-    alg (Var ix) = Fix $ Const (xs !! ix)
+    alg (Var ix) = Fix $ Const (xs U.! ix)
     alg (Param ix) = Fix $ Param ix
     alg (Const c) = Fix $ Const c
+    alg (Y ix)    = Fix $ Y ix
     alg (Uni g t) = Fix $ Uni g t
     alg (Bin op l r) = Fix $ Bin op l r
 
@@ -168,6 +170,7 @@ calcTheta0 dist tree = case cata alg tree of
     alg (Param 0) = Left id
     alg (Param ix) = Right $ Fix $ Param ix
     alg (Const c) = Right $ Fix $ Const c
+    alg (Y ix)    = Right $ Fix $ Y ix
     alg (Uni g t) = case t of
       Left f -> Left $ f . evalInverse g
       Right v -> Right $ evalFun g v
@@ -180,112 +183,94 @@ calcTheta0 dist tree = case cata alg tree of
         Right vr -> Right $ evalOp op vl vr
 
 -- calculate the profile likelihood of every parameter
-getAllProfiles :: PType -> Distribution -> Maybe PVector -> SRMatrix -> PVector -> Fix SRTree -> PVector -> PVector -> [CI] -> Double -> [ProfileT]
-getAllProfiles ptype dist mYerr xss ys tree theta stdErr estCIs alpha = getAll 0 []
+getAllProfiles :: PType -> EvalTree -> Target -> Target -> [CI] -> Double -> [ProfileT]
+getAllProfiles ptype et theta stdErr estCIs alpha = getAll 0 []
   where
-    (A.Sz k)   = A.size theta
-    (A.Sz n)   = A.size ys
-    tau_max    = sqrt $ quantile (fDistribution k (n - k)) (1 - 0.01)
-    tau_max'   = sqrt $ quantile (fDistribution k (n - k)) (1 - alpha)
+    k = U.length theta
+    n = ctRows et
+    tau_max  = sqrt $ quantile (fDistribution k (n - k)) (1 - 0.01)
+    tau_max' = sqrt $ quantile (fDistribution k (n - k)) (1 - alpha)
 
     profFun ix = case ptype of
-                    Bates       -> getProfile      dist mYerr xss ys tree theta (stdErr A.! ix) tau_max ix
-                    ODE         -> getProfileODE   dist mYerr xss ys tree theta (stdErr A.! ix) (estCIs !! ix) tau_max ix
-                    Constrained -> getProfileCnstr dist mYerr xss ys tree theta (stdErr A.! ix) tau_max' ix
+                    Bates       -> getProfile      et theta (stdErr U.! ix) tau_max ix
+                    ODE         -> getProfileODE   et theta (stdErr U.! ix) (estCIs !! ix) tau_max ix
+                    Constrained -> getProfileCnstr et theta (stdErr U.! ix) tau_max' ix
 
     getAll ix acc | ix == k   = acc
-                  | ix == k-1 && ptype == Constrained && dist == Gaussian = case getProfileODE   dist mYerr xss ys tree theta (stdErr A.! ix) (estCIs !! ix) tau_max ix of
-                                  Left t  -> getAllProfiles ptype dist mYerr xss ys tree t stdErr estCIs alpha
+                  | ix == k-1 && ptype == Constrained && ctDist et == Gaussian = case getProfileODE et theta (stdErr U.! ix) (estCIs !! ix) tau_max ix of
+                                  Left t  -> getAllProfiles ptype et t stdErr estCIs alpha
                                   Right p -> getAll (ix + 1) (acc <> [p])
                   | otherwise = case profFun ix of
-                                  Left t  -> getAllProfiles ptype dist mYerr xss ys tree t stdErr estCIs alpha
+                                  Left t  -> getAllProfiles ptype et t stdErr estCIs alpha
                                   Right p -> getAll (ix + 1) (acc <> [p])
 
 -- calculates the profile likelihood of a single parameter
-getProfile :: Distribution
-           -> Maybe PVector
-           -> SRMatrix
-           -> PVector
-           -> Fix SRTree
-           -> PVector
-           -> Double
-           -> Double
-           -> Int
-           -> Either PVector ProfileT
-getProfile dist mYerr xss ys tree theta stdErr_i tau_max ix
-  | stdErr_i == 0.0 = pure $ ProfileT (A.fromList compMode [-tau_max, tau_max]) (A.fromLists' compMode [theta', theta']) (theta A.! ix) (const (theta A.! ix)) (const tau_max)
+getProfile :: EvalTree -> Target -> Double -> Double -> Int -> Either Target ProfileT
+getProfile et theta stdErr_i tau_max ix
+  | stdErr_i == 0.0 = pure $ ProfileT (U.fromList [-tau_max, tau_max]) [theta, theta] (theta U.! ix) (const (theta U.! ix)) (const tau_max)
   | otherwise =
   do negDelta <- go kmax (-stdErr_i / 8) 0 1 mempty
      posDelta <- go kmax  (stdErr_i / 8) 0 1 p0
-     let (A.fromList compMode -> taus, A.fromLists' compMode. map A.toList -> thetas) = negDelta <> posDelta
-         (tau2theta, theta2tau)                       = createSplines taus thetas stdErr_i tau_max ix
+     let (taus', thetas') = negDelta <> posDelta
+         taus    = U.fromList taus'
+         thetas  = thetas'
+         (tau2theta, theta2tau) = createSplines taus thetas stdErr_i tau_max ix
      pure $ ProfileT taus thetas optTh tau2theta theta2tau
   where
-    theta'    = A.toList theta
     p0        = ([0], [theta_opt])
     kmax      = 300
-    nll_opt   = nll dist mYerr xss ys tree theta_opt
-    (theta_opt, _, _) = minimizeNLL dist mYerr 100 xss ys tree theta
-    optTh     = theta_opt A.! ix
-    minimizer = minimizeNLLWithFixedParam dist mYerr 100 xss ys tree ix
+    nll_opt   = ctNLL et theta_opt
+    theta_opt = ctOptimizer et theta
+    optTh     = theta_opt U.! ix
+    minimizer = ctOptimizerFixed et ix
 
-    -- after k iterations, interpolates to the endpoint
     go 0 delta _ _         acc = Right acc
     go k delta t inv_slope acc@(taus, thetas)
-      | isNaN inv_slope     = Right acc    -- stop since we cannot move forward on discontinuity
-      | nll_cond < nll_opt  = Left theta_t -- found a better optima
-      | abs tau > tau_max   = Right acc'   -- we reached the endpoint
+      | isNaN inv_slope     = Right acc
+      | nll_cond < nll_opt  = Left theta_t
+      | abs tau > tau_max   = Right acc'
+
       | otherwise           = go (k-1) delta (t + inv_slope) inv_slope' acc'
       where
-        t_delta     = (theta_opt A.! ix) + delta * (t + inv_slope)
+        t_delta     = (theta_opt U.! ix) + delta * (t + inv_slope)
         theta_delta = updateS theta_opt [(ix, t_delta)]
         theta_t     = minimizer theta_delta
-        zv          = A.computeAs A.S (snd $ gradNLL dist mYerr xss ys tree theta_t) A.! ix
-        zvs         = snd $ gradNLL dist mYerr xss ys tree theta_t
+        (nll_cond, grad) = ctGradNLL et theta_t
+        zv          = grad U.! ix
         inv_slope'  = min 4.0 . max 0.0625 . abs $ (tau / (stdErr_i * zv))
-        nll_cond    = nll dist mYerr xss ys tree theta_t
-        acc'        = if nll_cond == nll_opt || ( (not.null) taus && tau == head taus ) || isNaN tau
+        tau         = signum delta * sqrt (2*nll_cond - 2*nll_opt)
+        acc'        = if nll_cond == nll_opt || maybe False (tau ==) (listToMaybe taus) || isNaN tau
                          then acc
                          else (tau:taus, theta_t:thetas)
-        tau         = signum delta * sqrt (2*nll_cond - 2*nll_opt)
 
 -- Based on https://insysbio.github.io/LikelihoodProfiler.jl/latest/
 -- Borisov, Ivan, and Evgeny Metelkin. "Confidence intervals by constrained optimization—An algorithm and software package for practical identifiability analysis in systems biology." PLOS Computational Biology 16.12 (2020): e1008495.
-getProfileCnstr :: Distribution
-                -> Maybe PVector
-                -> SRMatrix
-                -> PVector
-                -> Fix SRTree
-                -> PVector
-                -> Double -> Double
-                -> Int
-                -> Either PVector ProfileT
-getProfileCnstr dist mYerr xss ys tree theta stdErr_i tau_max ix
+getProfileCnstr :: EvalTree -> Target -> Double -> Double -> Int -> Either Target ProfileT
+getProfileCnstr et theta stdErr_i tau_max ix
   | stdErr_i == 0.0 = pure $ ProfileT taus thetas theta_i (const theta_i) (const tau_max)
   | otherwise       = pure $ ProfileT taus thetas theta_i tau2theta (const tau_max)
   where
-    taus     = A.fromList compMode [-tau_max, tau_max]
-    theta'   = A.toList theta
-    thetas   = A.fromLists' compMode [theta', theta']
-    theta_i  = theta A.! ix
-    getPoint = getEndPoint dist mYerr xss ys tree theta tau_max ix
+    taus     = U.fromList [-tau_max, tau_max]
+    thetas   = [theta, theta]
+    theta_i  = theta U.! ix
+    getPoint = getEndPoint et theta tau_max ix
     leftPt   = getPoint True
     rightPt  = getPoint False
     tau2theta tau = if tau < 0 then leftPt else rightPt
 
-getEndPoint :: Distribution -> Maybe PVector -> A.Array A.S Ix2 Double -> A.Array A.S A.Ix1 Double -> Fix SRTree -> A.Array A.S A.Ix1 Double -> Double -> Int -> Bool -> Double
-getEndPoint dist mYerr xss ys tree theta tau_max ix isLeft =
-  case minimizeAugLag problem (A.toStorableVector theta_opt) of
+getEndPoint :: EvalTree -> Target -> Double -> Int -> Bool -> Double
+getEndPoint et theta tau_max ix isLeft =
+  case minimizeAugLag problem (G.convert theta_opt) of
             Right sol -> solutionParams sol VS.! ix
-            Left e    -> theta_opt A.! ix
+            Left _    -> theta_opt U.! ix
   where
-    (A.Sz1 n) = A.size theta
+    n = U.length theta
 
-    (theta_opt, _, _) = minimizeNLL dist mYerr 100 xss ys tree theta
-    nll_opt   = nll dist mYerr xss ys tree theta_opt
+    theta_opt = ctOptimizer et theta
+    nll_opt   = ctNLL et theta_opt
     loss_crit = nll_opt + tau_max
 
-    loss      = subtract loss_crit . nll dist mYerr xss ys tree . A.fromStorableVector compMode
+    loss      = subtract loss_crit . ctNLL et . G.convert
     obj       = (if isLeft then id else negate) . (VS.! ix)
 
     stop       = ObjectiveRelativeTolerance 1e-4 :| [MaximumEvaluations 1000]
@@ -299,70 +284,57 @@ getEndPoint dist mYerr xss ys tree theta tau_max ix isLeft =
 -- Based on
 -- Jian-Shen Chen & Robert I Jennrich (2002) Simple Accurate Approximation of Likelihood Profiles,
 -- Journal of Computational and Graphical Statistics, 11:3, 714-732, DOI: 10.1198/106186002493
-getProfileODE :: Distribution
-           -> Maybe PVector
-           -> SRMatrix
-           -> PVector
-           -> Fix SRTree
-           -> PVector
-           -> Double
-           -> CI
-           -> Double
-           -> Int
-           -> Either PVector ProfileT
-getProfileODE dist mYerr xss ys tree theta stdErr_i estCI tau_max ix
+getProfileODE :: EvalTree -> Target -> Double -> CI -> Double -> Int -> Either Target ProfileT
+getProfileODE et theta stdErr_i estCI tau_max ix
   | stdErr_i == 0.0 = pure dflt
-  | otherwise = let (A.fromList compMode -> taus, A.fromLists' compMode . map A.toList -> thetas) = solLeft <> ([0], [theta_opt]) <> solRight
+  | otherwise = let (taus', thetas') = solLeft <> ([0], [theta_opt]) <> solRight
+                    taus   = U.fromList taus'
+                    thetas = thetas'
                     (tau2theta, theta2tau) = createSplines taus thetas stdErr_i tau_max ix
                 in pure $ ProfileT taus thetas optTh tau2theta theta2tau
   where
-    dflt      = ProfileT (A.fromList compMode [-tau_max, tau_max]) (A.fromLists' compMode [theta', theta']) (theta A.! ix) (const (theta A.! ix)) (const tau_max)
-    minimizer = (\(x, _, _) -> x) . minimizeNLL dist mYerr 100 xss ys tree
-    grader    = snd . gradNLL dist mYerr xss ys tree
-    theta_opt = minimizer theta
-    theta'    = A.toList theta
-    nll_opt   = nll dist mYerr xss ys tree theta_opt
-    optTh     = theta_opt A.! ix
-    p'        = p+1
-    (A.Sz1 p) = A.size theta
-    --sErr      = fromMaybe 1 mSErr
-    getHess   = hessianNLL dist mYerr xss ys tree
+    dflt      = ProfileT (U.fromList [-tau_max, tau_max]) [theta, theta] (theta U.! ix) (const (theta U.! ix)) (const tau_max)
+    theta_opt = ctOptimizer et theta
+    grader    = snd . ctGradNLL et
+    nll_opt   = ctNLL et theta_opt
+    optTh     = theta_opt U.! ix
+    p         = U.length theta
+    p'        = p + 1
 
     odeFun gamma _ u =
         let grad     = grader u
-            w        = hessianNLL dist mYerr xss ys tree u
-            m        = A.makeArray compMode (A.Sz (p' :. p'))
-                         (\ (i :. j) -> if | i<p && j<p -> w A.! (i :. j)
-                                           | i==ix      -> 1
-                                           | j==ix      -> 1
-                                           | otherwise  -> 0
-                         )
-
-            v        = A.computeAs A.S $ A.snoc (A.map (*(-gamma)) grad) 1
+            w        = ctHessianNLL et u
+            m        = [ U.generate p' (\i ->
+                            if i < p && j < p then (w !! j) U.! i
+                            else if i == ix || j == ix then 1
+                            else 0
+                          )
+                       | j <- [0 .. p'-1] ]
+            v        = U.snoc (U.map (*(-gamma)) grad) 1
             dotTheta = unsafePerformIO $ luSolve m v
-        in A.fromStorableVector compMode $ VS.init $ A.toStorableVector dotTheta
+        in U.init dotTheta
 
-    tsHi = linSpace 50 (optTh, upper_ estCI)
-    tsLo = linSpace 50 (optTh, lower_ estCI)
+    minRange    = max (abs (upper_ estCI - optTh)) (abs (lower_ estCI - optTh))
+    scanRange   = max minRange (tau_max * abs stdErr_i)
+    nPts        = max 50 (min 100 (ceiling (scanRange / minRange * 49) + 1))
+    tsHi = linSpace nPts (optTh, optTh + scanRange)
+    tsLo = linSpace nPts (optTh, optTh - scanRange)
     scanOn sig = foldMap (calcTau sig) . f . scanl (rk (odeFun sig)) (optTh, theta_opt)
                     where f = if sig==1 then id else reverse
     solRight = scanOn 1 tsHi
     solLeft  = scanOn (-1) tsLo
-    calcTau s t = let nll_i = nll dist mYerr xss ys tree $ snd t
-                      z     = signum ((snd t A.! ix) - optTh) * sqrt (2 * nll_i - 2 * nll_opt)
+    calcTau s t = let nll_i = ctNLL et (snd t)
+                      z     = signum ((snd t U.! ix) - optTh) * sqrt (2 * nll_i - 2 * nll_opt)
                   in if z == 0 || isNaN z then ([], []) else ([z], [snd t])
 
-rk :: (Double -> PVector -> PVector) -> (Double, PVector) -> Double -> (Double, PVector)
-rk f (t, y) t' = (t', y !+! ((1.0/6.0) *. h' !*! (k1 !+! (2.0 *. k2) !+! (2.0 *. k3) !+! k4)))
+rk :: (Double -> Target -> Target) -> (Double, Target) -> Double -> (Double, Target)
+rk f (t, y) t' = (t', U.zipWith5 (\y0 k1 k2 k3 k4 -> y0 + h/6 * (k1 + 2*k2 + 2*k3 + k4)) y k1 k2 k3 k4)
   where
     h  = t' - t
-    h', k1, k2, k3, k4 :: PVector
-    h' = A.replicate compMode (A.size y) h
     k1 = f t y
-    k2 = f (t + 0.5*h) (A.computeAs A.S $ A.zipWith3 (g 0.5) y h' k1) -- (y !+! 0.5*.h' A.!*! k1)
-    k3 = f (t + 0.5*h) (A.computeAs A.S $ A.zipWith3 (g 0.5) y h' k2) -- (y !+! 0.5*.h' A.!*! k2)
-    k4 = f (t + 1.0*h) (A.computeAs A.S $ A.zipWith3 (g 1.0) y h' k3) -- (y !+! 1.0*.h'!*!k3)
-    g a yi hi ki = yi + a * hi * ki
+    k2 = f (t + 0.5*h) (U.zipWith (\y0 k -> y0 + 0.5*h*k) y k1)
+    k3 = f (t + 0.5*h) (U.zipWith (\y0 k -> y0 + 0.5*h*k) y k2)
+    k4 = f (t + 1.0*h) (U.zipWith (\y0 k -> y0 + 1.0*h*k) y k3)
 {-# INLINE rk #-}
 
 -- tau0, tau1 theta0, thetaX = tau1 theta0 / tau0
@@ -372,7 +344,6 @@ getStatsFromModel dist mYerr xss ys tree theta = MkStats cov corr stdErr
     k = U.length theta
     n = U.length ys
     nParams = fromIntegral k
-    ssr = compileLoss xss (buildLoss MSE (fromIntegral n) tree) ys mYerr theta
     ident = fromRowMajor k k (U.generate (k * k) (\ix -> let (i, j) = ix `divMod` k in if i == j then 1.0 else 0.0))
 
     hess = hessianNLL dist mYerr xss ys tree theta
@@ -405,7 +376,7 @@ createSplines taus thetas se tau_max ix
     theta2tau = genSplineFun $ nubOnFirst $ sortOnFirst cols taus
 
 getCol :: Int -> Columns -> Target
-getCol ix mtx = U.fromList [ (mtx !! j) U.! ix | j <- [0 .. length mtx - 1] ]
+getCol ix mtx = U.generate (length mtx) (\j -> (mtx !! j) U.! ix)
 {-# inline getCol #-}
 
 sortOnFirst :: Target -> Target -> [(Double, Double)]
@@ -433,7 +404,7 @@ approximateContour nParams nPoints profs ix1 ix2 alpha = go 0
     angles = [ (0, splineG2 1), (splineG1 1, 0), (pi, splineG2 (-1)), (splineG1 (-1), pi) ]
     applyIfNeg (x, y) = if y < 0 then (-x, -y) else (x ,y)
     points' = [applyIfNeg ((x+y)/2, x - y) | (x, y) <- angles]
-    points = sortOn fst $ (points' <> (\(x,y) -> [(x + 2*pi, y)]) (head points'))
+    points = sortOn fst $ points' <> maybe [] (\(x,y) -> [(x + 2*pi, y)]) (listToMaybe points')
     splineAD = genSplineFun points
 
     fmod a b = a - b * fromIntegral (truncate (a / b))
@@ -448,3 +419,4 @@ approximateContour nParams nPoints profs ix1 ix2 alpha = go 0
         t2i = tauScale * cos (ai - di)
         p = tau2theta1 t1i
         q = tau2theta2 t2i
+ 

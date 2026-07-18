@@ -60,17 +60,39 @@ minimizeNLL' alg backend dist mYerr niter xss ys tree t0 = minimizeNLLWith funAn
     m          = V.length ys
     tree'      = buildLoss dist (fromIntegral m) tree
     funAndGrad = compileFunAndGrad backend xss ys mYerr tree'
+ 
 
 minimizeNLL :: ADBackEnd -> Loss -> Maybe Target -> Int -> Columns -> Target -> Fix SRTree -> Target -> (Target, Double, Int)
 minimizeNLL = minimizeNLL' TNEWTON
 
--- | minimizes the function while keeping the parameter ix fixed (used to calculate the profile)
 minimizeNLLWithFixedParam' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> ADBackEnd -> Loss -> Maybe Target -> Int -> Columns -> Target -> Fix SRTree -> Int -> Target -> Target
-minimizeNLLWithFixedParam' alg backend dist mYerr' niter xss' ys' tree ix t0 = t
+minimizeNLLWithFixedParam' alg backend dist mYerr' niter xss' ys' tree ix t0 = result
   where
     m          = V.length ys'
     tree'      = buildLoss dist (fromIntegral m) tree
-    funAndGrad = second (VS.// [(ix, 0.0)]) . compileFunAndGrad backend xss' ys' mYerr' tree'
-    (t,_,_)    = minimizeNLLWith funAndGrad alg niter t0
+    fixedVal   = t0 V.! ix
+    p          = V.length t0
+
+    evalFull   = compileFunAndGrad backend xss' ys' mYerr' tree'
+
+    wrapRed thRed = let (lo, hi) = VS.splitAt ix thRed
+                    in (lo `VS.snoc` fixedVal) VS.++ hi
+    unwrapRed th  = let (lo, hi) = VS.splitAt ix th
+                    in lo VS.++ VS.tail hi
+
+    wrap thRed = let (lo, hi) = V.splitAt ix thRed  in (lo `V.snoc` fixedVal) V.++ hi
+    unwrap th  = let (lo, hi) = V.splitAt ix th      in lo V.++ V.tail hi
+
+    fgRed :: VS.Vector Double -> (Double, VS.Vector Double)
+    fgRed thRed =
+      let thFull        = wrapRed thRed
+          (nll, gradFull) = evalFull thFull
+          gradRed       = unwrapRed gradFull
+      in (nll, gradRed)
+
+    t0Red = unwrap t0
+    (tRawRed,_,_) = minimizeNLLWith fgRed alg niter t0Red
+    result = wrap tRawRed
 
 minimizeNLLWithFixedParam = minimizeNLLWithFixedParam' TNEWTON
+

@@ -296,10 +296,18 @@ chunkBy n = unfoldr go
 genSplineFun :: [(Double, Double)] -> Double -> Double
 genSplineFun pts x
   | length xs < 2 = x
-  | otherwise = go xs $ zip coefs (tail coefs)
+  | x < head xs   = y1 + (x - x1) * (y2 - y1) / (x2 - x1)
+  | x > last xs   = y_1 + (x - x_1) * (y_n - y_1) / (x_n - x_1)
+  | otherwise     = go xs $ zip coefs (tail coefs)
   where
     xs = map fst pts
+    ys = map snd pts
     coefs = cubicSplineCoefficients pts
+    x1 = head xs;  y1 = head ys
+    x2 = xs !! 1;  y2 = ys !! 1
+    x_1 = xs !! (len - 2);  y_1 = ys !! (len - 2)
+    x_n = last xs;          y_n = last ys
+    len = length xs
 
     evalAt (a1, b1, c1) (a2, b2, c2) y =
       let hi1 = a2 - a1
@@ -308,6 +316,5 @@ genSplineFun pts x
 
     go [x1, x2] [(c1, c2)] = evalAt c1 c2 x
     go (x1 : x2 : xs') ((c1, c2) : cs)
-      | x < x1 = evalAt c1 c2 x
       | x >= x1 && x <= x2 = evalAt c1 c2 x
-      | otherwise = go (x2 : xs') cs
+      | otherwise          = go (x2 : xs') cs

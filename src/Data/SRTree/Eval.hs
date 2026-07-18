@@ -151,7 +151,7 @@ compileLoss dataset tree y mYerr =
         Static v  -> \_  -> V.sum v
         -- We only allocate memory EXACTLY ONCE here at the top level
         --Dynamic f -> \th -> V.generate n (f th)
-        Dynamic f -> \th -> sumParallel n (f th)
+        Dynamic f -> \th -> V.sum (V.generate n (f th))
   where
     n    = V.length (head dataset)
     yErr = fromJust mYerr
@@ -160,10 +160,10 @@ compileLoss dataset tree y mYerr =
 
     -- 1. Base Cases
     alg (Const c)  = Scl c
-    alg (Var i)    = Static (dataset !! i)
-    alg (Param i)  = Dynamic (\th !idx -> th `V.unsafeIndex` i)
     alg (Var (-1)) = Static y
     alg (Var (-2)) = Static yErr
+    alg (Var i)    = Static (dataset !! i)
+    alg (Param i)  = Dynamic (\th !idx -> th `V.unsafeIndex` i)
 
     -- 2. Univariate Functions
     alg (Uni f (Scl c))     = Scl (evalFun f c)
@@ -205,7 +205,7 @@ compile dataset tree =
         Static v  -> \_  -> v
         -- We only allocate memory EXACTLY ONCE here at the top level
         --Dynamic f -> \th -> V.generate n (f th)
-        Dynamic f -> \th -> generateParallel n (f th)
+        Dynamic f -> \th -> V.generate n (f th)
   where
     n = V.length (head dataset)
 
@@ -389,3 +389,5 @@ invleft AQ v = (v/)
 invertibles :: [Function]
 invertibles = [Id, Sin, Cos, Tan, Tanh, ASin, ACos, ATan, ATanh, Sqrt, Square, Log, Exp, Recip]
 {-# INLINE invertibles #-}
+ 
+ 

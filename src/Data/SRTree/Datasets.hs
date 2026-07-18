@@ -153,8 +153,8 @@ getColumns headerMap target columns target_error = (ixs, iy, iy_error)
 getRows :: B.ByteString -> B.ByteString -> Int -> (Int, Int)
 getRows (B.unpack -> start) (B.unpack -> end) nRows
   | st_ix >= end_ix                 = error $ "Invalid range: " <> show start <> ":" <> show end <> "."
-  | st_ix == 0 && end_ix == nRows-1 = (0, nRows - 1)
-  | otherwise                       = (st_ix, end_ix)
+  | st_ix == 0 && end_ix == nRows-1 = (0, nRows)
+  | otherwise                       = (st_ix, end_ix + 1)
   where
       st_ix = if null start
                 then 0
@@ -220,8 +220,8 @@ processData csv params hasHeader = ((x_train, y_train, x_val, y_val) , (y_err_tr
 
     x_train = map (V.take end . V.drop st) x
     y_train = V.take end . V.drop st $ y
-    x_val   = map (V.drop (st + end - 1)) x
-    y_val   = V.drop (st + end - 1) y
+    x_val   = map (V.drop (st + end)) x
+    y_val   = V.drop (st + end) y
 
     y_err_train = if iy_err == -1 then Nothing else Just $ (V.take end . V.drop st) y_err
     y_err_val   = if iy_err == -1 then Nothing else Just $ (V.take end . V.drop st) y_err
