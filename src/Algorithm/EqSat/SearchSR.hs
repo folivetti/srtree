@@ -33,7 +33,7 @@ import Algorithm.EqSat.Build
 import Data.SRTree.Random
 import Algorithm.EqSat.Queries
 import Data.List ( maximumBy )
-import qualified Data.Map.Strict as Map
+import qualified Data.HashMap.Strict as HashMap
 import qualified Data.Vector.Unboxed as V
 
 -- Environment of an e-graph with support to random generator and IO
@@ -192,26 +192,26 @@ evaluateRndUnevaluated fitFun = do
 
 -- | check whether an e-node exists or does not exist in the e-graph
 doesExist, doesNotExist :: ENode -> RndEGraph Bool
-doesExist en = gets ((Map.member en) . _eNodeToEClass)
-doesNotExist en = gets ((Map.notMember en) . _eNodeToEClass)
+doesExist en = gets ((HashMap.member en) . _eNodeToEClass)
+doesNotExist en = gets ((not . HashMap.member en) . _eNodeToEClass)
 
 -- | check whether the partial tree defined by a list of ancestors will create
 -- a non-existent expression when combined with a certain e-node.
 doesNotExistGens :: [Maybe (EClassId -> ENode)] -> ENode -> RndEGraph Bool
-doesNotExistGens []              en = gets ((Map.notMember en) . _eNodeToEClass)
-doesNotExistGens (mGrand:grands) en = do  b <- gets ((Map.notMember en) . _eNodeToEClass)
+doesNotExistGens []              en = gets ((not . HashMap.member en) . _eNodeToEClass)
+doesNotExistGens (mGrand:grands) en = do  b <- gets ((not . HashMap.member en) . _eNodeToEClass)
                                           if b
                                             then pure True
                                             else case mGrand of
                                                 Nothing -> pure False
-                                                Just gf -> do ec  <- gets ((Map.! en) . _eNodeToEClass)
+                                                Just gf -> do ec  <- gets ((HashMap.! en) . _eNodeToEClass)
                                                               en' <- canonize (gf ec)
                                                               doesNotExistGens grands en'
 
 -- | check whether combining a partial tree `parent` with the e-node `en'`
 -- will create a new expression
 checkToken parent en' = do  en <- canonize en'
-                            mEc <- gets ((Map.!? en) . _eNodeToEClass)
+                            mEc <- gets (HashMap.lookup en . _eNodeToEClass)
                             case mEc of
                                 Nothing -> pure True
                                 Just ec -> do ec' <- canonical ec

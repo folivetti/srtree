@@ -28,6 +28,7 @@ import Algorithm.EqSat.DB
 import qualified Data.IntMap.Strict as IntMap
 import Data.Map.Strict ( Map )
 import qualified Data.Map.Strict as Map
+import qualified Data.HashMap.Strict as HashMap
 import qualified Data.HashSet as Set
 import Control.Monad.State.Strict
 import Control.Monad.Identity
@@ -61,13 +62,13 @@ add costFun enode = do
                                       _         -> enode''
                                _             -> pure $ enode''
 
-  maybeEid <- gets (Map.lookup enode' . _eNodeToEClass)
+  maybeEid <- gets (HashMap.lookup enode' . _eNodeToEClass)
   case maybeEid of
        Just eid -> pure eid
        Nothing  -> do
          curId <- gets (_nextId . _eDB)                             -- get the next available e-class id
          modify' $ over canonicalMap (IntMap.insert curId curId)           -- insert e-class id into canon map
-                 . over eNodeToEClass (Map.insert enode' curId)     -- associate new e-node with id
+                 . over eNodeToEClass (HashMap.insert enode' curId)     -- associate new e-node with id
                  . over (eDB . nextId) (+1)                                -- update next id
                  . over (eDB . worklist) (Set.insert (curId, enode'))      -- add e-node and id into worklist
          forM_ (childrenOf enode') (addParents curId enode')        -- update the children's parent list
@@ -108,14 +109,14 @@ rebuild costFun =
 -- e-graph, merge the e-classes
 repair :: Monad m => CostFun -> EClassId -> ENode -> EGraphST m ()
 repair costFun ecId enode =
-  do modify' $ over eNodeToEClass (Map.delete enode)
+  do modify' $ over eNodeToEClass (HashMap.delete enode)
      enode'  <- canonize enode
      ecId'   <- canonical ecId
-     doExist <- gets (Map.lookup enode' . _eNodeToEClass)
+     doExist <- gets (HashMap.lookup enode' . _eNodeToEClass)
      case doExist of
         Just ecIdCanon -> do mergedId <- merge costFun ecIdCanon ecId'
-                             modify' $ over eNodeToEClass (Map.insert enode' mergedId)
-        Nothing        -> modify' $ over eNodeToEClass (Map.insert enode' ecId')
+                             modify' $ over eNodeToEClass (HashMap.insert enode' mergedId)
+        Nothing        -> modify' $ over eNodeToEClass (HashMap.insert enode' ecId')
 {-# INLINE repair #-}
 
 -- | repair the analysis of the e-class
@@ -223,7 +224,7 @@ modifyEClass costFun ecId =
          do let en = Const x
             c <- calculateCost costFun en
             let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
-            maybeEid <- gets (Map.lookup en . _eNodeToEClass)
+            maybeEid <- gets (HashMap.lookup en . _eNodeToEClass)
             modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.singleton en , _info = infoEc})
             when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (IntSet.insert ecId)
             case maybeEid of
@@ -234,7 +235,7 @@ modifyEClass costFun ecId =
          do let en = Param x
             c <- calculateCost costFun en
             let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
-            maybeEid <- gets (Map.lookup en . _eNodeToEClass)
+            maybeEid <- gets (HashMap.lookup en . _eNodeToEClass)
             modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.insert en (_eNodes ec), _info = infoEc})
             when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (IntSet.insert ecId)
             case maybeEid of
@@ -260,7 +261,7 @@ modifyEClass costFun ecId =
 -- the e-graph.
 createDB :: Monad m => EGraphST m DB
 createDB = do modify' $ over (eDB . patDB) (const Map.empty)
-              ecls <- gets (Map.toList . _eNodeToEClass)
+              ecls <- gets (HashMap.toList . _eNodeToEClass)
               mapM_ (uncurry addToDB) ecls
               gets (_patDB . _eDB)
 {-# INLINE createDB #-}
@@ -275,7 +276,8 @@ createDBBest = do modify' $ over (eDB . patDB) (const Map.empty)
 addToDB :: Monad m => ENode -> EClassId -> EGraphST m () -- State DB ()
 addToDB enode' eid = do
   eid' <- canonical eid
-  isConst <- (_consts . _info) <$> getEClass eid'
+  ec <- gets ((IntMap.! eid') . _eClass)
+  let isConst = _consts . _info $ ec
   let enode = case isConst of
                 ConstVal x -> Const x
                 ParamIx  x -> Param x
@@ -358,7 +360,7 @@ classOfENode costFun subst (Fixed target) = do newChildren <- mapM (classOfENode
                                                                  then do eid <- add costFun new_enode
                                                                          rebuild costFun -- eid new_enode
                                                                          pure (Just eid)
-                                                                 else gets (Map.lookup new_enode . _eNodeToEClass)
+                                                                 else gets (HashMap.lookup new_enode . _eNodeToEClass)
 {-# INLINE classOfENode #-}
 
 -- | adds the target of the rule into the e-graph
@@ -582,11 +584,11 @@ getRndExpressionFrom eId' = do
 cleanMaps :: Monad m => EGraphST m ()
 cleanMaps = do
   enode2eclass <- gets _eNodeToEClass
-  entries <- forM (Map.toList enode2eclass) $ \(k,v) -> do
+  entries <- forM (HashMap.toList enode2eclass) $ \(k,v) -> do
     k' <- canonize k
     v' <- canonical v
     pure (k',v')
-  let enode2eclass' = Map.fromList entries
+  let enode2eclass' = HashMap.fromList entries
   eclassMap <- gets _eClass
   entries' <- forM (IntMap.toList eclassMap) $ \(k,v) -> do
     k' <- canonical k

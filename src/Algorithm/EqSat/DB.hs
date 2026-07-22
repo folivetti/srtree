@@ -180,36 +180,36 @@ match :: Monad m => Pattern -> EGraphST m [(Map ClassOrVar ClassOrVar, ClassOrVa
 match src = matchCached (compileToQuery src)
 {-# INLINE match #-}
 
-matchCached :: Monad m => (Query, ClassOrVar) -> EGraphST m [(Map ClassOrVar ClassOrVar, ClassOrVar)]
-matchCached (q, root) = do
-  substs <- genericJoin q root               -- find the substituion rules for this pattern
+matchCached :: Monad m => (Query, [ClassOrVar], ClassOrVar) -> EGraphST m [(Map ClassOrVar ClassOrVar, ClassOrVar)]
+matchCached (q, vars, root) = do
+  substs <- genericJoin q vars root               -- find the substituion rules for this pattern
   pure [(s, s Map.! root) | s <- substs, Map.size s > 0]
 {-# INLINE matchCached #-}
 
--- | Returns a Query (list of atoms) of a pattern
-compileToQuery :: Pattern -> (Query, ClassOrVar)
-compileToQuery pat = evalState (processPat pat) 256 -- returns (atoms, root)
-  where
+-- | Returns a Query (list of atoms) of a pattern with pre-computed ordered vars
+compileToQuery :: Pattern -> (Query, [ClassOrVar], ClassOrVar)
+compileToQuery pat = (atoms, orderedVars atoms, root)
+  where (atoms, root) = evalState (processPat pat) 256
       -- creates the atoms of a pattern
-      processPat :: Pattern -> State Int (Query, ClassOrVar)
-      processPat (VarPat x)  = pure ([], Right $ fromEnum x)
-      processPat (Fixed pat) = do
-          -- get the next available var id and add as root
-          v <- get
-          let root = Right v
-          -- updates the next available id
-          modify (+1)
-          -- recursivelly process the children of the pattern
-          patChilds <- mapM processPat (getElems pat)
-          -- create an atom composed of the
-          -- root and the tree with the children
-          -- replaced by the childs roots
-          -- add the child atoms to the list
-          let atoms = concatMap fst patChilds
-              roots = map snd patChilds
-              atom  = Atom root (replaceChildren roots pat)
-              atoms' = atom:atoms
-          pure (atoms', root)
+        processPat :: Pattern -> State Int (Query, ClassOrVar)
+        processPat (VarPat x)  = pure ([], Right $ fromEnum x)
+        processPat (Fixed pat) = do
+            -- get the next available var id and add as root
+            v <- get
+            let root = Right v
+            -- updates the next available id
+            modify (+1)
+            -- recursivelly process the children of the pattern
+            patChilds <- mapM processPat (getElems pat)
+            -- create an atom composed of the
+            -- root and the tree with the children
+            -- replaced by the childs roots
+            -- add the child atoms to the list
+            let atoms = concatMap fst patChilds
+                roots = map snd patChilds
+                atom  = Atom root (replaceChildren roots pat)
+                atoms' = atom:atoms
+            pure (atoms', root)
 {-# INLINE compileToQuery #-}
 
 -- get the value from the Either Int Int
@@ -228,10 +228,8 @@ getElems _           = []
 -- | Creates the substituion map for
 -- the pattern variables for each one of the
 -- matched subgraph
-genericJoin :: Monad m => Query -> ClassOrVar -> EGraphST m [Map ClassOrVar ClassOrVar]
-genericJoin atoms root = do
-  let vars = orderedVars atoms -- order the vars, starting with the most frequently occuring
-  go atoms vars
+genericJoin :: Monad m => Query -> [ClassOrVar] -> ClassOrVar -> EGraphST m [Map ClassOrVar ClassOrVar]
+genericJoin atoms vars root = go atoms vars
   where
     -- for each variable
     --   for each possible e-class id for that variable
@@ -268,12 +266,12 @@ intersectAtoms var (a:atoms) root = do
                      then pure x
                      else Set.fromList <$> (mapM canonical $ Set.toList x)
 
-      go (Atom r t) = do
-        let op = getOperator t
-        mTrie <- gets ((Map.!? op) . _patDB . _eDB)
-        case mTrie of
-          Just trie -> pure (fromMaybe Set.empty $ intersectTries var Map.empty trie (r:getElems t))
-          Nothing   -> pure Set.empty
+      go (Atom r t) =
+        do let op = getOperator t
+           mTrie <- gets ((Map.!? op) . _patDB . _eDB)
+           case mTrie of
+             Just trie -> pure (fromMaybe Set.empty $ intersectTries var IntMap.empty trie (r:getElems t))
+             Nothing   -> pure Set.empty
 
 {-# INLINE intersectAtoms #-}
 
@@ -286,26 +284,26 @@ intersectAtoms var (a:atoms) root = do
 -- trie is the current trie of the pattern
 -- (i:ids) sequence of root : children of the atom to investigate
 -- NOTE: it must be Maybe Set to differentiate between empty set and no answer
-intersectTries :: ClassOrVar -> Map ClassOrVar EClassId -> IntTrie -> [ClassOrVar] -> Maybe (HashSet EClassId)
+intersectTries :: ClassOrVar -> IntMap EClassId -> IntTrie -> [ClassOrVar] -> Maybe (HashSet EClassId)
 intersectTries var xs trie [] = Just Set.empty
 intersectTries var xs trie (i:ids) =
     case i of
       Left x  -> case IntMap.lookup x (_trie trie) of
                    Just subtrie -> intersectTries var xs subtrie ids
                    Nothing -> Nothing
-      Right x -> if i `Map.member` xs
-                    then case IntMap.lookup (xs Map.! i) (_trie trie) of
+      Right x -> if IntMap.member x xs
+                    then case IntMap.lookup (xs IntMap.! x) (_trie trie) of
                            Just subtrie -> intersectTries var xs subtrie ids
                            Nothing -> Nothing
                     else if Right x == var
                             then if all (isDiffFrom x) ids
                                     then Just $ Set.fromList (IntMap.keys (_trie trie))
                                     else Just $ IntMap.foldrWithKey (\k v acc ->
-                                                    case intersectTries var (Map.insert i k xs) v ids of
+                                                    case intersectTries var (IntMap.insert x k xs) v ids of
                                                       Nothing -> acc
                                                       _       -> Set.insert k acc) Set.empty (_trie trie)
                             else Just $ IntMap.foldrWithKey (\k v acc ->
-                                                case intersectTries var (Map.insert i k xs) v ids of
+                                                case intersectTries var (IntMap.insert x k xs) v ids of
                                                   Nothing -> acc
                                                   Just s  -> Set.union acc s
                                                      ) Set.empty (_trie trie)

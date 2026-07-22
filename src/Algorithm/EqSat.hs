@@ -24,6 +24,7 @@ import Control.Monad.State
 import Data.Function (on)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
+import qualified Data.IntSet as IntSet
 import Data.List (intercalate, minimumBy)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -47,7 +48,7 @@ eqSat :: Monad m => Fix SRTree -> [Rule] -> CostFun -> Int -> EGraphST m (Fix SR
 eqSat expr rules costFun maxIt =
     do root <- fromTree costFun expr
        _ <- runEqSat costFun rules maxIt
-       getBestExpr root
+       recalculateBest costFun root
 
 type CostMap = Map EClassId (Int, Fix SRTree)
 
@@ -72,23 +73,30 @@ recalculateBest costFun eid =
         minimumBy' f xs = Just $ minimumBy f xs
 
         fillUpCosts :: IntMap EClass -> CostMap -> CostMap
-        fillUpCosts classes m =
-            case IntMap.foldrWithKey costOfClass (False, m) classes of -- applies costOfClass to each class
-              (False, _) -> m
-              (True, m') -> fillUpCosts classes m' -- | if something changed, recurse
-
-        costOfClass :: EClassId -> EClass -> (Bool, CostMap) -> (Bool, CostMap)
-        costOfClass eid ecl (b, m) =
-            let currentCost = m Map.!? eid
-                minCost     = minimumBy' (compare `on` fst)  -- get the minimum available cost of the nodes of this class
-                            $ mapMaybe (nodeCost m)
-                            $ Set.toList (_eNodes ecl)
-            in case (currentCost, minCost) of -- replace the costs accordingly
-                  (_, Nothing)         -> (b, m)
-                  (Nothing, Just new)  -> (True, Map.insert eid new m)
-                  (Just old, Just new) -> if fst old <= fst new
-                                            then (b, m)
-                                            else (True, Map.insert eid new m)
+        fillUpCosts classes = go (IntMap.keysSet classes)
+          where
+            go dirty m
+              | IntSet.null dirty = m
+              | otherwise = go dirty' m'
+              where
+                (dirty', m') = IntSet.foldl' step (IntSet.empty, m) dirty
+                step (d, cm) eid = case IntMap.lookup eid classes of
+                  Nothing -> (d, cm)
+                  Just ecl ->
+                    let currentCost = Map.lookup eid cm
+                        minCost     = minimumBy' (compare `on` fst)
+                                    $ mapMaybe (nodeCost cm)
+                                    $ Set.toList (_eNodes ecl)
+                        (changed, cm') = case (currentCost, minCost) of
+                          (_, Nothing)            -> (False, cm)
+                          (Nothing, Just new)     -> (True, Map.insert eid new cm)
+                          (Just old, Just new)
+                            | fst old <= fst new  -> (False, cm)
+                            | otherwise           -> (True, Map.insert eid new cm)
+                        d' = if changed
+                             then IntSet.union d (IntSet.fromList (map fst (Set.toList (_parents ecl))))
+                             else d
+                    in d' `seq` cm' `seq` (d', cm')
 
 -- | run equality saturation for a number of iterations
 runEqSat :: Monad m => CostFun -> [Rule] -> Int -> EGraphST m (Bool, Int)
@@ -103,28 +111,30 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
         replaceEqRules (p1 :==: p2) = [p1 :=> p2, p2 :=> p1]
         replaceEqRules (r :| cond)  = map (:| cond) $ replaceEqRules r
 
-        go it sch compiled = do -- reset dirty flag before processing this iteration
-                                modify' $ over (eDB . changed) (const False)
+        go it sch compiled =
+          do -- reset dirty flag before processing this iteration
+             modify' $ over (eDB . changed) (const False)
 
-                                -- step 1: match the rules using cached compiled queries
-                                let matchSch  = matchWithScheduler it
-                                    adapted i (r, cq) = map (,cq) <$> matchSch i r
-                                    matchAll  = zipWithM adapted [0..]
-                                    (filtered, sch') = runState (matchAll compiled) sch
+             -- step 1: match the rules using cached compiled queries
+             let matchSch  = matchWithScheduler it
+                 adapted i (r, cq) = map (,cq) <$> matchSch i r
+                 matchAll  = zipWithM adapted [0..]
+                 (filtered, sch') = runState (matchAll compiled) sch
 
-                                -- step 2: apply matches and rebuild
-                                matches <- mapM (\(rule, (q, root)) -> map (rule,) <$> matchCached (q, root)) $ concat filtered
-                                mapM_ (uncurry (applyMatch costFun)) $ concat matches
-                                rebuild costFun
+             -- step 2: apply matches and rebuild
+             matches <- mapM (\(rule, (q, vars, root)) -> map (rule,) <$> matchCached (q, vars, root)) $ concat filtered
+             mapM_ (uncurry (applyMatch costFun)) $ concat matches
+             rebuild costFun
 
-                                -- check dirty flag: if no modifications occurred, we've saturated
-                                changed <- gets (_changed . _eDB)
-                                if it == 1 || not changed
-                                   then pure (True, it)
-                                   else do eClasses <- gets _eClass
-                                           if IntMap.size eClasses > 1500
-                                             then throttle it sch' compiled
-                                             else go (it-1) sch' compiled
+             -- check dirty flag: if no modifications occurred, we've saturated
+             changed <- gets (_changed . _eDB)
+             if it == 1 || not changed
+                then pure (True, it)
+                 else
+                   do eClasses <- gets _eClass
+                      if IntMap.size eClasses > 1500
+                        then throttle it sch' compiled
+                        else go (it-1) sch' compiled
 
         throttle it sch compiled = do
           cleanMaps

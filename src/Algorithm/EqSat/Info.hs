@@ -173,34 +173,35 @@ combineConsts (Bin op l r) = evalOp' l r
     evalOp' _            _            = NotConst
 
 insertFitness :: Monad m => EClassId -> Double -> [Target] -> EGraphST m ()
-insertFitness eId' fit params = do
-  eId <- canonical eId'
-  tree <- getBestExpr' eId
-  let p = fromIntegral (length params)
-  let f_compl = countNodes tree * log (countUniqueTokens tree) + p * (log (2 * pi * exp(1 - log 3)) - log p) / 2.0
-  ec <- getEClass eId
-  let oldFit  = _fitness . _info $ ec
-  let newInfo = (_info ec){_fitness = Just fit, _theta = params}
-      newEc   = ec{_info = newInfo}
-      sz = _size newInfo
-  modify' $ over eClass (IntMap.insert eId newEc)
-  case oldFit of
-    Nothing -> modify' $ over (eDB . unevaluated) (IntSet.delete eId)
-                 . over (eDB . fitRangeDB) (insertRange eId fit)
-                 . over (eDB . sizeFitDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith RangeSet.union sz RangeSet.empty)
-                 . over (eDB . dlRangeDB) (insertRange eId f_compl)
-    Just oldVal -> modify' $ over (eDB . fitRangeDB) (insertRange eId fit . removeRange eId oldVal)
+insertFitness eId' fit params =
+  do eId <- canonical eId'
+     tree <- getBestExpr' eId
+     let p = fromIntegral (length params)
+     let f_compl = countNodes tree * log (countUniqueTokens tree) + p * (log (2 * pi * exp(1 - log 3)) - log p) / 2.0
+     ec <- getEClass eId
+     let oldFit  = _fitness . _info $ ec
+     let newInfo = (_info ec){_fitness = Just fit, _theta = params}
+         newEc   = ec{_info = newInfo}
+         sz = _size newInfo
+     modify' $ over eClass (IntMap.insert eId newEc)
+     case oldFit of
+       Nothing -> modify' $ over (eDB . unevaluated) (IntSet.delete eId)
+                    . over (eDB . fitRangeDB) (insertRange eId fit)
+                    . over (eDB . sizeFitDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith RangeSet.union sz RangeSet.empty)
+                    . over (eDB . dlRangeDB) (insertRange eId f_compl)
+       Just oldVal -> modify' $ over (eDB . fitRangeDB) (insertRange eId fit . removeRange eId oldVal)
+                                 . over (eDB . sizeFitDB) (IntMap.adjust (insertRange eId fit . removeRange eId oldVal) sz)
 
 insertDL :: Monad m => EClassId -> Double -> EGraphST m ()
-insertDL eId fit' = do
-  let fit = negate fit'
-  ec <- getEClass eId
-  let sz = _size . _info $ ec
-      newInfo = (_info ec){_dl = Just fit'}
-      newEc   = ec{_info=newInfo}
-  modify' $ over eClass (IntMap.insert eId newEc)
-  modify' $ over (eDB . dlRangeDB) (insertRange eId fit)
-          . over (eDB . sizeDLDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith RangeSet.union sz RangeSet.empty)
+insertDL eId fit' =
+  do let fit = negate fit'
+     ec <- getEClass eId
+     let sz = _size . _info $ ec
+         newInfo = (_info ec){_dl = Just fit'}
+         newEc   = ec{_info=newInfo}
+     modify' $ over eClass (IntMap.insert eId newEc)
+     modify' $ over (eDB . dlRangeDB) (insertRange eId fit)
+             . over (eDB . sizeDLDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith RangeSet.union sz RangeSet.empty)
 
 -- | TODO: remove from here gets the best expression given the default cost function
 getBestExpr' :: Monad m => EClassId -> EGraphST m (Fix SRTree)

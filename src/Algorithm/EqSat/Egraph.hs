@@ -28,6 +28,8 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HashMap
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as Set
 import Data.IntSet (IntSet)
@@ -91,7 +93,7 @@ getGreatest = RangeSet.lookupMax
 {-# INLINE getGreatest #-}
 
 data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId   -- maps an e-class id to its canonical form
-                     , _eNodeToEClass :: Map ENode EClassId    -- maps an e-node to its e-class id
+                     , _eNodeToEClass :: HashMap ENode EClassId    -- maps an e-node to its e-class id
                      , _eClass        :: ClassIdMap EClass     -- maps an e-class id to its e-class data
                      , _eDB           :: EGraphDB
                      } deriving (Show, Generic)
@@ -110,23 +112,23 @@ data EGraphDB = EDB { _worklist      :: HashSet (EClassId, ENode)      -- e-node
                      , _changed       :: !Bool                      -- dirty flag: true if modified since last check
                      } deriving (Show, Generic)
 
-data EClass = EClass { _eClassId :: Int                   -- e-class id (maybe we don't need that here)
+data EClass = EClass { _eClassId :: {-# UNPACK #-} !Int                   -- e-class id (maybe we don't need that here)
                      , _eNodes   :: HashSet ENode           -- set of e-nodes inside this e-class
                      , _parents  :: HashSet (EClassId, ENode) -- parents (e-class, e-node)'s
-                     , _height   :: Int                   -- height
+                     , _height   :: {-# UNPACK #-} !Int                   -- height
                      , _info     :: EClassData            -- data
                      } deriving (Show, Eq, Generic)
 
-data Consts   = NotConst | ParamIx Int | ConstVal Double deriving (Show, Eq, Generic)
+data Consts   = NotConst | ParamIx {-# UNPACK #-} !Int | ConstVal {-# UNPACK #-} !Double deriving (Show, Eq, Generic)
 data Property = Positive | Negative | NonZero | Real deriving (Show, Eq, Generic) -- TODO: incorporate properties
 
-data EClassData = EData { _cost    :: Cost
+data EClassData = EData { _cost    :: {-# UNPACK #-} !Cost
                         , _best    :: ENode
                         , _consts  :: Consts
                         , _fitness :: Maybe Double    -- NOTE: this cannot be NaN
                         , _dl      :: Maybe Double
                         , _theta   :: [Target]
-                        , _size    :: Int
+                        , _size    :: {-# UNPACK #-} !Int
                         -- , _properties :: Property
                         -- TODO: include evaluation of expression from this e-class
                         } deriving (Show, Generic)
@@ -168,6 +170,10 @@ instance (Binary a, Hashable a) => Binary (HashSet a) where
   put hs = put (Set.toList hs)
   get    = Set.fromList <$> get
 
+instance (Binary k, Binary v, Hashable k, Eq k) => Binary (HashMap k v) where
+  put hm = put (HashMap.toList hm)
+  get    = HashMap.fromList <$> get
+
 instance Binary Target where
   put xs = put (VU.toList xs)
   get    = VU.fromList <$> get
@@ -204,7 +210,7 @@ makeLenses ''EGraphDB
 
 -- | returns an empty e-graph
 emptyGraph :: EGraph
-emptyGraph = EGraph IntMap.empty Map.empty IntMap.empty emptyDB
+emptyGraph = EGraph IntMap.empty HashMap.empty IntMap.empty emptyDB
 {-# INLINE emptyGraph #-}
 
 -- | returns an empty e-graph DB
