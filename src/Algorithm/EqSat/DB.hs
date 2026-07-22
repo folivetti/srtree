@@ -29,11 +29,10 @@ import Data.Ord (comparing)
 import Data.SRTree
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as Set
-import qualified Data.Set as OrdSet
+import qualified Data.Set as RangeSet
 import Data.String (IsString (..))
 import Data.SRTree.Recursion (cata)
 
-import Debug.Trace
 
 -- A Pattern is either a fixed-point of a tree or an
 -- index to a pattern variable. The pattern variable matches anything. 
@@ -246,8 +245,6 @@ genericJoin atoms root = do
                            pure (concat maps)
 {-# INLINE genericJoin #-}
 
-     -- [Map.insert x classId y | classId <- domainX db x atoms
-     --                                           , y <- go (updateVar x classId atoms) vars]
 
 
 -- | returns the e-class id for a certain variable that
@@ -257,10 +254,6 @@ domainX var atoms root = do
   let atoms' = filter (elemOfAtom var) atoms -- :: [ClassOrVar]  -- look only in the atoms with this var
   map Left <$> intersectAtoms var atoms' root -- find the intersection of possible keys by each atom
 {-# INLINE domainX #-}
-  --let ss = (map Left
-  --                                $ intersectAtoms var db
-  --                                $
-  --                     in ss
 
 -- | returns all e-class id that can matches this sequence of atoms
 intersectAtoms :: Monad m => ClassOrVar -> Query -> ClassOrVar -> EGraphST m [EClassId]
@@ -281,11 +274,7 @@ intersectAtoms var (a:atoms) root = do
         case mTrie of
           Just trie -> pure (fromMaybe Set.empty $ intersectTries var Map.empty trie (r:getElems t))
           Nothing   -> pure Set.empty
-          -- TODO: remove FlexibleContexts
-        --if op `Map.member` db -- if the e-graph contains the operator
-                               -- try to find an intersection of the tries that matches each atom of the pattern
-        --  then
-        --  else pure Set.empty
+
 {-# INLINE intersectAtoms #-}
 
 -- | searches for the intersection of e-class ids that
@@ -301,34 +290,20 @@ intersectTries :: ClassOrVar -> Map ClassOrVar EClassId -> IntTrie -> [ClassOrVa
 intersectTries var xs trie [] = Just Set.empty
 intersectTries var xs trie (i:ids) =
     case i of
-      Left x  -> if x `Set.member` _keys trie
-                    -- if the current investigated id is an e-class id and
-                    -- it is one of the keys of the trie...
-                    -- ..try to match the next id with the next trie
-                    then intersectTries var xs (_trie trie IntMap.! x) ids
-                    else Nothing
+      Left x  -> case IntMap.lookup x (_trie trie) of
+                   Just subtrie -> intersectTries var xs subtrie ids
+                   Nothing -> Nothing
       Right x -> if i `Map.member` xs
-                    -- if it is a pattern variable under investigation
-                    -- and the e-class id is part of the trie
-                    then if xs Map.! i `Set.member` _keys trie
-                            -- match the next id with the next trie
-                            then intersectTries var xs (_trie trie IntMap.! (xs Map.! i)) ids
-                            else Nothing
+                    then case IntMap.lookup (xs Map.! i) (_trie trie) of
+                           Just subtrie -> intersectTries var xs subtrie ids
+                           Nothing -> Nothing
                     else if Right x == var
-                            -- not under investigation and is the var of interest
                             then if all (isDiffFrom x) ids
-                                    -- if there are no other occurrence of x in the next vars,
-                                    -- the keys of the trie are all possible candidates
-                                    then Just $ _keys trie
-                                    -- oterwise, put i under investigation and check the next occurrences
-                                    -- returning the intersection
+                                    then Just $ Set.fromList (IntMap.keys (_trie trie))
                                     else Just $ IntMap.foldrWithKey (\k v acc ->
                                                     case intersectTries var (Map.insert i k xs) v ids of
                                                       Nothing -> acc
                                                       _       -> Set.insert k acc) Set.empty (_trie trie)
-                            -- if it is not the var of interest
-                            -- assign and test all possible e-class ids to it
-                            -- and move forward
                             else Just $ IntMap.foldrWithKey (\k v acc ->
                                                 case intersectTries var (Map.insert i k xs) v ids of
                                                   Nothing -> acc
@@ -363,7 +338,7 @@ elemOfAtom v (Atom root tree) =
 
 -- | sorts the variables in a query by the most frequently occurring
 orderedVars :: Query -> [ClassOrVar]
-orderedVars atoms = sortBy (comparing varCost) $ OrdSet.toList $ OrdSet.fromList [a | atom <- atoms, a <- getIdsFrom atom, isRight a]
+orderedVars atoms = sortBy (comparing varCost) $ RangeSet.toList $ RangeSet.fromList [a | atom <- atoms, a <- getIdsFrom atom, isRight a]
   where
     getIdsFrom (Atom r t) = r : getElems t
     isRight (Right _) = True

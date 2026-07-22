@@ -98,7 +98,7 @@ data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId   -- maps an e-clas
 
 data EGraphDB = EDB { _worklist      :: HashSet (EClassId, ENode)      -- e-nodes and e-class schedule for analysis
                     , _analysis      :: HashSet (EClassId, ENode)      -- e-nodes and e-class that changed data
-                    , _refits        :: HashSet EClassId
+                     , _refits        :: IntSet
                     , _patDB         :: DB                         -- database of patterns
                     , _fitRangeDB    :: RangeTree Double           -- database of valid fitness
                     , _dlRangeDB     :: RangeTree Double
@@ -190,13 +190,10 @@ type DB = Map (SRTree ()) IntTrie
 -- The IntTrie is composed of the set of available keys (for convenience)
 -- and an IntMap that maps one e-class id to the first child IntTrie,
 -- the first child IntTrie will point to the next child and so on
-data IntTrie = IntTrie { _keys :: HashSet EClassId, _trie :: IntMap IntTrie } deriving (Generic)
+newtype IntTrie = IntTrie { _trie :: IntMap IntTrie } deriving (Generic)
 
--- Shows the IntTrie as {keys} -> {show IntTries}
 instance Show IntTrie where
-  show (IntTrie k t) = let keys  = intercalate "," (map show $ Set.toList k)
-                           tries = intercalate "," (map (\(k,v) -> show k <> " -> " <> show v) $ IntMap.toList t)
-                       in "{" <> keys <> "} - {" <> tries <> "}"
+  show (IntTrie t) = "{" <> intercalate "," (map (\(k,v) -> show k <> " -> " <> show v) $ IntMap.toList t) <> "}"
 
 makeLenses ''EGraph
 makeLenses ''EClass
@@ -212,7 +209,7 @@ emptyGraph = EGraph IntMap.empty Map.empty IntMap.empty emptyDB
 
 -- | returns an empty e-graph DB
 emptyDB :: EGraphDB
-emptyDB = EDB Set.empty Set.empty Set.empty Map.empty RangeSet.empty RangeSet.empty IntMap.empty IntMap.empty IntMap.empty IntSet.empty 0 False
+emptyDB = EDB Set.empty Set.empty IntSet.empty Map.empty RangeSet.empty RangeSet.empty IntMap.empty IntMap.empty IntMap.empty IntSet.empty 0 False
 {-# INLINE emptyDB #-}
 
 -- | Creates a new e-class from an e-class id, a new e-node,
@@ -250,7 +247,7 @@ getEClass c = gets ((IntMap.! c) . _eClass)
 
 -- | Creates a singleton trie from an e-class id
 trie :: EClassId -> IntMap IntTrie -> IntTrie
-trie eid = IntTrie (Set.singleton eid)
+trie eid = IntTrie
 {-# INLINE trie #-}
 
 -- | Check whether an e-class is a constant value

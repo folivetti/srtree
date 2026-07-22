@@ -129,7 +129,7 @@ repairAnalysis costFun ecId enode =
      when (_info eclass /= newData) $
        do modify' $ over (eDB . analysis) (_parents eclass <>)
                   . over eClass (IntMap.insert ecId' eclass')
-                  . over (eDB . refits) (Set.insert ecId')
+                   . over (eDB . refits) (IntSet.insert ecId')
           _ <- modifyEClass costFun ecId'
           pure ()
 {-# INLINE repairAnalysis #-}
@@ -158,7 +158,7 @@ merge costFun c1 c2 =
                  . over (eDB . worklist) (_parents subC <>)         -- insert parents of sub into worklist
          when (_info newC /= _info ledC)                            -- if there was change in data,
            $ modify' $ over (eDB . analysis) (_parents ledC <>)     --   insert parents into analysis
-                     . over (eDB . refits) (Set.insert led)
+                      . over (eDB . refits) (IntSet.insert led)
          when (_info newC /= _info subC)
            $ modify' $ over (eDB . analysis) (_parents subC <>)
          updateDBs newC led ledC ledO sub subC subO
@@ -224,7 +224,7 @@ modifyEClass costFun ecId =
          let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
          maybeEid <- gets ((Map.!? en) . _eNodeToEClass)
          modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.singleton en , _info = infoEc})
-         when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (Set.insert ecId)
+         when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (IntSet.insert ecId)
          case maybeEid of
            Nothing   -> pure ecId
            Just eid' -> merge costFun eid' ecId
@@ -236,7 +236,7 @@ modifyEClass costFun ecId =
          let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
          maybeEid <- gets ((Map.!? en) . _eNodeToEClass)
          modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.insert en (_eNodes ec), _info = infoEc})
-         when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (Set.insert ecId)
+         when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (IntSet.insert ecId)
          -- TODO: what happen to the orphans?
          case maybeEid of
            Nothing   -> pure ecId
@@ -292,18 +292,14 @@ addToDB enode' eid = do
 -- | Populates an IntTrie with a sequence of e-class ids
 populate :: Maybe IntTrie -> [EClassId] -> Maybe IntTrie
 populate _ []         = Nothing
--- if it is a new entry, simply add the ids sequentially
 populate Nothing eids = foldr f Nothing eids
   where
     f :: EClassId -> Maybe IntTrie -> Maybe IntTrie
-    f eid (Just t) = Just $ trie eid (IntMap.singleton eid t)
-    f eid Nothing  = Just $ trie eid IntMap.empty
--- if the entry already exists, insert the new key
--- and populate the next child entry recursivelly
-populate (Just tId) (eid:eids) = let keys     = Set.insert eid (_keys tId)
-                                     nextTrie = _trie tId IntMap.!? eid
-                                     val      = fromMaybe (trie eid IntMap.empty) $ populate nextTrie eids
-                                  in Just $ IntTrie keys (IntMap.insert eid val (_trie tId))
+    f eid (Just t) = Just $ IntTrie (IntMap.singleton eid t)
+    f eid Nothing  = Just $ IntTrie (IntMap.singleton eid (IntTrie IntMap.empty))
+populate (Just tId) (eid:eids) = let nextTrie = _trie tId IntMap.!? eid
+                                     val      = fromMaybe (IntTrie IntMap.empty) $ populate nextTrie eids
+                                  in Just $ IntTrie (IntMap.insert eid val (_trie tId))
 {-# INLINE populate #-}
 
 canonizeMap :: Monad m => (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m (Map ClassOrVar ClassOrVar, ClassOrVar)
