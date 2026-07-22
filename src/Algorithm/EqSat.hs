@@ -40,11 +40,6 @@ import Debug.Trace
 type Scheduler a = State (IntMap Int) a
 
 -- to avoid importing
-fromJust :: Maybe a -> a
-fromJust (Just x) = x
-fromJust _        = error "fromJust called with Nothing"
-{-# INLINE fromJust #-}
-
 -- | runs equality saturation from an expression tree,
 -- a given set of rules, and a cost function.
 -- Returns the tree with the smallest cost.
@@ -114,10 +109,8 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty
         replaceEqRules (p1 :==: p2) = [p1 :=> p2, p2 :=> p1]
         replaceEqRules (r :| cond)  = map (:| cond) $ replaceEqRules r
 
-        go it sch = do eNodes   <- gets _eNodeToEClass
-                       eClasses <- gets _eClass
-                       --createDB -- TODO: partial db is still incomplete 
-                       --db       <- gets (_patDB . _eDB) -- createDB -- creates the DB
+        go it sch = do -- reset dirty flag before processing this iteration
+                       modify' $ over (eDB . changed) (const False)
 
                        -- step 1: match the rules
                        let matchSch        = matchWithScheduler it
@@ -129,17 +122,14 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty
                        mapM_ (uncurry (applyMatch costFun)) $ concat matches
                        rebuild costFun
 
-                       -- recalculate heights
-                       --calculateHeights
-                       eNodes'   <- gets _eNodeToEClass
-                       eClasses' <- gets _eClass
-
-                       -- if nothing changed, return
-                       if it == 1 || (eNodes' == eNodes && eClasses' == eClasses)
+                       -- check dirty flag: if no modifications occurred, we've saturated
+                       changed <- gets (_changed . _eDB)
+                       if it == 1 || not changed
                           then pure (True, it)
-                          else if IntMap.size eClasses' > 1500 -- maximum allowed number of e-classes. TODO: customize
-                                 then pure (False, it)
-                                 else go (it-1) sch'
+                          else do eClasses <- gets _eClass
+                                  if IntMap.size eClasses > 1500
+                                     then pure (False, it)
+                                     else go (it-1) sch'
 
 -- | apply a single step of merge-only equality saturation
 applySingleMergeOnlyEqSat :: Monad m => CostFun -> [Rule] -> EGraphST m ()
@@ -179,7 +169,7 @@ applySingleMergeOnlyEqSat costFun rules =
 matchWithScheduler :: Int -> Int -> Rule -> Scheduler [Rule] -- [(Rule, (Map ClassOrVar ClassOrVar, ClassOrVar))]
 matchWithScheduler it ruleNumber rule =
   do mbBan <- gets (IntMap.!? ruleNumber)
-     if mbBan /= Nothing && fromJust mbBan <= it -- check if the rule is banned
+     if maybe False (<= it) mbBan -- check if the rule is banned
         then pure []
         else do -- let matches = match db (source rule)
                 modify (IntMap.insert ruleNumber (it+5))

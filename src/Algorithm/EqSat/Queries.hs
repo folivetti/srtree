@@ -74,7 +74,7 @@ getTopECLassThat b n p = do
                        t :|> y -> do let x = snd y
                                      ecId <- canonical x
                                      ec <- gets ((IntMap.! ecId) . _eClass)
-                                     if (isInfinite . fromJust . _fitness . _info $ ec)
+                                     if (maybe True (isInfinite) . _fitness . _info $ ec)
                                        then go m bests t
                                        else if p ec
                                               then go (m-1) (ecId:bests) t
@@ -100,7 +100,7 @@ getTopEClassInRange b n p range = do
                              t :|> y -> do let x = snd y
                                            ecId <- canonical x
                                            ec <- gets ((IntMap.! ecId) . _eClass)
-                                           if (isInfinite . fromJust . _fitness . _info $ ec)
+                                           if (maybe True (isInfinite) . _fitness . _info $ ec)
                                              then go m bests (r:rs) t
                                              else do let v = p ec 
                                                      case (v `inRange` r) of
@@ -122,7 +122,7 @@ getTopECLassIn b n p ecs' = do
                        t :|> y -> do let x = snd y
                                      ecId <- canonical x
                                      ec <- gets ((IntMap.! ecId) . _eClass)
-                                     if (isInfinite . fromJust . _fitness . _info $ ec)
+                                     if (maybe True (isInfinite) . _fitness . _info $ ec)
                                        then go m bests t -- pure bests
                                        else if ecId `Set.member` ecs && p ec
                                               then go (m-1) (ecId:bests) t
@@ -143,7 +143,7 @@ getTopECLassNotIn b n p ecs' = do
                        t :|> y -> do let x = snd y
                                      ecId <- canonical x
                                      ec <- gets ((IntMap.! ecId) . _eClass)
-                                     if (isInfinite . fromJust . _fitness . _info $ ec)
+                                     if (maybe True (isInfinite) . _fitness . _info $ ec)
                                        then go m bests t
                                        else if not (ecId `Set.member` ecs) && p ec
                                               then go (m-1) (ecId:bests) t
@@ -160,7 +160,7 @@ getAllEvaluatedEClasses = do
                     t :|> y -> do let x = snd y
                                   ecId <- canonical x
                                   ec <- gets ((IntMap.! ecId) . _eClass)
-                                  if (isInfinite . fromJust . _fitness . _info $ ec)
+                                  if (maybe True (isInfinite) . _fitness . _info $ ec)
                                     then go bests t
                                     else go (ecId:bests) t
 

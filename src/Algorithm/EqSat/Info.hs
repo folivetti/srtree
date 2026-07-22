@@ -15,10 +15,10 @@
 module Algorithm.EqSat.Info where
 
 import Control.Lens ( over )
-import Control.Monad --(forM, forM_, when, foldM, void)
+import Control.Monad
 import Control.Monad.State
 import Data.AEq (AEq ((~==)))
-import Data.IntMap (IntMap) -- , delete, empty, insert, toList)
+import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -28,7 +28,6 @@ import Data.HashSet (HashSet)
 import qualified Data.HashSet as Set
 import qualified Data.IntSet as IntSet
 import Algorithm.EqSat.Egraph
-import Data.AEq (AEq ((~==)))
 import Algorithm.EqSat.Queries
 
 import Data.Maybe
@@ -84,14 +83,24 @@ joinData (EData c1 b1 cn1 fit1 dl1 p1 sz1) (EData c2 b2 cn2 fit2 dl2 p2 sz2) =
     combineConsts (ConstVal x) (ParamIx ix) = ConstVal x -- p - p = 0
     combineConsts x y = error (show x <> " " <> show y)
 
+-- | Fetch consts, cost, and size for all children in a single state traversal
+getChildrenData :: Monad m => [EClassId] -> EGraphST m [(Consts, Cost, Int)]
+getChildrenData ids = gets $ \eg ->
+  map (\cid -> let ec = _eClass eg IntMap.! cid
+                   d  = _info ec
+               in (_consts d, _cost d, _size d)) ids
+{-# INLINE getChildrenData #-}
+
 -- | Calculate e-node data (constant values and cost)
 makeAnalysis :: Monad m => CostFun -> ENode -> EGraphST m EClassData
 makeAnalysis costFun enode =
-  do consts <- calculateConsts enode
+  do let cs = childrenOf enode
+     childData <- getChildrenData cs
+     let consts = combineConsts $ replaceChildren (map (\(x,_,_) -> x) childData) enode
+         cost   = costFun $ replaceChildren (map (\(_,y,_) -> y) childData) enode
+         sz     = sum (map (\(_,_,z) -> z) childData)
      enode' <- canonize enode
-     cost   <- calculateCost costFun enode'
-     sz <- sum <$> mapM (\ecId -> gets (_size . _info . (IntMap.! ecId) . _eClass)) (childrenOf enode')
-     pure $ EData cost enode' consts Nothing Nothing [] (sz+1)
+     pure $ EData cost enode' consts Nothing Nothing [] (sz + 1)
 
 getChildrenMinHeight :: Monad m => ENode -> EGraphST m Int
 getChildrenMinHeight enode = do
@@ -148,7 +157,6 @@ calculateCost f t =
 calculateConsts :: Monad m => SRTree EClassId -> EGraphST m Consts
 calculateConsts t =
   do let cs = childrenOf t
-     eg <- get
      consts <- traverse (fmap (_consts . _info) . getEClass) cs
      case combineConsts $ replaceChildren consts t of
           ConstVal x | isNaN x -> pure (ConstVal x)

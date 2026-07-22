@@ -91,6 +91,78 @@ library
           nlopt
     default-language: Haskell2010
 
+executable bench
+    main-is: Main.hs
+    other-modules:
+          Paths_srtree
+    hs-source-dirs:
+          apps/Bench
+    ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2 -fllvm -pgmlo opt-20 -pgmlc llc-20 -optlo-O3 -optlc-mcpu=native -mavx2 -mfma -fspec-constr -fmax-simplifier-iterations=20 -fexpose-all-unfoldings
+    build-depends:
+          accelerate
+        , accelerate-llvm-native
+        , async
+        , attoparsec >=0.14.4 && <0.15
+        , attoparsec-expr >=0.1.1.2 && <0.2
+        , base >=4.19 && <5
+        , binary
+        , bytestring >=0.11 && <0.13
+        , containers >=0.6.7 && <0.9
+        , criterion
+        , deepseq
+        , exceptions
+        , filepath >=1.4.0.0 && <1.6
+        , hashable
+        , ieee754
+        , lens
+        , mtl >=2.2 && <2.4
+        , parallel
+        , primitive
+        , random >=1.2 && <1.4
+        , split >=0.2.5 && <0.3
+        , srtree
+        , statistics
+        , unordered-containers
+        , vector >=0.12 && <0.14
+        , zlib >=0.6.3 && <0.8
+    default-language: Haskell2010
+
+executable bench-eqsat
+    main-is: Main.hs
+    other-modules:
+          Paths_srtree
+    hs-source-dirs:
+          apps/BenchEqSat
+    ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2
+    build-depends:
+          accelerate
+        , accelerate-llvm-native
+        , async
+        , attoparsec >=0.14.4 && <0.15
+        , attoparsec-expr >=0.1.1.2 && <0.2
+        , base >=4.19 && <5
+        , binary
+        , bytestring >=0.11 && <0.13
+        , containers >=0.6.7 && <0.9
+        , criterion
+        , deepseq
+        , exceptions
+        , filepath >=1.4.0.0 && <1.6
+        , hashable
+        , ieee754
+        , lens
+        , mtl >=2.2 && <2.4
+        , parallel
+        , primitive
+        , random >=1.2 && <1.4
+        , split >=0.2.5 && <0.3
+        , srtree
+        , statistics
+        , unordered-containers
+        , vector >=0.12 && <0.14
+        , zlib >=0.6.3 && <0.8
+    default-language: Haskell2010
+
 executable srtree-report
     main-is: Main.hs
     other-modules:
@@ -102,7 +174,7 @@ executable srtree-report
           accelerate
         , accelerate-llvm-native
         , async
-        , attoparsec >=0.14.4 && <0.15
+        , attoparsec
         , attoparsec-expr >=0.1.1.2 && <0.2
         , base >=4.19 && <5
         , binary
@@ -110,27 +182,28 @@ executable srtree-report
         , containers
         , deepseq
         , exceptions
-        , filepath >=1.4.0.0 && <1.6
+        , filepath
         , hashable
         , ieee754
         , lens
-        , mtl >=2.2 && <2.4
+        , mtl
         , optparse-applicative
         , parallel
         , primitive
-        , random >=1.2 && <1.4
+        , random
         , split
         , srtree
         , statistics
         , unordered-containers
         , vector
-        , zlib >=0.6.3 && <0.8
+        , zlib
     default-language: Haskell2010
 
 test-suite srtree-test
     type: exitcode-stdio-1.0
     main-is: Spec.hs
     other-modules:
+          EqSatTests
           Paths_srtree
     hs-source-dirs:
           test

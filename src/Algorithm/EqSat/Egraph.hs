@@ -22,7 +22,7 @@ module Algorithm.EqSat.Egraph where
 
 import Control.Lens (element, makeLenses, view, over, (&), (+~), (-~), (.~), (^.))
 --import Control.Monad (forM, forM_, when, foldM, void)
-import Data.List ( intercalate )
+import Data.List ( intercalate, foldl' )
 import Control.Monad.State.Strict hiding ( get, put )
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
@@ -184,8 +184,9 @@ data EGraphDB = EDB { _worklist      :: HashSet (EClassId, ENode)      -- e-node
                     , _sizeFitDB     :: IntMap (RangeTree Double)  -- hacky! Size x Fitness DB
                     , _sizeDLDB      :: IntMap (RangeTree Double)
                     , _unevaluated   :: IntSet                     -- set of not-evaluated e-classes
-                    , _nextId        :: Int                        -- next available id
-                    } deriving (Show, Generic)
+                     , _nextId        :: Int                        -- next available id
+                     , _changed       :: !Bool                      -- dirty flag: true if modified since last check
+                     } deriving (Show, Generic)
 
 data EClass = EClass { _eClassId :: Int                   -- e-class id (maybe we don't need that here)
                      , _eNodes   :: HashSet ENodeEnc          -- set of e-nodes inside this e-class
@@ -289,7 +290,7 @@ emptyGraph = EGraph IntMap.empty Map.empty IntMap.empty emptyDB
 
 -- | returns an empty e-graph DB
 emptyDB :: EGraphDB
-emptyDB = EDB Set.empty Set.empty Set.empty Map.empty FingerTree.empty FingerTree.empty IntMap.empty IntMap.empty IntMap.empty IntSet.empty 0
+emptyDB = EDB Set.empty Set.empty Set.empty Map.empty FingerTree.empty FingerTree.empty IntMap.empty IntMap.empty IntMap.empty IntSet.empty 0 False
 {-# INLINE emptyDB #-}
 
 -- | Creates a new e-class from an e-class id, a new e-node,
@@ -298,20 +299,21 @@ createEClass :: EClassId -> ENode -> EClassData -> Int -> EClass
 createEClass cId enode' info h = EClass cId (Set.singleton $ encodeEnode enode') Set.empty h info
 {-# INLINE createEClass #-}
 
--- | gets the canonical id of an e-class
+-- | gets the canonical id of an e-class with full path compression
 canonical :: Monad m => EClassId -> EGraphST m EClassId
 canonical eclassId =
   do m <- gets _canonicalMap
      let oneStep = m IntMap.! eclassId
      if oneStep == eclassId
         then pure eclassId
-        else go m oneStep
-    where
-      go :: Monad m => IntMap EClassId -> EClassId -> EGraphST m EClassId
-      go m ecId
-        | m IntMap.! ecId == ecId = do modify' $ over canonicalMap (IntMap.insert eclassId ecId) -- creates a shortcut for next time
-                                       pure ecId        -- if the e-class id is mapped to itself, it's canonical
-        | otherwise        = go m (m IntMap.! ecId)  -- otherwise, check the next id in the sequence
+        else do
+          let loop path ecId
+                | m IntMap.! ecId == ecId = (ecId, eclassId : path)
+                | otherwise = loop (ecId : path) (m IntMap.! ecId)
+              (root, path) = loop [] oneStep
+          modify' $ \eg -> eg{ _canonicalMap =
+                        foldl' (\m' k -> IntMap.insert k root m') (_canonicalMap eg) path }
+          pure root
 {-# INLINE canonical #-}
 
 -- | canonize the e-node children

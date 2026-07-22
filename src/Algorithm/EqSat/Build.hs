@@ -79,6 +79,7 @@ add costFun enode =
          modify' $ over (eDB . sizeDB)
                  $ IntMap.insertWith (IntSet.union) (_size info) (IntSet.singleton curId)
          modify' $ over (eDB . unevaluated) (IntSet.insert curId)
+                 . over (eDB . changed) (const True)
          pure curId
   where
     addParents :: Monad m => EClassId -> ENode -> EClassId -> EGraphST m ()
@@ -161,7 +162,7 @@ merge costFun c1 c2 =
            $ modify' $ over (eDB . analysis) (_parents subC <>)
          updateDBs newC led ledC ledO sub subC subO
          modifyEClass costFun led
-         --forM_ (_eNodes newC) $ \en -> addToDB (decodeEnode en) led
+         modify' $ over (eDB . changed) (const True)
          pure led
 
     getLeaderSub c1 c1O c2 c2O =
@@ -631,7 +632,7 @@ cleanMaps = do
     pure $ if k==v then Just (k,v) else Nothing
   let canon' = IntMap.fromList (catMaybes entries'')
   eDB' <- gets _eDB
-  put $ EGraph canon enode2eclass' eclassMap' eDB'
+  put $ EGraph canon' enode2eclass' eclassMap' eDB'
   forceState
 {-# INLINE cleanMaps #-}
 

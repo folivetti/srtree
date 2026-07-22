@@ -100,16 +100,13 @@ executables:
     - -fspec-constr
     - -fmax-simplifier-iterations=20
     - -fexpose-all-unfoldings
-    # - -prof
-    # - -fprof-auto
     dependencies:
     - srtree
     - criterion
 
-executables:
-  srtree-report:
+  bench-eqsat:
     main:                Main.hs
-    source-dirs:         apps/Report
+    source-dirs:         apps/BenchEqSat
     ghc-options:
     - -threaded
     - -rtsopts
@@ -117,12 +114,7 @@ executables:
     - -O2
     dependencies:
     - srtree
-    - optparse-applicative
-    - split
-    - bytestring
-    - containers
-    - vector
-    - statistics
+    - criterion
 
 tests:
   srtree-test:
