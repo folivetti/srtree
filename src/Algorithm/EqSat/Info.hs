@@ -96,18 +96,18 @@ makeAnalysis :: Monad m => CostFun -> ENode -> EGraphST m EClassData
 makeAnalysis costFun enode =
   do let cs = childrenOf enode
      childData <- getChildrenData cs
-     let consts = combineConsts $ replaceChildren (map (\(x,_,_) -> x) childData) enode
-         cost   = costFun $ replaceChildren (map (\(_,y,_) -> y) childData) enode
-         sz     = sum (map (\(_,_,z) -> z) childData)
+     let (consts', costs', sizes) = unzip3 childData
+         consts = combineConsts $ replaceChildren consts' enode
+         cost   = costFun $ replaceChildren costs' enode
+         sz     = sum sizes
      enode' <- canonize enode
      pure $ EData cost enode' consts Nothing Nothing [] (sz + 1)
 
 getChildrenMinHeight :: Monad m => ENode -> EGraphST m Int
 getChildrenMinHeight enode = do
   let children = childrenOf enode
-      minimum' [] = 0
-      minimum' xs = minimum xs
-  minimum' <$> mapM (\ec -> gets (_height . (IntMap.! ec) . _eClass)) children
+  if null children then pure 0 else
+    gets (\eg -> minimum $ map (\ec -> _height $ _eClass eg IntMap.! ec) children)
 
 -- | update the heights of each e-class
 -- won't work if there's no root

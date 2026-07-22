@@ -168,8 +168,8 @@ merge costFun c1 c2 =
     getLeaderSub c1 c1O c2 c2O =
       do ec1 <- getEClass c1
          ec2 <- getEClass c2
-         let n1 = length (_parents ec1)
-             n2 = length (_parents ec2)
+         let n1 = Set.size (_parents ec1)
+             n2 = Set.size (_parents ec2)
          pure $ if n1 >= n2
                   then (c1, ec1, c1O, c2, ec2, c2O)
                   else (c2, ec2, c2O, c1, ec1, c1O)

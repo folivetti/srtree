@@ -21,15 +21,15 @@ import Control.Monad (when, foldM, forM)
 import Control.Monad.State
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
-import Data.List (intercalate, nub, sortBy)
+import Data.List (intercalate, sortBy)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Ord (comparing)
 import Data.SRTree
---import Data.Set (Set)
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as Set
+import qualified Data.Set as OrdSet
 import Data.String (IsString (..))
 import Data.SRTree.Recursion (cata)
 
@@ -360,7 +360,7 @@ elemOfAtom v (Atom root tree) =
 
 -- | sorts the variables in a query by the most frequently occurring
 orderedVars :: Query -> [ClassOrVar]
-orderedVars atoms = sortBy (comparing varCost) $ nub [a | atom <- atoms, a <- getIdsFrom atom, isRight a]
+orderedVars atoms = sortBy (comparing varCost) $ OrdSet.toList $ OrdSet.fromList [a | atom <- atoms, a <- getIdsFrom atom, isRight a]
   where
     getIdsFrom (Atom r t) = r : getElems t
     isRight (Right _) = True
