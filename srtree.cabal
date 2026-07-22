@@ -27,15 +27,22 @@ source-repository head
 
 library
     exposed-modules:
+          Algorithm.EqSat
+          Algorithm.EqSat.Build
+          Algorithm.EqSat.DB
+          Algorithm.EqSat.Egraph
+          Algorithm.EqSat.Info
+          Algorithm.EqSat.Queries
+          Algorithm.EqSat.SearchSR
+          Algorithm.EqSat.Simplify
           Algorithm.SRTree.AD
           Algorithm.SRTree.AD.Accelerate
-          Algorithm.SRTree.Compile
           Algorithm.SRTree.AD.CompiledAD
           Algorithm.SRTree.AD.Unboxed
+          Algorithm.SRTree.Compile
           Algorithm.SRTree.ConfidenceIntervals
           Algorithm.SRTree.Likelihoods
           Algorithm.SRTree.ModelSelection
-          Numeric.Optimization.NLOPT
           Algorithm.SRTree.NonlinearOpt
           Algorithm.SRTree.Utils
           Data.SRTree
@@ -46,6 +53,7 @@ library
           Data.SRTree.Print
           Data.SRTree.Random
           Data.SRTree.Recursion
+          Numeric.Optimization.NLOPT
           Numeric.Optimization.NLOPT.Bindings
           Text.ParseSR
           Text.ParseSR.IO
@@ -58,17 +66,22 @@ library
         , attoparsec >=0.14.4 && <0.15
         , attoparsec-expr >=0.1.1.2 && <0.2
         , base >=4.19 && <5
+        , binary
         , bytestring >=0.11 && <0.13
         , containers >=0.6.7 && <0.9
         , deepseq
         , exceptions
         , filepath >=1.4.0.0 && <1.6
+        , hashable
+        , ieee754
+        , lens
         , mtl >=2.2 && <2.4
         , parallel
         , primitive
         , random >=1.2 && <1.4
         , split >=0.2.5 && <0.3
         , statistics
+        , unordered-containers
         , vector >=0.12 && <0.14
         , zlib >=0.6.3 && <0.8
     hs-source-dirs:
@@ -86,47 +99,33 @@ executable srtree-report
           apps/Report
     ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2
     build-depends:
-          base >=4.19 && <5
-        , bytestring >=0.11 && <0.13
-        , containers >=0.6.7 && <0.9
-        , optparse-applicative
-        , srtree
-        , split >=0.2.5 && <0.3
-        , statistics
-        , vector >=0.12 && <0.14
-    default-language: Haskell2010
-
-executable bench
-    main-is: Main.hs
-    other-modules:
-          Paths_srtree
-    hs-source-dirs:
-          apps/Bench
-    ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2 -fllvm -pgmlo opt-20 -pgmlc llc-20 -optlo-O3 -optlc-mcpu=native -mavx2 -mfma -fspec-constr -fmax-simplifier-iterations=20 -fexpose-all-unfoldings
-    build-depends:
           accelerate
         , accelerate-llvm-native
         , async
         , attoparsec >=0.14.4 && <0.15
         , attoparsec-expr >=0.1.1.2 && <0.2
         , base >=4.19 && <5
-        , bytestring >=0.11 && <0.13
-        , containers >=0.6.7 && <0.9
-        , criterion
+        , binary
+        , bytestring
+        , containers
         , deepseq
         , exceptions
         , filepath >=1.4.0.0 && <1.6
+        , hashable
+        , ieee754
+        , lens
         , mtl >=2.2 && <2.4
+        , optparse-applicative
         , parallel
         , primitive
         , random >=1.2 && <1.4
-        , split >=0.2.5 && <0.3
+        , split
         , srtree
         , statistics
-        , vector >=0.12 && <0.14
+        , unordered-containers
+        , vector
         , zlib >=0.6.3 && <0.8
     default-language: Haskell2010
-
 
 test-suite srtree-test
     type: exitcode-stdio-1.0
@@ -145,11 +144,15 @@ test-suite srtree-test
         , attoparsec >=0.14.4 && <0.15
         , attoparsec-expr >=0.1.1.2 && <0.2
         , base >=4.19 && <5
+        , binary
         , bytestring >=0.11 && <0.13
         , containers >=0.6.7 && <0.9
         , deepseq
         , exceptions
         , filepath >=1.4.0.0 && <1.6
+        , hashable
+        , ieee754
+        , lens
         , mtl >=2.2 && <2.4
         , parallel
         , primitive
@@ -157,6 +160,7 @@ test-suite srtree-test
         , split >=0.2.5 && <0.3
         , srtree
         , statistics
+        , unordered-containers
         , vector >=0.12 && <0.14
         , zlib >=0.6.3 && <0.8
     default-language: Haskell2010

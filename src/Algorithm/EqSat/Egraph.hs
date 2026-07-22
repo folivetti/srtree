@@ -40,7 +40,7 @@ import Data.SRTree.Eval
 import Data.Hashable
 import Data.Binary
 import qualified Data.Binary as Bin
-import qualified Data.Massiv.Array as MA
+import qualified Data.Vector.Unboxed as VU
 
 import GHC.Generics
 
@@ -53,7 +53,7 @@ type ENodeEnc     = (Int, Int, Int, Double)
 type EGraphST m a = StateT EGraph m a
 type Cost         = Int
 type CostFun      = SRTree Cost -> Cost
-type ECache = IntMap.IntMap PVector
+type ECache = IntMap.IntMap Target
 
 instance Hashable ENode where
   hashWithSalt n enode = hashWithSalt n (encodeEnode enode)
@@ -202,7 +202,7 @@ data EClassData = EData { _cost    :: Cost
                         , _consts  :: Consts
                         , _fitness :: Maybe Double    -- NOTE: this cannot be NaN
                         , _dl      :: Maybe Double
-                        , _theta   :: [PVector]
+                        , _theta   :: [Target]
                         , _size    :: Int
                         -- , _properties :: Property
                         -- TODO: include evaluation of expression from this e-class
@@ -245,9 +245,9 @@ instance (Binary a, Hashable a) => Binary (HashSet a) where
   put hs = put (Set.toList hs)
   get    = Set.fromList <$> get
 
-instance Binary PVector where
-  put xs = put (MA.toList xs)
-  get    = MA.fromList compMode <$> get
+instance Binary Target where
+  put xs = put (VU.toList xs)
+  get    = VU.fromList <$> get
 
 instance Binary IntTrie
 instance Binary EClass
@@ -340,7 +340,7 @@ isConst eid = do ec <- gets ((IntMap.! eid) . _eClass)
 getFitness :: Monad m => EClassId -> EGraphST m (Maybe Double)
 getFitness c = gets (_fitness . _info . (IntMap.! c) . _eClass)
 {-# INLINE getFitness #-}
-getTheta :: Monad m => EClassId -> EGraphST m ([PVector])
+getTheta :: Monad m => EClassId -> EGraphST m ([Target])
 getTheta c = gets (_theta . _info . (IntMap.! c) . _eClass)
 {-# INLINE getTheta #-}
 getSize :: Monad m => EClassId -> EGraphST m Int

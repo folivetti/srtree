@@ -15,19 +15,19 @@ module Algorithm.EqSat.SearchSR where
 
 import Data.SRTree
 import Data.SRTree.Datasets
+import Data.SRTree.Eval (compileLoss)
 import System.Random
 import Control.Monad.State.Strict
 import Algorithm.EqSat.Egraph
 import Algorithm.SRTree.Likelihoods
+import Algorithm.SRTree.AD (ADBackEnd(..))
 import qualified Data.IntMap as IM
 import qualified Data.IntSet as IntSet
 import qualified Data.SRTree.Random as Random
 import Data.Function ( on )
-import Algorithm.SRTree.Likelihoods
 import Algorithm.SRTree.NonlinearOpt
 import Control.Monad ( when, replicateM, forM, forM_ )
-import Algorithm.EqSat.Egraph
-import Algorithm.SRTree.Opt
+import Numeric.Optimization.NLOPT
 import Algorithm.EqSat.Info
 import Algorithm.EqSat.Build
 import Data.Maybe ( fromJust )
@@ -35,6 +35,7 @@ import Data.SRTree.Random
 import Algorithm.EqSat.Queries
 import Data.List ( maximumBy )
 import qualified Data.Map.Strict as Map
+import qualified Data.Vector.Unboxed as V
 
 -- Environment of an e-graph with support to random generator and IO
 type RndEGraph a = EGraphST (StateT StdGen IO) a
@@ -59,22 +60,20 @@ while p arg prog = do if (p arg)
                               while p arg' prog
                       else pure arg
 
-fitnessFun :: Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> PVector -> (Double, PVector)
+fitnessFun :: Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> Target -> (Double, Target)
 fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) tree thetaOrig =
-  if isNaN val -- || isNaN tr
-    then (-(1/0), theta) -- infinity
+  if isNaN val
+    then (-(1/0), theta)
     else (val, theta)
   where
-    --tree          = relabelParams _tree
     nParams       = countParamsUniq tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
-    (theta, _, _) = minimizeNLL' VAR1 distribution mYErr nIter x y tree thetaOrig
-    evalF a b c   = negate $ nll distribution c a b tree $ if nParams == 0 then thetaOrig else theta
-    --tr            = evalF x y mYErr
+    (theta, _, _) = minimizeNLL' VAR1 SingleThread (NLL distribution) mYErr nIter x y tree thetaOrig
+    evalF a b c   = negate $ compileLoss a (buildLoss (NLL distribution) (fromIntegral (V.length b)) tree) b c $ if nParams == 0 then thetaOrig else theta
     val           = evalF x_val y_val mYErr_val
 
 --{-# INLINE fitnessFun #-}
 
-fitnessFunRep :: Int -> Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> RndEGraph (Double, PVector)
+fitnessFunRep :: Int -> Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> RndEGraph (Double, Target)
 fitnessFunRep nRep nIter distribution dataTrain dataVal tree = do
     let nParams = countParamsUniq tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
     thetaOrigs <- replicateM nRep (rnd $ randomVec nParams)
@@ -83,7 +82,7 @@ fitnessFunRep nRep nIter distribution dataTrain dataVal tree = do
 --{-# INLINE fitnessFunRep #-}
 
 
-fitnessMV :: Bool -> Int -> Int -> Distribution -> [(DataSet, DataSet)] -> Fix SRTree -> RndEGraph (Double, [PVector])
+fitnessMV :: Bool -> Int -> Int -> Distribution -> [(DataSet, DataSet)] -> Fix SRTree -> RndEGraph (Double, [Target])
 fitnessMV shouldReparam nRep nIter distribution dataTrainsVals _tree = do
   let tree = if shouldReparam then relabelParams _tree else relabelParamsOrder _tree
   response <- forM dataTrainsVals $ \(dt, dv) -> fitnessFunRep nRep nIter distribution dt dv tree
@@ -95,7 +94,7 @@ fitnessMV shouldReparam nRep nIter distribution dataTrainsVals _tree = do
 
 -- RndEGraph utils
 -- fitFun fitnessFunRep rep iter distribution x y mYErr x_val y_val mYErr_val
-insertExpr :: Fix SRTree -> (Fix SRTree -> RndEGraph (Double, [PVector])) -> RndEGraph EClassId
+insertExpr :: Fix SRTree -> (Fix SRTree -> RndEGraph (Double, [Target])) -> RndEGraph EClassId
 insertExpr t fitFun = do
     ecId <- fromTree myCost t >>= canonical
     (f, p) <- fitFun t

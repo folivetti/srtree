@@ -1,0 +1,10 @@
+cabal-version: 3.0
+name: rangetree-bench
+version: 0.1
+build-type: Simple
+
+executable bench
+    main-is: RangeTreeBench.hs
+    hs-source-dirs: .
+    build-depends: base, containers, deepseq, random
+    ghc-options: -O2 -rtsopts

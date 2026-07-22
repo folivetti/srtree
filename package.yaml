@@ -41,6 +41,11 @@ dependencies:
 - accelerate-llvm-native
 - exceptions
 - statistics 
+- lens
+- hashable
+- binary
+- unordered-containers
+- ieee754
 
 library:
   source-dirs: src

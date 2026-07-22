@@ -23,7 +23,7 @@ import qualified Data.IntMap as IntMap
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.SRTree
-import Data.SRTree.Eval (evalFun, evalOp, PVector)
+import Data.SRTree.Eval (evalFun, evalOp, Target)
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as Set
 import qualified Data.IntSet as IntSet
@@ -168,7 +168,7 @@ combineConsts (Bin op l r) = evalOp' l r
     evalOp' (ConstVal x) (ConstVal y) = ConstVal $ evalOp op x y
     evalOp' _            _            = NotConst
 
-insertFitness :: Monad m => EClassId -> Double -> [PVector] -> EGraphST m ()
+insertFitness :: Monad m => EClassId -> Double -> [Target] -> EGraphST m ()
 insertFitness eId' fit params = do
   eId <- canonical eId'
   tree <- getBestExpr' eId
