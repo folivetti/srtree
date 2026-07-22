@@ -82,7 +82,6 @@ recalculateBest costFun eid =
             let currentCost = m Map.!? eid
                 minCost     = minimumBy' (compare `on` fst)  -- get the minimum available cost of the nodes of this class
                             $ mapMaybe (nodeCost m)
-                            $ map decodeEnode
                             $ Set.toList (_eNodes ecl)
             in case (currentCost, minCost) of -- replace the costs accordingly
                   (_, Nothing)         -> (b, m)

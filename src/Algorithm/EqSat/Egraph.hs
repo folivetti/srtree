@@ -32,9 +32,7 @@ import Data.HashSet (HashSet)
 import qualified Data.HashSet as Set
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
-import Data.Sequence ( Seq(..), (><) )
-import qualified Data.Sequence as FingerTree
-import Data.Foldable ( toList )
+import qualified Data.Set as RangeSet
 import Data.SRTree
 import Data.SRTree.Eval
 import Data.Hashable
@@ -49,80 +47,29 @@ import Debug.Trace
 type EClassId     = Int -- NOTE: DO NOT CHANGE THIS, this will break the use of IntMap and IntSet
 type ClassIdMap   = IntMap
 type ENode        = SRTree EClassId
-type ENodeEnc     = (Int, Int, Int, Double)
 type EGraphST m a = StateT EGraph m a
 type Cost         = Int
 type CostFun      = SRTree Cost -> Cost
 type ECache = IntMap.IntMap Target
 
 instance Hashable ENode where
-  hashWithSalt n enode = hashWithSalt n (encodeEnode enode)
+  hashWithSalt n (Var ix)       = n `hashWithSalt` (0 :: Int) `hashWithSalt` ix
+  hashWithSalt n (Param ix)     = n `hashWithSalt` (1 :: Int) `hashWithSalt` ix
+  hashWithSalt n (Const x)      = n `hashWithSalt` (2 :: Int) `hashWithSalt` x
+  hashWithSalt n (Uni f e)      = n `hashWithSalt` (3 :: Int) `hashWithSalt` (fromEnum f) `hashWithSalt` e
+  hashWithSalt n (Bin op l r)   = n `hashWithSalt` (4 :: Int) `hashWithSalt` (fromEnum op) `hashWithSalt` l `hashWithSalt` r
 
-type RangeTree a = Seq (a, EClassId)
+type RangeTree a = RangeSet.Set (a, EClassId)
 
-encodeEnode :: ENode -> ENodeEnc
-encodeEnode (Var ix)         = (0, ix, -1, 0)
-encodeEnode (Param ix)       = (1, ix, -1, 0)
-encodeEnode (Const x)        = (2, -1, -1, x)
-encodeEnode (Uni f ed)       = (300 + fromEnum f, ed, -1, 0)
-encodeEnode (Bin op ed1 ed2) = (400 + fromEnum op, ed1, ed2, 0)
-{-# INLINE encodeEnode #-}
 
-decodeEnode :: ENodeEnc -> ENode
-decodeEnode (0, ix, _, _) = Var ix
-decodeEnode (1, ix, _, _) = Param ix
-decodeEnode (2, _, _, x)  = Const x
-decodeEnode (opCode, arg1, arg2, arg3)
-  | opCode < 400 = Uni (toEnum $ opCode-300) arg1
-  | otherwise    = Bin (toEnum $ opCode-400) arg1 arg2
-{-# INLINE decodeEnode #-}
 
 insertRange :: (Ord a, Show a) => EClassId -> a -> RangeTree a -> RangeTree a
-insertRange eid x Empty                      = FingerTree.singleton (x, eid)
-insertRange eid x (y :<| _xs) | (x, eid) < y = (x, eid) :<| y :<| _xs
-insertRange eid x (_xs :|> y) | (x, eid) > y = _xs :|> y :|> (x, eid)
-insertRange eid x rt = go rt
-  where
-    entry   = (x, eid)
-    go root = case FingerTree.splitAt (n `div` 2) root of
-                (Empty, Empty)    -> FingerTree.singleton entry
-                (Empty, z :<| zs) | entry < z -> entry :<| z :<| zs
-                                  | otherwise -> z :<| (go zs)
-                (ys :|> y, Empty) | entry > y -> ys :|> y :|> entry
-                                  | otherwise -> (go ys) :|> y
-                (ys :|> y, z :<| zs)
-                     | entry > y && entry < z -> (ys :|> y :|> entry) >< (z :<| zs)
-                     | entry > z              -> (ys :|> y) >< go (z :<| zs)
-                     | entry < y              -> go (ys :|> y) >< (z :<| zs)
-                     | otherwise              -> root
-      where
-        n = FingerTree.length root
+insertRange eid x = RangeSet.insert (x, eid)
+{-# INLINE insertRange #-}
 
 removeRange :: (Ord a, Show a) => EClassId -> a -> RangeTree a -> RangeTree a
-removeRange eid x Empty                  = Empty
-removeRange eid x (y :<| _xs) | (x, eid) < y = (y :<| _xs)
-removeRange eid x (_xs :|> y) | (x, eid) > y = (_xs :|> y)
-removeRange eid x rt = go rt
-  where
-    entry   = (x, eid)
-    go root = case FingerTree.splitAt (n `div` 2) root of
-                (Empty, Empty)    -> root
-                (Empty, z :<| zs)
-                            | entry < z  -> z :<| zs
-                            | entry == z -> zs
-                            | otherwise  -> z :<| (go zs)
-                (ys :|> y, Empty)
-                            | entry > y  -> ys :|> y
-                            | entry == y -> ys
-                            | otherwise  -> (go ys) :|> y
-                (ys :|> y, z :<| zs)
-                     | entry > y && entry < z -> root
-                     | entry > z              -> (ys :|> y) >< go (z :<| zs)
-                     | entry < y              -> go (ys :|> y) >< (z :<| zs)
-                     | otherwise              -> root
-
-      where
-        n = FingerTree.length root
+removeRange eid x = RangeSet.delete (x, eid)
+{-# INLINE removeRange #-}
 
 
 
@@ -130,35 +77,17 @@ removeRange eid x rt = go rt
 
 -- TODO: check this \/
 getWithinRange :: Ord a => a -> a -> RangeTree a -> [EClassId]
-getWithinRange lb ub rt = map snd . toList $ go rt
-  where
-    go Empty = Empty
-    go root = case FingerTree.splitAt (n `div` 2) root of
-                (Empty, Empty)    -> Empty
-                (ys :|> y, Empty)
-                     | fst y < lb    -> Empty
-                     | otherwise -> go (ys :|> y)
-                (Empty, z :<| zs)
-                            | fst z > ub    -> Empty
-                            | otherwise -> go (z :<| zs)
-                (ys :|> y, z :<| zs)
-                     | fst y < lb -> go (z :<| zs)
-                     | fst z > ub -> go (ys :|> y)
-                     | otherwise -> go (ys :|> y) >< go (z :<| zs)
-      where
-        n = FingerTree.length root
-
+getWithinRange lb ub rt =
+  let (_, ge)  = RangeSet.split (lb, minBound) rt
+      (inR, _) = RangeSet.split (ub, maxBound) ge
+  in map snd (RangeSet.toList inR)
 
 getSmallest :: Ord a => RangeTree a -> (a, EClassId)
-getSmallest rt = case rt of
-                     Empty -> error "empty finger"
-                     x :<| t -> x
+getSmallest = maybe (error "empty range tree") id . RangeSet.lookupMin
 {-# INLINE getSmallest #-}
 
 getGreatest :: Ord a => RangeTree a -> (a, EClassId)
-getGreatest rt = case rt of
-                     Empty -> error "empty finger"
-                     t :|> x -> x
+getGreatest = maybe (error "empty range tree") id . RangeSet.lookupMax
 {-# INLINE getGreatest #-}
 
 data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId   -- maps an e-class id to its canonical form
@@ -182,7 +111,7 @@ data EGraphDB = EDB { _worklist      :: HashSet (EClassId, ENode)      -- e-node
                      } deriving (Show, Generic)
 
 data EClass = EClass { _eClassId :: Int                   -- e-class id (maybe we don't need that here)
-                     , _eNodes   :: HashSet ENodeEnc          -- set of e-nodes inside this e-class
+                     , _eNodes   :: HashSet ENode           -- set of e-nodes inside this e-class
                      , _parents  :: HashSet (EClassId, ENode) -- parents (e-class, e-node)'s
                      , _height   :: Int                   -- height
                      , _info     :: EClassData            -- data
@@ -283,13 +212,13 @@ emptyGraph = EGraph IntMap.empty Map.empty IntMap.empty emptyDB
 
 -- | returns an empty e-graph DB
 emptyDB :: EGraphDB
-emptyDB = EDB Set.empty Set.empty Set.empty Map.empty FingerTree.empty FingerTree.empty IntMap.empty IntMap.empty IntMap.empty IntSet.empty 0 False
+emptyDB = EDB Set.empty Set.empty Set.empty Map.empty RangeSet.empty RangeSet.empty IntMap.empty IntMap.empty IntMap.empty IntSet.empty 0 False
 {-# INLINE emptyDB #-}
 
 -- | Creates a new e-class from an e-class id, a new e-node,
 -- and the info of this e-class 
 createEClass :: EClassId -> ENode -> EClassData -> Int -> EClass
-createEClass cId enode' info h = EClass cId (Set.singleton $ encodeEnode enode') Set.empty h info
+createEClass cId enode' info h = EClass cId (Set.singleton enode') Set.empty h info
 {-# INLINE createEClass #-}
 
 -- | gets the canonical id of an e-class with full path compression

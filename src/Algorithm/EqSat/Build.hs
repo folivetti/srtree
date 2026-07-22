@@ -35,8 +35,9 @@ import Data.SRTree.Recursion (cataM)
 import Algorithm.EqSat.Info
 import qualified Data.IntSet as IntSet
 import Data.Maybe
-import Data.Sequence (Seq(..), (><))
+
 import Data.List ( nub )
+import qualified Data.Set as RangeSet
 import Debug.Trace (trace, traceShow)
 
 -- | adds a new or existing e-node (merging if necessary)
@@ -197,7 +198,7 @@ merge costFun c1 c2 =
              else modify' $ over (eDB . fitRangeDB) (removeRange led (fromJust fitLed) . removeRange ledO (fromJust fitLed))
                           . over (eDB . sizeFitDB) (IntMap.adjust (removeRange ledO (fromJust fitLed) . removeRange led (fromJust fitLed)) szLed)
           modify' $ over (eDB . fitRangeDB) (insertRange led (fromJust fitNew))
-                  . over (eDB . sizeFitDB) (IntMap.adjust (insertRange led (fromJust fitNew)) szNew . IntMap.insertWith (><) szNew Empty)
+                  . over (eDB . sizeFitDB) (IntMap.adjust (insertRange led (fromJust fitNew)) szNew . IntMap.insertWith RangeSet.union szNew RangeSet.empty)
         if isNothing fitSub
            then modify' $ over (eDB . unevaluated) (IntSet.delete sub . IntSet.delete subO)
            else modify' $ over (eDB . fitRangeDB) (removeRange sub (fromJust fitSub) . removeRange subO (fromJust fitSub))
@@ -222,7 +223,7 @@ modifyEClass costFun ecId =
          c <- calculateCost costFun en
          let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
          maybeEid <- gets ((Map.!? en) . _eNodeToEClass)
-         modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.singleton (encodeEnode en) , _info = infoEc})
+         modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.singleton en , _info = infoEc})
          when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (Set.insert ecId)
          case maybeEid of
            Nothing   -> pure ecId
@@ -234,7 +235,7 @@ modifyEClass costFun ecId =
          ens <- gets (_eNodes . (IntMap.! ecId) . _eClass)
          let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
          maybeEid <- gets ((Map.!? en) . _eNodeToEClass)
-         modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.insert (encodeEnode en) (_eNodes ec), _info = infoEc})
+         modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.insert en (_eNodes ec), _info = infoEc})
          when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (Set.insert ecId)
          -- TODO: what happen to the orphans?
          case maybeEid of
@@ -421,7 +422,7 @@ getBestENode eid = do eid' <- canonical eid
 getExpressionFrom :: Monad m => EClassId -> EGraphST m (Fix SRTree)
 getExpressionFrom eId' = do
     eId <- canonical eId'
-    nodes <- gets (Set.map decodeEnode . _eNodes . (IntMap.! eId) . _eClass)
+    nodes <- gets (_eNodes . (IntMap.! eId) . _eClass)
     let hasTerm = any isTerm nodes
         cands   = if hasTerm then filter isTerm (Set.toList nodes) else Set.toList nodes
 
@@ -443,7 +444,7 @@ getExpressionFrom eId' = do
 getAllExpressionsFrom :: Monad m => EClassId -> EGraphST m [Fix SRTree]
 getAllExpressionsFrom eId' = do
   eId <- canonical eId'
-  nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! eId) . _eClass)
+  nodes <- gets (Set.toList . _eNodes . (IntMap.! eId) . _eClass)
   go nodes
   where
     go []     = pure []
@@ -467,7 +468,7 @@ getNExpressionsFrom' :: Monad m => Int -> Int -> EClassId -> EGraphST m [Fix SRT
 getNExpressionsFrom' _ 0 _ = pure []
 getNExpressionsFrom' n d eId' = do
   eId <- canonical eId'
-  nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! eId) . _eClass)
+  nodes <- gets (Set.toList . _eNodes . (IntMap.! eId) . _eClass)
   (concat <$> go n d nodes)
   where
     isTerm (Var _) = True
@@ -503,7 +504,7 @@ getNEclassFrom' :: Monad m => Int -> Int -> EClassId -> EGraphST m [[EClassId]]
 getNEclassFrom' _ 0 _ = pure []
 getNEclassFrom' n d eId' = do
   eId <- canonical eId'
-  nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! eId) . _eClass)
+  nodes <- gets (Set.toList . _eNodes . (IntMap.! eId) . _eClass)
   (Prelude.map (eId:) <$> go n d nodes)
   where
     --go :: Int -> Int -> [ENode] -> EGraphST m [[EClassId]]
@@ -534,7 +535,7 @@ getAllChildEClasses eId' = do
     hasNoTerminal :: [ENode] -> Bool
     hasNoTerminal = all (not . null . childrenOf) 
     getNodes :: Monad m => EClassId -> EGraphST m [ENode]
-    getNodes n = gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! n) . _eClass)
+    getNodes n = gets (Set.toList . _eNodes . (IntMap.! n) . _eClass)
 
     go :: Monad m => [Int] -> IntSet.IntSet -> EGraphST m IntSet.IntSet
     go [] visited = pure visited
@@ -589,7 +590,7 @@ getRndExpressionFrom eId' = do
     eId <- canonical eId'
     nodes <- gets (Set.toList . _eNodes . (IntMap.! eId) . _eClass)
     n <- lift $ randomFrom nodes
-    Fix <$> case decodeEnode n of
+    Fix <$> case n of
               Bin op l r -> Bin op <$> getRndExpressionFrom l <*> getRndExpressionFrom r
               Uni f t    -> Uni f <$> getRndExpressionFrom t
               Var ix     -> pure $ Var ix

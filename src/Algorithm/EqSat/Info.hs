@@ -26,13 +26,14 @@ import Data.SRTree
 import Data.SRTree.Eval (evalFun, evalOp, Target)
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as Set
+import qualified Data.Set as RangeSet
 import qualified Data.IntSet as IntSet
 import Algorithm.EqSat.Egraph
 import Algorithm.EqSat.Queries
 
 import Data.Maybe
 import qualified Data.Set as TrueSet
-import Data.Sequence (Seq(..), (><))
+
 
 import Debug.Trace
 
@@ -133,11 +134,7 @@ calculateHeights =
 
     getChildrenEC :: Monad m => EClassId -> EGraphST m [EClassId]
     getChildrenEC ec' = do ec <- canonical ec'
-                           gets (concatMap childrenOf' . _eNodes . (IntMap.! ec) . _eClass)
-
-    childrenOf' (_, -1, -1, _) = []
-    childrenOf' (_, e1, -1, _) = [e1]
-    childrenOf' (_, e1, e2, _) = [e1, e2]
+                           gets (concatMap childrenOf . _eNodes . (IntMap.! ec) . _eClass)
 
     go [] _    _ = pure ()
     go qs tabu h =
@@ -192,7 +189,7 @@ insertFitness eId' fit params = do
   if (isNothing oldFit)
     then modify' $ over (eDB . unevaluated) (IntSet.delete eId)
                  . over (eDB . fitRangeDB) (insertRange eId fit)
-                 . over (eDB . sizeFitDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith (><) sz Empty)
+                  . over (eDB . sizeFitDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith RangeSet.union sz RangeSet.empty)
                  . over (eDB . dlRangeDB) (insertRange eId f_compl)
     else modify' $ over (eDB . fitRangeDB) (insertRange eId fit . removeRange eId (fromJust oldFit))
 
@@ -205,7 +202,7 @@ insertDL eId fit' = do
       newEc   = ec{_info=newInfo}
   modify' $ over eClass (IntMap.insert eId newEc)
   modify' $ over (eDB . dlRangeDB) (insertRange eId fit)
-          . over (eDB . sizeDLDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith (><) sz Empty)
+          . over (eDB . sizeDLDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith RangeSet.union sz RangeSet.empty)
 
 -- | TODO: remove from here gets the best expression given the default cost function
 getBestExpr' :: Monad m => EClassId -> EGraphST m (Fix SRTree)
