@@ -46,14 +46,8 @@ type Scheduler a = State (IntMap Int) a
 eqSat :: Monad m => Fix SRTree -> [Rule] -> CostFun -> Int -> EGraphST m (Fix SRTree)
 eqSat expr rules costFun maxIt =
     do root <- fromTree costFun expr
-       (end, it) <- runEqSat costFun rules maxIt
-       best      <- getBestExpr root
-       --info      <- gets ((IntMap.! root) . _eClass)
-       --info2     <- gets ((IntMap.! 9) . _eClass)
-       --traceShow (info, info2) $
-       if not end -- if had an early stop
-         then do modify' (const emptyGraph) >> eqSat best rules costFun it -- reapplies eqsat on the best so far
-         else pure best
+       _ <- runEqSat costFun rules maxIt
+       getBestExpr root
 
 type CostMap = Map EClassId (Int, Fix SRTree)
 
@@ -99,9 +93,10 @@ recalculateBest costFun eid =
 
 -- | run equality saturation for a number of iterations
 runEqSat :: Monad m => CostFun -> [Rule] -> Int -> EGraphST m (Bool, Int)
-runEqSat costFun rules maxIter = go maxIter IntMap.empty
+runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
     where
         rules' = concatMap replaceEqRules rules
+        compiledRules = map (\r -> (r, compileToQuery (source r))) rules'
 
         -- replaces the equality rules with two one-way rules
         replaceEqRules :: Rule -> [Rule]
@@ -109,27 +104,39 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty
         replaceEqRules (p1 :==: p2) = [p1 :=> p2, p2 :=> p1]
         replaceEqRules (r :| cond)  = map (:| cond) $ replaceEqRules r
 
-        go it sch = do -- reset dirty flag before processing this iteration
-                       modify' $ over (eDB . changed) (const False)
+        go it sch compiled = do -- reset dirty flag before processing this iteration
+                                modify' $ over (eDB . changed) (const False)
 
-                       -- step 1: match the rules
-                       let matchSch        = matchWithScheduler it
-                           matchAll        = zipWithM matchSch [0..]
-                           (rules, sch')   = runState (matchAll rules') sch
+                                -- step 1: match the rules using cached compiled queries
+                                let matchSch  = matchWithScheduler it
+                                    adapted i (r, cq) = map (,cq) <$> matchSch i r
+                                    matchAll  = zipWithM adapted [0..]
+                                    (filtered, sch') = runState (matchAll compiled) sch
 
-                       -- step 2: apply matches and rebuild
-                       matches <- mapM (\rule -> map (rule,) <$> match (source rule)) $ concat rules
-                       mapM_ (uncurry (applyMatch costFun)) $ concat matches
-                       rebuild costFun
+                                -- step 2: apply matches and rebuild
+                                matches <- mapM (\(rule, (q, root)) -> map (rule,) <$> matchCached (q, root)) $ concat filtered
+                                mapM_ (uncurry (applyMatch costFun)) $ concat matches
+                                rebuild costFun
 
-                       -- check dirty flag: if no modifications occurred, we've saturated
-                       changed <- gets (_changed . _eDB)
-                       if it == 1 || not changed
-                          then pure (True, it)
-                          else do eClasses <- gets _eClass
-                                  if IntMap.size eClasses > 1500
-                                     then pure (False, it)
-                                     else go (it-1) sch'
+                                -- check dirty flag: if no modifications occurred, we've saturated
+                                changed <- gets (_changed . _eDB)
+                                if it == 1 || not changed
+                                   then pure (True, it)
+                                   else do eClasses <- gets _eClass
+                                           if IntMap.size eClasses > 1500
+                                             then throttle it sch' compiled
+                                             else go (it-1) sch' compiled
+
+        throttle it sch compiled = do
+          cleanMaps
+          eClasses <- gets _eClass
+          if IntMap.size eClasses <= 1500
+            then go (it-1) sch compiled
+            else do applySingleMergeOnlyEqSat costFun rules
+                    changed <- gets (_changed . _eDB)
+                    if it <= 1 || not changed
+                      then pure (False, it)  -- give up and return early stop
+                      else throttle (it-1) sch compiled
 
 -- | apply a single step of merge-only equality saturation
 applySingleMergeOnlyEqSat :: Monad m => CostFun -> [Rule] -> EGraphST m ()

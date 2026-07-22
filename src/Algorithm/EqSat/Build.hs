@@ -614,15 +614,7 @@ cleanMaps = do
     k' <- canonical k
     pure $ if k==k' then (Just (k,v)) else Nothing
   let eclassMap' = IntMap.fromList (catMaybes entries')
-  canon <- gets _canonicalMap
-  entries'' <- forM (IntMap.toList canon) $ \(k,v) -> do
-    pure $ if k==v then Just (k,v) else Nothing
-  let canon' = IntMap.fromList (catMaybes entries'')
+  canon' <- gets (IntMap.filterWithKey (\k v -> k == v) . _canonicalMap)
   eDB' <- gets _eDB
   put $ EGraph canon' enode2eclass' eclassMap' eDB'
-  forceState
 {-# INLINE cleanMaps #-}
-
-forceState :: Monad m => StateT s m ()
-forceState = get >>= \ !_ -> return ()
-{-# INLINE forceState #-}

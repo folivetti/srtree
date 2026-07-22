@@ -178,11 +178,14 @@ cleanDB = modify' $ over (eDB. patDB) (const Map.empty)
 -- | Returns the substitution rules
 -- for every match of the pattern `source` inside the e-graph.
 match :: Monad m => Pattern -> EGraphST m [(Map ClassOrVar ClassOrVar, ClassOrVar)]
-match src = do
-  let (q, root) = compileToQuery src     -- compile the source of the pattern into a query
+match src = matchCached (compileToQuery src)
+{-# INLINE match #-}
+
+matchCached :: Monad m => (Query, ClassOrVar) -> EGraphST m [(Map ClassOrVar ClassOrVar, ClassOrVar)]
+matchCached (q, root) = do
   substs <- genericJoin q root               -- find the substituion rules for this pattern
   pure [(s, s Map.! root) | s <- substs, Map.size s > 0]
-{-# INLINE match #-}
+{-# INLINE matchCached #-}
 
 -- | Returns a Query (list of atoms) of a pattern
 compileToQuery :: Pattern -> (Query, ClassOrVar)
