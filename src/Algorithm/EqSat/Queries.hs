@@ -39,7 +39,7 @@ getEClassesThat p = do
         where
             go :: Monad m => [EClassId] -> EGraphST m [EClassId]
             go [] = pure []
-            go (ecId:ecs) = do ec <- gets (p . (IntMap.! ecId) . _eClass)
+            go (ecId:ecs) = do ec <- p <$> getEClass ecId
                                ecs' <- go ecs
                                if ec
                                   then pure (ecId:ecs')
@@ -47,7 +47,7 @@ getEClassesThat p = do
 
 updateFitness :: Monad m => Double -> EClassId -> EGraphST m ()
 updateFitness f ecId = do
-   ec   <- gets ((IntMap.! ecId) . _eClass)
+   ec   <- getEClass ecId
    let info = _info ec
    modify' $ over eClass (IntMap.insert ecId ec{_info=info{_fitness = Just f}})
 
@@ -68,15 +68,16 @@ getTopECLassThat b n p = do
     go :: Monad m => Int -> [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
     go 0 bests rt = pure bests
     go m bests rt = case RangeSet.maxView rt of
-                       Nothing      -> pure bests
-                       Just (y, t) -> do let x = snd y
-                                         ecId <- canonical x
-                                         ec <- gets ((IntMap.! ecId) . _eClass)
-                                         if (maybe True (isInfinite) . _fitness . _info $ ec)
-                                           then go m bests t
-                                           else if p ec
-                                                  then go (m-1) (ecId:bests) t
-                                                  else go m bests t
+                       Nothing -> pure bests
+                       Just (y, t) ->
+                         let x = snd y
+                         in do ecId <- canonical x
+                               ec <- getEClass ecId
+                               if (maybe True (isInfinite) . _fitness . _info $ ec)
+                                 then go m bests t
+                                 else if p ec
+                                   then go (m-1) (ecId:bests) t
+                                   else go m bests t
 
 getTopEClassInRange :: Monad m => Bool -> Int -> (EClass -> Double) -> [(Double, Double)] -> EGraphST m [EClassId]
 getTopEClassInRange b n p range = do
@@ -94,17 +95,18 @@ getTopEClassInRange b n p range = do
     go _ bests []      _ = pure bests 
     go 0 bests (r:rs) rt = go n bests rs rt
     go m bests (r:rs) rt = case RangeSet.maxView rt of
-                             Nothing      -> pure bests
-                             Just (y, t) -> do let x = snd y
-                                               ecId <- canonical x
-                                               ec <- gets ((IntMap.! ecId) . _eClass)
-                                               if (maybe True (isInfinite) . _fitness . _info $ ec)
-                                                 then go m bests (r:rs) t
-                                                 else do let v = p ec 
-                                                         case (v `inRange` r) of
-                                                           0  -> go (m-1) (ecId:bests) (r:rs) t -- it is in range, go to the next range 
-                                                           -1 -> go n bests rs (RangeSet.insert y t) -- it is smaller than the range, get the first n of the next range
-                                                           1  -> go m bests (r:rs) t -- y is still greater than the range, keep looking in the same range
+                             Nothing -> pure bests
+                             Just (y, t) ->
+                               let x = snd y
+                               in do ecId <- canonical x
+                                     ec <- getEClass ecId
+                                     if (maybe True (isInfinite) . _fitness . _info $ ec)
+                                       then go m bests (r:rs) t
+                                       else do let v = p ec
+                                               case (v `inRange` r) of
+                                                 0  -> go (m-1) (ecId:bests) (r:rs) t
+                                                 -1 -> go n bests rs (RangeSet.insert y t)
+                                                 1  -> go m bests (r:rs) t
 
 getTopECLassIn :: Monad m => Bool -> Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
 getTopECLassIn b n p ecs' = do
@@ -116,15 +118,16 @@ getTopECLassIn b n p ecs' = do
     go :: Monad m => Int -> [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
     go 0 bests rt = pure bests
     go m bests rt = case RangeSet.maxView rt of
-                       Nothing      -> pure bests
-                       Just (y, t) -> do let x = snd y
-                                         ecId <- canonical x
-                                         ec <- gets ((IntMap.! ecId) . _eClass)
-                                         if (maybe True (isInfinite) . _fitness . _info $ ec)
-                                           then go m bests t
-                                           else if ecId `Set.member` ecs && p ec
-                                                  then go (m-1) (ecId:bests) t
-                                                  else go m bests t
+                       Nothing -> pure bests
+                       Just (y, t) ->
+                         let x = snd y
+                         in do ecId <- canonical x
+                               ec <- getEClass ecId
+                               if (maybe True (isInfinite) . _fitness . _info $ ec)
+                                 then go m bests t
+                                 else if ecId `Set.member` ecs && p ec
+                                   then go (m-1) (ecId:bests) t
+                                   else go m bests t
 
 getTopECLassNotIn :: Monad m => Bool -> Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
 getTopECLassNotIn b n p ecs' = do
@@ -137,15 +140,16 @@ getTopECLassNotIn b n p ecs' = do
     go :: Monad m => Int -> [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
     go 0 bests rt = pure bests
     go m bests rt = case RangeSet.maxView rt of
-                       Nothing      -> pure bests
-                       Just (y, t) -> do let x = snd y
-                                         ecId <- canonical x
-                                         ec <- gets ((IntMap.! ecId) . _eClass)
-                                         if (maybe True (isInfinite) . _fitness . _info $ ec)
-                                           then go m bests t
-                                           else if not (ecId `Set.member` ecs) && p ec
-                                                  then go (m-1) (ecId:bests) t
-                                                  else go m bests t
+                       Nothing -> pure bests
+                       Just (y, t) ->
+                         let x = snd y
+                         in do ecId <- canonical x
+                               ec <- getEClass ecId
+                               if (maybe True (isInfinite) . _fitness . _info $ ec)
+                                 then go m bests t
+                                 else if not (ecId `Set.member` ecs) && p ec
+                                   then go (m-1) (ecId:bests) t
+                                   else go m bests t
 
 getAllEvaluatedEClasses :: Monad m => EGraphST m [EClassId]
 getAllEvaluatedEClasses = do
@@ -154,21 +158,20 @@ getAllEvaluatedEClasses = do
   where
     go :: Monad m => [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
     go bests rt = case RangeSet.maxView rt of
-                    Nothing      -> pure bests
-                    Just (y, t) -> do let x = snd y
-                                      ecId <- canonical x
-                                      ec <- gets ((IntMap.! ecId) . _eClass)
-                                      if (maybe True (isInfinite) . _fitness . _info $ ec)
-                                        then go bests t
-                                        else go (ecId:bests) t
+                    Nothing -> pure bests
+                    Just (y, t) ->
+                      let x = snd y
+                      in do ecId <- canonical x
+                            ec <- getEClass ecId
+                            if (maybe True (isInfinite) . _fitness . _info $ ec)
+                              then go bests t
+                              else go (ecId:bests) t
 
 getTopEClassWithSize :: Monad m => Bool -> Int -> Int -> EGraphST m [EClassId]
 getTopEClassWithSize b sz n = do
    let fun = if b then _sizeFitDB else _sizeDLDB
    gets (go n [] . (IntMap.!? sz) . fun . _eDB)
-    -- >>= mapM canonical
   where
-    -- go :: Monad m => Int -> [EClassId] -> Maybe (RangeTree Double) -> EGraphST m [EClassId]
     go _ bests Nothing   = []
     go 0 bests (Just rt) = bests
     go m bests (Just rt) = case RangeSet.maxView rt of

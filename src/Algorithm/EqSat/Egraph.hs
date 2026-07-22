@@ -82,12 +82,12 @@ getWithinRange lb ub rt =
       (inR, _) = RangeSet.split (ub, maxBound) ge
   in map snd (RangeSet.toList inR)
 
-getSmallest :: Ord a => RangeTree a -> (a, EClassId)
-getSmallest = maybe (error "empty range tree") id . RangeSet.lookupMin
+getSmallest :: Ord a => RangeTree a -> Maybe (a, EClassId)
+getSmallest = RangeSet.lookupMin
 {-# INLINE getSmallest #-}
 
-getGreatest :: Ord a => RangeTree a -> (a, EClassId)
-getGreatest = maybe (error "empty range tree") id . RangeSet.lookupMax
+getGreatest :: Ord a => RangeTree a -> Maybe (a, EClassId)
+getGreatest = RangeSet.lookupMax
 {-# INLINE getGreatest #-}
 
 data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId   -- maps an e-class id to its canonical form
@@ -240,9 +240,9 @@ canonize :: Monad m => ENode -> EGraphST m ENode
 canonize = mapM canonical  -- applies canonical to the children
 {-# INLINE canonize #-}
 
--- | gets an e-class with id `c`
+-- | gets an e-class with id `c` (auto-canonizes)
 getEClass :: Monad m => EClassId -> EGraphST m EClass
-getEClass c = gets ((IntMap.! c) . _eClass)
+getEClass c = do c' <- canonical c; gets ((IntMap.! c') . _eClass)
 {-# INLINE getEClass #-}
 
 -- | Creates a singleton trie from an e-class id
@@ -252,28 +252,30 @@ trie eid = IntTrie
 
 -- | Check whether an e-class is a constant value
 isConst :: Monad m => EClassId -> EGraphST m Bool
-isConst eid = do ec <- gets ((IntMap.! eid) . _eClass)
+isConst eid = do ec <- getEClass eid
                  case (_consts . _info) ec of
                    ConstVal _ -> pure True
                    _          -> pure False
 {-# INLINE isConst #-}
 
 getFitness :: Monad m => EClassId -> EGraphST m (Maybe Double)
-getFitness c = gets (_fitness . _info . (IntMap.! c) . _eClass)
+getFitness c = (_fitness . _info) <$> getEClass c
 {-# INLINE getFitness #-}
 getTheta :: Monad m => EClassId -> EGraphST m ([Target])
-getTheta c = gets (_theta . _info . (IntMap.! c) . _eClass)
+getTheta c = (_theta . _info) <$> getEClass c
 {-# INLINE getTheta #-}
 getSize :: Monad m => EClassId -> EGraphST m Int
-getSize c = gets (_size . _info . (IntMap.! c) . _eClass)
+getSize c = (_size . _info) <$> getEClass c
 {-# INLINE getSize #-}
 isSizeOf :: (Int -> Bool) -> EClass -> Bool
 isSizeOf p = p . _size . _info
 {-# INLINE isSizeOf #-}
 getBestFitness :: Monad m => EGraphST m (Maybe Double)
 getBestFitness = do
-    bec <- (gets (snd . getGreatest . _fitRangeDB . _eDB) >>= canonical)
-    gets (_fitness . _info . (IntMap.! bec) . _eClass)
+    mbec <- gets (fmap snd . getGreatest . _fitRangeDB . _eDB)
+    case mbec of
+      Just bec -> (_fitness . _info) <$> getEClass bec
+      Nothing  -> pure Nothing
 getDL :: Monad m => EClassId -> EGraphST m (Maybe Double)
-getDL c = gets (_dl . _info . (IntMap.! c) . _eClass)
+getDL c = (_dl . _info) <$> getEClass c
 {-# INLINE getDL #-}

@@ -42,25 +42,27 @@ import Debug.Trace (trace, traceShow)
 
 -- | adds a new or existing e-node (merging if necessary)
 add :: Monad m => CostFun -> ENode -> EGraphST m EClassId
-add costFun enode =
-  do enode''   <- canonize enode                                             -- canonize e-node
-     constEnode <- calculateConsts enode''
-     enode' <- case constEnode of
-                 ConstVal x -> pure $ Const x
-                 ParamIx  x -> pure $ Param x
-                 _          -> case enode'' of
-                                 Bin Sub c1 c2 -> do constType <- gets (_consts . _info . (IntMap.! c2) . _eClass)
-                                                     pure $ case constType of
-                                                              ParamIx x -> Bin Add c1 c2
-                                                              _         -> enode''
-                                 Bin Div c1 c2 -> do constType <- gets (_consts . _info . (IntMap.! c2) . _eClass)
-                                                     pure $ case constType of
-                                                              ParamIx x -> Bin Mul c1 c2
-                                                              _         -> enode''
-                                 _             -> pure $ enode''
+add costFun enode = do
+  enode''   <- canonize enode
+  constEnode <- calculateConsts enode''
+  enode' <- case constEnode of
+              ConstVal x -> pure $ Const x
+              ParamIx  x -> pure $ Param x
+              _          -> case enode'' of
+                               Bin Sub c1 c2 ->
+                                 do constType <- (_consts . _info) <$> getEClass c2
+                                    pure $ case constType of
+                                      ParamIx x -> Bin Add c1 c2
+                                      _         -> enode''
+                               Bin Div c1 c2 ->
+                                 do constType <- (_consts . _info) <$> getEClass c2
+                                    pure $ case constType of
+                                      ParamIx x -> Bin Mul c1 c2
+                                      _         -> enode''
+                               _             -> pure $ enode''
 
-     maybeEid <- gets ((Map.!? enode') . _eNodeToEClass)                -- check if canonical e-node exists
-     case maybeEid of
+  maybeEid <- gets (Map.lookup enode' . _eNodeToEClass)
+  case maybeEid of
        Just eid -> pure eid
        Nothing  -> do
          curId <- gets (_nextId . _eDB)                             -- get the next available e-class id
@@ -109,7 +111,7 @@ repair costFun ecId enode =
   do modify' $ over eNodeToEClass (Map.delete enode)
      enode'  <- canonize enode
      ecId'   <- canonical ecId
-     doExist <- gets ((Map.!? enode') . _eNodeToEClass)
+     doExist <- gets (Map.lookup enode' . _eNodeToEClass)
      case doExist of
         Just ecIdCanon -> do mergedId <- merge costFun ecIdCanon ecId'
                              modify' $ over eNodeToEClass (Map.insert enode' mergedId)
@@ -190,20 +192,20 @@ merge costFun c1 c2 =
 
     updateFitnessDB :: Monad m => EClass -> EClassId -> EClass -> EClassId -> EClassId -> EClass -> EClassId -> EGraphST m ()
     updateFitnessDB newC led ledC ledO sub subC subO =
-      if (isJust fitNew)
-       then do
-        when (fitNew /= fitLed) $ do
-          if isNothing fitLed
-             then modify' $ over (eDB . unevaluated) (IntSet.delete led . IntSet.delete ledO)
-             else modify' $ over (eDB . fitRangeDB) (removeRange led (fromJust fitLed) . removeRange ledO (fromJust fitLed))
-                          . over (eDB . sizeFitDB) (IntMap.adjust (removeRange ledO (fromJust fitLed) . removeRange led (fromJust fitLed)) szLed)
-          modify' $ over (eDB . fitRangeDB) (insertRange led (fromJust fitNew))
-                  . over (eDB . sizeFitDB) (IntMap.adjust (insertRange led (fromJust fitNew)) szNew . IntMap.insertWith RangeSet.union szNew RangeSet.empty)
-        if isNothing fitSub
-           then modify' $ over (eDB . unevaluated) (IntSet.delete sub . IntSet.delete subO)
-           else modify' $ over (eDB . fitRangeDB) (removeRange sub (fromJust fitSub) . removeRange subO (fromJust fitSub))
-                        . over (eDB . sizeFitDB) (IntMap.adjust (removeRange subO (fromJust fitSub) . removeRange sub (fromJust fitSub)) szSub)
-       else modify' $ over (eDB . unevaluated) (IntSet.insert led . IntSet.delete ledO . IntSet.delete sub . IntSet.delete subO)
+      case fitNew of
+        Nothing -> modify' $ over (eDB . unevaluated) (IntSet.insert led . IntSet.delete ledO . IntSet.delete sub . IntSet.delete subO)
+        Just fn -> do
+          when (fitNew /= fitLed) $ do
+            modify' $ case fitLed of
+              Nothing -> over (eDB . unevaluated) (IntSet.delete led . IntSet.delete ledO)
+              Just fl -> over (eDB . fitRangeDB) (removeRange led fl . removeRange ledO fl)
+                       . over (eDB . sizeFitDB) (IntMap.adjust (removeRange ledO fl . removeRange led fl) szLed)
+            modify' $ over (eDB . fitRangeDB) (insertRange led fn)
+                    . over (eDB . sizeFitDB) (IntMap.adjust (insertRange led fn) szNew . IntMap.insertWith RangeSet.union szNew RangeSet.empty)
+          modify' $ case fitSub of
+            Nothing -> over (eDB . unevaluated) (IntSet.delete sub . IntSet.delete subO)
+            Just fs -> over (eDB . fitRangeDB) (removeRange sub fs . removeRange subO fs)
+                     . over (eDB . sizeFitDB) (IntMap.adjust (removeRange subO fs . removeRange sub fs) szSub)
       where
         fitNew = (_fitness . _info) newC
         fitLed = (_fitness . _info) ledC
@@ -216,31 +218,28 @@ merge costFun c1 c2 =
 modifyEClass :: Monad m => CostFun -> EClassId -> EGraphST m EClassId
 modifyEClass costFun ecId =
   do ec <- getEClass ecId
-     -- let term = filter isTerm (Set.toList $ _eNodes ec)
      case (_consts . _info) ec of
-       ConstVal x -> do
-         let en = Const x
-         c <- calculateCost costFun en
-         let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
-         maybeEid <- gets ((Map.!? en) . _eNodeToEClass)
-         modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.singleton en , _info = infoEc})
-         when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (IntSet.insert ecId)
-         case maybeEid of
-           Nothing   -> pure ecId
-           Just eid' -> merge costFun eid' ecId
+       ConstVal x ->
+         do let en = Const x
+            c <- calculateCost costFun en
+            let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
+            maybeEid <- gets (Map.lookup en . _eNodeToEClass)
+            modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.singleton en , _info = infoEc})
+            when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (IntSet.insert ecId)
+            case maybeEid of
+              Nothing   -> pure ecId
+              Just eid' -> merge costFun eid' ecId
 
-       ParamIx x -> do
-         let en = Param x
-         c <- calculateCost costFun en
-         ens <- gets (_eNodes . (IntMap.! ecId) . _eClass)
-         let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
-         maybeEid <- gets ((Map.!? en) . _eNodeToEClass)
-         modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.insert en (_eNodes ec), _info = infoEc})
-         when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (IntSet.insert ecId)
-         -- TODO: what happen to the orphans?
-         case maybeEid of
-           Nothing   -> pure ecId
-           Just eid' -> merge costFun eid' ecId
+       ParamIx x ->
+         do let en = Param x
+            c <- calculateCost costFun en
+            let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
+            maybeEid <- gets (Map.lookup en . _eNodeToEClass)
+            modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.insert en (_eNodes ec), _info = infoEc})
+            when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (IntSet.insert ecId)
+            case maybeEid of
+              Nothing   -> pure ecId
+              Just eid' -> merge costFun eid' ecId
 
        _ -> pure ecId
 
@@ -276,14 +275,14 @@ createDBBest = do modify' $ over (eDB . patDB) (const Map.empty)
 addToDB :: Monad m => ENode -> EClassId -> EGraphST m () -- State DB ()
 addToDB enode' eid = do
   eid' <- canonical eid
-  isConst <- gets (_consts . _info . (IntMap.! eid') . _eClass)
+  isConst <- (_consts . _info) <$> getEClass eid'
   let enode = case isConst of
                 ConstVal x -> Const x
                 ParamIx  x -> Param x
                 _          -> enode'
   let ids = eid : childrenOf enode -- we will add the e-class id and the children ids
       op  = getOperator enode    -- changes Bin op l r to Bin op () () so `op` as a single entry in the DB
-  trie <- gets ((Map.!? op) . _patDB . _eDB)       -- gets the entry for op, if it exists
+  trie <- gets (Map.lookup op . _patDB . _eDB)
   case populate trie ids of      -- populates the trie
     Nothing -> pure ()
     Just t  -> modify' $ over (eDB . patDB) (Map.insert op t) -- if something was created, insert back into the DB
@@ -297,7 +296,7 @@ populate Nothing eids = foldr f Nothing eids
     f :: EClassId -> Maybe IntTrie -> Maybe IntTrie
     f eid (Just t) = Just $ IntTrie (IntMap.singleton eid t)
     f eid Nothing  = Just $ IntTrie (IntMap.singleton eid (IntTrie IntMap.empty))
-populate (Just tId) (eid:eids) = let nextTrie = _trie tId IntMap.!? eid
+populate (Just tId) (eid:eids) = let nextTrie = IntMap.lookup eid (_trie tId)
                                      val      = fromMaybe (IntTrie IntMap.empty) $ populate nextTrie eids
                                   in Just $ IntTrie (IntMap.insert eid val (_trie tId))
 {-# INLINE populate #-}
@@ -344,7 +343,7 @@ applyMergeOnlyMatch costFun rule match' =
 -- | gets the e-node of the target of the rule
 -- TODO: add consts and modify
 classOfENode :: Monad m => CostFun -> Map ClassOrVar ClassOrVar -> Pattern -> EGraphST m (Maybe EClassId)
-classOfENode costFun subst (VarPat c)     = do let maybeEid = getInt <$> subst Map.!? Right (fromEnum c)
+classOfENode costFun subst (VarPat c)     = do let maybeEid = getInt <$> Map.lookup (Right (fromEnum c)) subst
                                                case maybeEid of
                                                  Nothing  -> pure Nothing
                                                  Just eid -> Just <$> canonical eid
@@ -359,7 +358,7 @@ classOfENode costFun subst (Fixed target) = do newChildren <- mapM (classOfENode
                                                                  then do eid <- add costFun new_enode
                                                                          rebuild costFun -- eid new_enode
                                                                          pure (Just eid)
-                                                                 else gets ((Map.!? new_enode) . _eNodeToEClass)
+                                                                 else gets (Map.lookup new_enode . _eNodeToEClass)
 {-# INLINE classOfENode #-}
 
 -- | adds the target of the rule into the e-graph
@@ -371,11 +370,10 @@ reprPrat costFun subst (Fixed target) = do newChildren <- mapM (reprPrat costFun
 
 isValidHeight :: Monad m => (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m Bool
 isValidHeight match = do
-    h <- case snd match of
-           Left ec -> do ec' <- canonical ec
-                         gets (_height . (IntMap.! ec') . _eClass)
-           Right _ -> pure 0
-    pure $ h < 15
+      h <- case snd match of
+             Left ec -> _height <$> getEClass ec
+             Right _ -> pure 0
+      pure $ h < 15
 {-# INLINE isValidHeight #-}
 
 -- | returns `True` if the condition of a rule is valid for that match
@@ -403,44 +401,33 @@ countParamsUniqEg eg rt = countParamsUniq . runIdentity $ getBestExpr rt `evalSt
 
 -- | gets the best expression given the default cost function
 getBestExpr :: Monad m => EClassId -> EGraphST m (Fix SRTree)
-getBestExpr eid = do eid' <- canonical eid
-                     best <- gets (_best . _info . (IntMap.! eid') . _eClass)
+getBestExpr eid = do best <- (_best . _info) <$> getEClass eid
                      childs <- mapM getBestExpr $ childrenOf best
                      pure . Fix $ replaceChildren childs best
-{-# INLINE getBestExpr #-}
 
-getBestENode eid = do eid' <- canonical eid
-                      gets (_best . _info . (IntMap.! eid') . _eClass)
+getBestENode eid = (_best . _info) <$> getEClass eid
 {-# INLINE getBestENode #-}
 
 -- | returns one expression rooted at e-class `eId`
 -- TODO: avoid loopings
 getExpressionFrom :: Monad m => EClassId -> EGraphST m (Fix SRTree)
 getExpressionFrom eId' = do
-    eId <- canonical eId'
-    nodes <- gets (_eNodes . (IntMap.! eId) . _eClass)
-    let hasTerm = any isTerm nodes
-        cands   = if hasTerm then filter isTerm (Set.toList nodes) else Set.toList nodes
-
-    Fix <$> case head $ Set.toList nodes of
-      Bin op l r -> Bin op <$> getExpressionFrom l <*> getExpressionFrom r
-      Uni f t    -> Uni f <$> getExpressionFrom t
-      Var ix     -> pure $ Var ix
-      Const x    -> pure $ Const x
-      Param ix   -> pure $ Param ix
-  where
-    isTerm (Var _) = True
-    isTerm (Const _) = True
-    isTerm (Param _) = True
-    isTerm _ = False
+    nodes <- _eNodes <$> getEClass eId'
+    case Set.toList nodes of
+      (n:_) -> Fix <$> case n of
+        Bin op l r -> Bin op <$> getExpressionFrom l <*> getExpressionFrom r
+        Uni f t    -> Uni f <$> getExpressionFrom t
+        Var ix     -> pure $ Var ix
+        Const x    -> pure $ Const x
+        Param ix   -> pure $ Param ix
+      [] -> error "getExpressionFrom: empty eclass"
 {-# INLINE getExpressionFrom #-}
 
 -- | returns all expressions rooted at e-class `eId`
 -- TODO: check for infinite list
 getAllExpressionsFrom :: Monad m => EClassId -> EGraphST m [Fix SRTree]
 getAllExpressionsFrom eId' = do
-  eId <- canonical eId'
-  nodes <- gets (Set.toList . _eNodes . (IntMap.! eId) . _eClass)
+  nodes <- Set.toList . _eNodes <$> getEClass eId'
   go nodes
   where
     go []     = pure []
@@ -463,8 +450,7 @@ getNExpressionsFrom n eId' = getNExpressionsFrom' n 15 eId'
 getNExpressionsFrom' :: Monad m => Int -> Int -> EClassId -> EGraphST m [Fix SRTree]
 getNExpressionsFrom' _ 0 _ = pure []
 getNExpressionsFrom' n d eId' = do
-  eId <- canonical eId'
-  nodes <- gets (Set.toList . _eNodes . (IntMap.! eId) . _eClass)
+  nodes <- Set.toList . _eNodes <$> getEClass eId'
   (concat <$> go n d nodes)
   where
     isTerm (Var _) = True
@@ -500,7 +486,7 @@ getNEclassFrom' :: Monad m => Int -> Int -> EClassId -> EGraphST m [[EClassId]]
 getNEclassFrom' _ 0 _ = pure []
 getNEclassFrom' n d eId' = do
   eId <- canonical eId'
-  nodes <- gets (Set.toList . _eNodes . (IntMap.! eId) . _eClass)
+  nodes <- Set.toList . _eNodes <$> getEClass eId'
   (Prelude.map (eId:) <$> go n d nodes)
   where
     --go :: Int -> Int -> [ENode] -> EGraphST m [[EClassId]]
@@ -531,7 +517,7 @@ getAllChildEClasses eId' = do
     hasNoTerminal :: [ENode] -> Bool
     hasNoTerminal = all (not . null . childrenOf) 
     getNodes :: Monad m => EClassId -> EGraphST m [ENode]
-    getNodes n = gets (Set.toList . _eNodes . (IntMap.! n) . _eClass)
+    getNodes n = Set.toList . _eNodes <$> getEClass n
 
     go :: Monad m => [Int] -> IntSet.IntSet -> EGraphST m IntSet.IntSet
     go [] visited = pure visited
@@ -552,12 +538,10 @@ getAllChildEClasses eId' = do
 
 getAllChildBestEClasses :: Monad m => EClassId -> EGraphST m [EClassId]
 getAllChildBestEClasses eId' = do
-  eId <- canonical eId'
-  nub <$> go eId
-
+  nub <$> go eId'
   where
-    go :: Monad m => Int -> EGraphST m [Int]
-    go n = do node <- gets (_best . _info . (IntMap.! n) . _eClass)
+    go :: Monad m => EClassId -> EGraphST m [EClassId]
+    go n = do node <- (_best . _info) <$> getEClass n
               let hasTerminal = (null . childrenOf) node
               eids <- mapM canonical $ childrenOf node
               if hasTerminal
@@ -567,12 +551,10 @@ getAllChildBestEClasses eId' = do
 
 getAllChildBestEClassesRep :: Monad m => EClassId -> EGraphST m [EClassId]
 getAllChildBestEClassesRep eId' = do
-  eId <- canonical eId'
-  go eId
-
+  go eId'
   where
-    go :: Monad m => Int -> EGraphST m [Int]
-    go n = do node <- gets (_best . _info . (IntMap.! n) . _eClass)
+    go :: Monad m => EClassId -> EGraphST m [EClassId]
+    go n = do node <- (_best . _info) <$> getEClass n
               let hasTerminal = (null . childrenOf) node
               eids <- mapM canonical $ childrenOf node
               if hasTerminal
@@ -583,8 +565,7 @@ getAllChildBestEClassesRep eId' = do
 -- | returns a random expression rooted at e-class `eId`
 getRndExpressionFrom :: EClassId -> EGraphST (State StdGen) (Fix SRTree)
 getRndExpressionFrom eId' = do
-    eId <- canonical eId'
-    nodes <- gets (Set.toList . _eNodes . (IntMap.! eId) . _eClass)
+    nodes <- Set.toList . _eNodes <$> getEClass eId'
     n <- lift $ randomFrom nodes
     Fix <$> case n of
               Bin op l r -> Bin op <$> getRndExpressionFrom l <*> getRndExpressionFrom r

@@ -31,7 +31,6 @@ import qualified Data.IntSet as IntSet
 import Algorithm.EqSat.Egraph
 import Algorithm.EqSat.Queries
 
-import Data.Maybe
 import qualified Data.Set as TrueSet
 
 
@@ -133,8 +132,8 @@ calculateHeights =
          setHeight (min h x) eId
 
     getChildrenEC :: Monad m => EClassId -> EGraphST m [EClassId]
-    getChildrenEC ec' = do ec <- canonical ec'
-                           gets (concatMap childrenOf . _eNodes . (IntMap.! ec) . _eClass)
+    getChildrenEC ec' = do ec <- getEClass ec'
+                           pure $ concatMap childrenOf (_eNodes ec)
 
     go [] _    _ = pure ()
     go qs tabu h =
@@ -179,24 +178,23 @@ insertFitness eId' fit params = do
   tree <- getBestExpr' eId
   let p = fromIntegral (length params)
   let f_compl = countNodes tree * log (countUniqueTokens tree) + p * (log (2 * pi * exp(1 - log 3)) - log p) / 2.0
-  ec <- gets ((IntMap.! eId) . _eClass)
+  ec <- getEClass eId
   let oldFit  = _fitness . _info $ ec
-  --when (oldFit < Just fit) $ do
   let newInfo = (_info ec){_fitness = Just fit, _theta = params}
       newEc   = ec{_info = newInfo}
       sz = _size newInfo
   modify' $ over eClass (IntMap.insert eId newEc)
-  if (isNothing oldFit)
-    then modify' $ over (eDB . unevaluated) (IntSet.delete eId)
+  case oldFit of
+    Nothing -> modify' $ over (eDB . unevaluated) (IntSet.delete eId)
                  . over (eDB . fitRangeDB) (insertRange eId fit)
-                  . over (eDB . sizeFitDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith RangeSet.union sz RangeSet.empty)
+                 . over (eDB . sizeFitDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith RangeSet.union sz RangeSet.empty)
                  . over (eDB . dlRangeDB) (insertRange eId f_compl)
-    else modify' $ over (eDB . fitRangeDB) (insertRange eId fit . removeRange eId (fromJust oldFit))
+    Just oldVal -> modify' $ over (eDB . fitRangeDB) (insertRange eId fit . removeRange eId oldVal)
 
 insertDL :: Monad m => EClassId -> Double -> EGraphST m ()
 insertDL eId fit' = do
   let fit = negate fit'
-  ec <- gets ((IntMap.! eId) . _eClass)
+  ec <- getEClass eId
   let sz = _size . _info $ ec
       newInfo = (_info ec){_dl = Just fit'}
       newEc   = ec{_info=newInfo}
@@ -206,8 +204,9 @@ insertDL eId fit' = do
 
 -- | TODO: remove from here gets the best expression given the default cost function
 getBestExpr' :: Monad m => EClassId -> EGraphST m (Fix SRTree)
-getBestExpr' eid = do eid' <- canonical eid
-                      best <- gets (_best . _info . (IntMap.! eid') . _eClass)
-                      childs <- mapM getBestExpr' $ childrenOf best
-                      pure . Fix $ replaceChildren childs best
+getBestExpr' eid = do
+  eid' <- canonical eid
+  best <- (_best . _info) <$> getEClass eid'
+  childs <- mapM getBestExpr' $ childrenOf best
+  pure . Fix $ replaceChildren childs best
 

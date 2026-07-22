@@ -30,7 +30,6 @@ import Control.Monad ( when, replicateM, forM, forM_ )
 import Numeric.Optimization.NLOPT
 import Algorithm.EqSat.Info
 import Algorithm.EqSat.Build
-import Data.Maybe ( fromJust )
 import Data.SRTree.Random
 import Algorithm.EqSat.Queries
 import Data.List ( maximumBy )
@@ -115,25 +114,24 @@ updateIfNothing fitFun ec = do
 pickRndSubTree :: RndEGraph (Maybe EClassId)
 pickRndSubTree = do ecIds <- gets (IntSet.toList . _unevaluated . _eDB)
                     if not (null ecIds)
-                          then do rndId' <- rnd $ randomFrom ecIds
-                                  rndId  <- canonical rndId'
-                                  constType <- gets (_consts . _info . (IM.! rndId) . _eClass)
-                                  case constType of
-                                    NotConst -> pure $ Just rndId
-                                    _        -> pure Nothing
-                          else pure Nothing
+                      then do rndId' <- rnd $ randomFrom ecIds
+                              rndId  <- canonical rndId'
+                              constType <- (_consts . _info) <$> getEClass rndId
+                              case constType of
+                                NotConst -> pure $ Just rndId
+                                _        -> pure Nothing
+                      else pure Nothing
 
 getParetoEcsUpTo n maxSize = concat <$> forM [1..maxSize] (\i -> getTopFitEClassWithSize i n)
 getParetoDLEcsUpTo n maxSize = concat <$> forM [1..maxSize] (\i -> getTopDLEClassWithSize i n)
 
 getBestExprWithSize n =
         do ec <- getTopFitEClassWithSize n 1 >>= traverse canonical
-           if (not (null ec))
-            then do
-              bestFit <- getFitness $ head ec
-              bestP   <- gets (_theta . _info . (IM.! (head ec)) . _eClass)
-              pure [(head ec, bestFit)]
-            else pure []
+           case ec of
+             (x:_) -> do bestFit <- getFitness x
+                         bestP   <- (_theta . _info) <$> getEClass x
+                         pure [(x, bestFit)]
+             []    -> pure []
 
 insertRndExpr maxSize rndTerm rndNonTerm =
       do grow <- rnd toss
@@ -151,11 +149,11 @@ refit fitFun ec = do
 
 --printBest :: (Int -> EClassId -> RndEGraph ()) -> RndEGraph ()
 printBest fitFun printExprFun = do
-      bec <- gets (snd . getGreatest . _fitRangeDB . _eDB) >>= canonical
-      bestFit <- gets (_fitness. _info . (IM.! bec) . _eClass)
-      --refit fitFun bec
-      --io.print $ "should be " <> show bestFit
-      printExprFun 0 bec
+      mbec <- gets (fmap snd . getGreatest . _fitRangeDB . _eDB)
+      case mbec of
+        Just bec -> do bestFit <- (_fitness . _info) <$> getEClass bec
+                       printExprFun 0 bec
+        Nothing  -> pure ()
 
 --paretoFront :: Int -> (Int -> EClassId -> RndEGraph ()) -> RndEGraph ()
 paretoFront fitFun maxSize printExprFun = go 1 0 (-(1.0/0.0))
@@ -165,18 +163,17 @@ paretoFront fitFun maxSize printExprFun = go 1 0 (-(1.0/0.0))
         | n > maxSize = pure []
         | otherwise   = do
             ecList <- getBestExprWithSize n
-            if not (null ecList)
-                then do let (ec, mf) = head ecList
-                            f' = fromJust mf
-                            improved = f' >= f && (not . isNaN) f' && (not . isInfinite) f'
-                        ec' <- canonical ec
-                        if improved
-                                then do refit fitFun ec'
-                                        t <- printExprFun ix ec'
-                                        ts <- go (n+1) (ix + if improved then 1 else 0) (max f f')
-                                        pure (t:ts)
-                                else go (n+1) (ix + if improved then 1 else 0) (max f f')
-                else go (n+1) ix f
+            case ecList of
+              ((ec, Just f'):_) -> do
+                let improved = f' >= f && (not . isNaN) f' && (not . isInfinite) f'
+                ec' <- canonical ec
+                if improved
+                  then do refit fitFun ec'
+                          t <- printExprFun ix ec'
+                          ts <- go (n+1) (ix + if improved then 1 else 0) (max f f')
+                          pure (t:ts)
+                  else go (n+1) (ix + if improved then 1 else 0) (max f f')
+              _ -> go (n+1) ix f
 
 evaluateUnevaluated fitFun = do
           ec <- gets (IntSet.toList . _unevaluated . _eDB)
