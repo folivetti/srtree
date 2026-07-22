@@ -100,31 +100,24 @@ rewriteBasic =
     [
       "x" * "y" :=> "y" * "x"
     , "x" + "y" :=> "y" + "x"
-    --, ("x" ** "y") * ("x" ** "z") :=> "x" ** ("y" + "z") -- :| isPositive "x"
-    --, (powabs "x" "y") * (powabs "x" "z") :=> powabs "x" ("y" + "x")
     , ("x" + "y") + "z" :=> "x" + ("y" + "z")
     , ("x" + "y") - "z" :=> "x" + ("y" - "z")
-    --, ("x" + "y") - "z" :=> "x" + ("y" - "z") -- TODO: check that I don't need that
     , ("x" * "y") * "z" :=> "x" * ("y" * "z")
     , ("x" * "y") + ("x" * "z") :=> "x" * ("y" + "z")
-    , "x" - ("y" + "z") :=> ("x" - "y") - "z" -- TODO: check that I don't this
-    , "x" - ("y" - "z") :=> ("x" - "y") + "z" -- TODO
-    , ("x" * "y") / "z" :=> ("x" / "z") * "y" :| isNotZero "z" -- TODO: inv(x) <=> x^-1 , x/y <=> x*y^-1
-    , "x" * ("y" / "z") :=> ("x" / "z") * "y" :| isNotZero "z" -- ^
-    , "x" / ("y" * "z") :=> ("x" / "z") / "y" :| isNotZero "z" -- ^ TODO: 0 ^-1 check
-    , ("w" * "x") + ("z" * "x") :=> ("w" + "z") * "x" -- :| isConstPt "w" :| isConstPt "z"
-    , ("w" * "x") - ("z" * "x") :=> ("w" - "z") * "x" -- TODO: handle sub :| isConstPt "w" :| isConstPt "z"
-    , ("w" * "x") / ("z" * "y") :=> ("w" / "z") * ("x" / "y") -- TODO handle with power :| isConstPt "w" :| isConstPt "z" :| isNotZero "z"
-    -- TODO: a + b*y :=> b * (a/b + y) :| isNotZero b
+    , "x" - ("y" + "z") :=> ("x" - "y") - "z"
+    , "x" - ("y" - "z") :=> ("x" - "y") + "z"
+    , ("x" * "y") / "z" :=> ("x" / "z") * "y" :| isNotZero "z"
+    , "x" * ("y" / "z") :=> ("x" / "z") * "y" :| isNotZero "z"
+    , "x" / ("y" * "z") :=> ("x" / "z") / "y" :| isNotZero "z"
+    , ("w" * "x") + ("z" * "x") :=> ("w" + "z") * "x"
+    , ("w" * "x") - ("z" * "x") :=> ("w" - "z") * "x"
+    , ("w" * "x") / ("z" * "y") :=> ("w" / "z") * ("x" / "y")
     , (("x" * "y") + ("z" * "w")) :=> "x" * ("y" + ("z" / "x") * "w") :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
-    -- , "a" * (("x" * "y") + ("z" * "w")) :=> ("a" * "x") * ("y" + ("z" / "x") * "w") :| isConstPt "a" :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
     , (("x" * "y") - ("z" * "w")) :=> "x" * ("y" - ("z" / "x") * "w") :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
     , (("x" * "y") * ("z" * "w")) :=> ("x" * "z") * ("y" * "w") :| isConstPt "x" :| isConstPt "z"
     , "x" * "x" :=> "x" ** 2 
     , ("x" + "y") ** 2 :=> "x" ** 2 + 2 * "x" * "y" + "y" ** 2 
     , "x" ** 2 + "x" * "y" :=> "x" * ("x" + "y")
-    -- , "x" + "y" :=> "y" * ("x" * "y" ** (-1) + 1) :| isNotZero "y" -- GABRIEL 
-    -- , "x" + "y" * "z" :=> "y" * ("x" * "y" ** (-1) + "z") :| isNotZero "y" -- GABRIEL 
     ]
 
 -- rules for nonlinear functions 
@@ -133,24 +126,14 @@ rewritesFun =
     [
       log (exp "x") :==: exp (log "x")
     , log (exp "x")  :=> "x"
-    -- , exp (log "x")  :=> "x" -- :| isPositive "x" ??? exp(log(x)), x, log(exp(0))
     , log ("x" * "y") :=> log "x" + log "y" :| isConstPos "x" :| isConstPos "y"
-    -- , log ("x" / "y") :=> log "x" - log "y" :| isConstPos "x" :| isConstPos "y"
     , log ("x" ** "y") :=> "y" * log "x"
     , log (powabs "x" "y") :=> "y" * log (abs "x")
-    --, sqrt ("x" ** "y") :=> "x" ** ("y" / 2) :| isEven "y"
-    -- , sqrt ("y" * "x") :=> sqrt "y" * sqrt "x" --
-    --, sqrt ("y" / "x") :=> sqrt "y" / sqrt "x"
-    , abs ("x" * "y") :=> abs "x" * abs "y" -- :| isConstPt "x"
+    , abs ("x" * "y") :=> abs "x" * abs "y"
     , abs ("x" ** "y") :=> abs "x" ** "y"
     , abs ("x" - "y") :=> abs ("y" - "x")
-    --, sqrt ("z" * ("x" - "y")) :=> sqrt (negate "z") * sqrt ("y" - "x")
-    --, sqrt ("z" * ("x" + "y")) :=> sqrt "z" * sqrt ("x" + "y")
     , recip (recip "x") :=> "x" :| isNotZero "x"
-    , ("x" * "y") ** "z" :==: ("x" ** "z") * ("y" ** "z") -- :| bothSameSign "x" "y"
-    , ("x" * "y") ** "z" :==: ("x" ** "z") * ("y" ** "z") -- :| isInteger "z"
-    --, recip "x" :==: "x" ** (-1) -- GABRIEL 
-    --, "x" / "y" :==: "x" * "y" ** (-1) -- GABRIEL 
+    , ("x" * "y") ** "z" :==: ("x" ** "z") * ("y" ** "z")
     , abs "x" ** "y" :=> "x" ** "y" :| isEven "y"
     , sqrt ("x" * "x") :=> abs "x"
     ]
@@ -160,27 +143,14 @@ constReduction :: [Rule]
 constReduction =
     [
       0 + "x" :=> "x"
-    -- , "x" - 0 :=> "x"
-    --, 1 * "x" :=> "x"
-    -- , 0 / "x" :=> 0 :| isNotZero "x"
-    --, "x" - "x" :=> 0 :| isNotParam "x"
-    --, "x" / "x" :=> 1 :| isNotZero "x" :| isNotParam "x"
     , "x" ** 1 :=> "x"
     , powabs "x" 1 :=> abs "x"
-
-    -- , "x" * (1 / "x") :=> 1 :| isNotParam "x" :| isNotZero "x"
-    -- , negate ("x" * "y") :=> (negate "x") * "y" :| isConstPt "x"
 
     , "x" ** "y" * "x" ** "z" :==: "x" ** ("y" + "z") :| isPositive "x"
     , (powabs "x" "y") * (powabs "x" "z") :=> powabs "x" ("y" + "x")
     , ("x" ** "y") ** "z" :==: "x" ** ("y" * "z") :| isPositive "x"
     , powabs (powabs "x" "y") "z" :=> powabs "x" ("y" * "z")
     , ("x" * "y") ** "z" :==: "x" ** "z" * "y" ** "z" :| isPositive "x" :| isPositive "y"
-
-    --, "x" ** "y" * "x" ** "z" :==: "x" ** ("y" + "z") :| isInteger "y" :| isInteger "z"  :| isNotZero "x"
-    --, ("x" ** "y") ** "z" :==: "x" ** ("y" * "z") :| isInteger "y" :| isInteger "z" :| isNotZero "x"
-    --, ("x" * "y") ** "z" :==: "x" ** "z" * "y" ** "z" :| isInteger "z" :| isNotZero "x" :| isNotZero "y"
-
     ]
 
 rewritesWithConstant :: [Rule]
@@ -193,10 +163,10 @@ rewritesWithConstant =
     , 1 ** "x" :=> 1
     , powabs 1 "x" :=> 1
     , log (sqrt "x") :=> 0.5 * log "x" :| isNotParam "x"
-    , "x" ** (1/2)   :==: sqrt "x" -- <==>
+    , "x" ** (1/2)   :==: sqrt "x"
     , powabs "x" (1/2) :=> sqrt (abs "x")
     , "x" ** (1/3) :==: Fixed (Uni Cbrt "x")
-    , 0 * "x" :=> 0 :| isValid "x" -- :| isNotParam "x"
+    , 0 * "x" :=> 0 :| isValid "x"
     , 0 ** "x" :=> 0 :| isPositive "x"
     , powabs 0 "x" :=> 0
     , 0 - "x" :=> negate "x"
@@ -205,12 +175,10 @@ rewritesWithConstant =
 rewritesWithParam :: [Rule]
 rewritesWithParam =
     [
-    --  "x" * "x" :=> "x" ** Fixed (Param 0)
       "x" - "x" :=> Fixed (Param 0)
     , "x" / "x" :=> Fixed (Param 0) :| isNotZero "x"
     , 1 ** "x" :=> Fixed (Param 0)
     , powabs 1 "x" :=> Fixed (Param 0)
-    -- , log (sqrt "x") :=> Fixed (Param 0) * log "x" :| isNotParam "x"
     ]
 
 rewritesSimple :: [Rule]

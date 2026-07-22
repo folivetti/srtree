@@ -444,21 +444,8 @@ getAllExpressionsFrom :: Monad m => EClassId -> EGraphST m [Fix SRTree]
 getAllExpressionsFrom eId' = do
   eId <- canonical eId'
   nodes <- gets (map decodeEnode . Set.toList . _eNodes . (IntMap.! eId) . _eClass)
-  let cands  = filter isTerm nodes
-  concat <$> go nodes
-  --if null cands
-  --   then concat <$> go nodes
-  --   else pure [toTree $ head cands]
+  go nodes
   where
-    isTerm (Var _) = True
-    isTerm (Const _) = True
-    isTerm (Param _) = True
-    isTerm _ = False
-    toTree (Var ix) = Fix $ Var ix
-    toTree (Const x) = Fix $ Const x
-    toTree (Param ix) = Fix $ Param ix
-    toTree _ = undefined
-
     go []     = pure []
     go (n:ns) = do
         t <- Prelude.map Fix <$> case n of
@@ -470,7 +457,7 @@ getAllExpressionsFrom eId' = do
                 Const x    -> pure [Const x]
                 Param ix   -> pure [Param ix]
         ts <- go ns
-        pure (t:ts)
+        pure (t ++ ts)
 {-# INLINE getAllExpressionsFrom #-}
 
 getNExpressionsFrom :: Monad m => Int -> EClassId -> EGraphST m [Fix SRTree]

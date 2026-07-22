@@ -216,6 +216,6 @@ rebuildRange rt = go Set.empty Empty <$> canonizeRange rt
     go seen root (xs :|> (x,eid)) = go (Set.insert eid seen)
                                        (if Set.member eid seen
                                           then root
-                                          else (x, eid) :<| root)
-                                        xs -- (Prelude.filter ((/= eid) . snd) xs)
+                                          else root :|> (x, eid))
+                                        xs
 

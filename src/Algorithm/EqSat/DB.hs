@@ -229,7 +229,7 @@ getElems _           = []
 genericJoin :: Monad m => Query -> ClassOrVar -> EGraphST m [Map ClassOrVar ClassOrVar]
 genericJoin atoms root = do
   let vars = orderedVars atoms -- order the vars, starting with the most frequently occuring
-  go atoms vars -- TODO: investigate why we need nub
+  go atoms vars
   where
     -- for each variable
     --   for each possible e-class id for that variable

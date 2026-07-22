@@ -60,28 +60,21 @@ instance Hashable ENode where
 
 type RangeTree a = Seq (a, EClassId)
 
--- | this assumes up to 999 variables and params
 encodeEnode :: ENode -> ENodeEnc
---encodeEnode = id
-{--}
 encodeEnode (Var ix)         = (0, ix, -1, 0)
 encodeEnode (Param ix)       = (1, ix, -1, 0)
 encodeEnode (Const x)        = (2, -1, -1, x)
 encodeEnode (Uni f ed)       = (300 + fromEnum f, ed, -1, 0)
 encodeEnode (Bin op ed1 ed2) = (400 + fromEnum op, ed1, ed2, 0)
-{--}
 {-# INLINE encodeEnode #-}
 
 decodeEnode :: ENodeEnc -> ENode
---decodeEnode = id
-{--}
 decodeEnode (0, ix, _, _) = Var ix
 decodeEnode (1, ix, _, _) = Param ix
 decodeEnode (2, _, _, x)  = Const x
 decodeEnode (opCode, arg1, arg2, arg3)
   | opCode < 400 = Uni (toEnum $ opCode-300) arg1
   | otherwise    = Bin (toEnum $ opCode-400) arg1 arg2
-  {--}
 {-# INLINE decodeEnode #-}
 
 insertRange :: (Ord a, Show a) => EClassId -> a -> RangeTree a -> RangeTree a
