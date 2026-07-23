@@ -60,7 +60,7 @@ add costFun enode = do
                                     pure $ case constType of
                                       ParamIx x -> Bin Mul c1 c2
                                       _         -> enode''
-                               _             -> pure $ enode''
+                               _             -> pure enode''
 
   maybeEid <- gets (HashMap.lookup enode' . _eNodeToEClass)
   case maybeEid of
@@ -116,7 +116,9 @@ repair costFun ecId enode =
      case doExist of
         Just ecIdCanon -> do mergedId <- merge costFun ecIdCanon ecId'
                              modify' $ over eNodeToEClass (HashMap.insert enode' mergedId)
-        Nothing        -> modify' $ over eNodeToEClass (HashMap.insert enode' ecId')
+                             addToDB enode' mergedId
+        Nothing        -> do modify' $ over eNodeToEClass (HashMap.insert enode' ecId')
+                             addToDB enode' ecId'
 {-# INLINE repair #-}
 
 -- | repair the analysis of the e-class
@@ -149,18 +151,17 @@ merge costFun c1 c2 =
   where
     mergeClasses :: Monad m => EClassId -> EClass -> EClassId -> EClassId -> EClass -> EClassId -> EGraphST m EClassId
     mergeClasses led ledC ledO sub subC subO =
-      do modify' $ over canonicalMap (IntMap.insert sub led . IntMap.insert subO led) -- points sub e-class to leader to maintain consistency
-         let -- create new e-class with same id as led
-             newC = EClass led
-                           (_eNodes ledC `Set.union` _eNodes subC)
-                           (_parents ledC <> _parents subC)
-                           (min (_height ledC) (_height subC))
-                           (joinData (_info ledC) (_info subC))
-
-         modify' $ over eClass (IntMap.insert led newC . IntMap.delete sub) -- delete sub e-class and replace leader
-                 . over (eDB . worklist) (_parents subC <>)         -- insert parents of sub into worklist
-         when (_info newC /= _info ledC)                            -- if there was change in data,
-           $ modify' $ over (eDB . analysis) (_parents ledC <>)     --   insert parents into analysis
+      do modify' $ over canonicalMap (IntMap.insert sub led . IntMap.insert subO led)
+         let newC = EClass led
+                         (_eNodes ledC `Set.union` _eNodes subC)
+                         (_parents ledC <> _parents subC)
+                         (min (_height ledC) (_height subC))
+                         (joinData (_info ledC) (_info subC))
+         modify' $ \eg -> eg { _eNodeToEClass = Set.foldl' (\acc en -> HashMap.insert en led acc) (_eNodeToEClass eg) (_eNodes subC) }
+         modify' $ over eClass (IntMap.insert led newC . IntMap.delete sub)
+                 . over (eDB . worklist) (_parents subC <>)
+         when (_info newC /= _info ledC)
+           $ modify' $ over (eDB . analysis) (_parents ledC <>)
                       . over (eDB . refits) (IntSet.insert led)
          when (_info newC /= _info subC)
            $ modify' $ over (eDB . analysis) (_parents subC <>)

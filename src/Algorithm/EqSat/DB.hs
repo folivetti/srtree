@@ -257,11 +257,11 @@ domainX var atoms root = do
 intersectAtoms :: Monad m => ClassOrVar -> Query -> ClassOrVar -> EGraphST m [EClassId]
 intersectAtoms _ [] root = pure []
 intersectAtoms var (a:atoms) root = do
-  a0 <- go a
-  Set.toList <$> (foldM (\acc atom -> Set.intersection acc <$> go atom) a0 atoms)
+  a0 <- toCanon =<< go a
+  Set.toList <$> (foldM (\acc atom -> do
+    res <- go atom
+    Set.intersection acc <$> toCanon res) a0 atoms)
   where
-      -- canonize everything except the root for consistency
-      -- doing this here prevents traversing the map again
       toCanon x = if var==root
                      then pure x
                      else Set.fromList <$> (mapM canonical $ Set.toList x)
