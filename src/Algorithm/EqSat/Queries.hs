@@ -23,27 +23,13 @@ import qualified Data.Map as Map
 import qualified Data.HashSet as Set
 import qualified Data.Set as RangeSet
 import Control.Monad.State ( gets, modify' )
-import Control.Monad ( filterM )
 import Control.Lens ( over )
 import Data.Maybe
 import Data.SRTree (childrenOf)
 
-import Debug.Trace
-
--- this is too slow for now, it needs a db of its own
--- basically a db for each query we need
 getEClassesThat :: Monad m => (EClass -> Bool) -> EGraphST m [EClassId]
 getEClassesThat p = do
     gets (map fst . filter (\(ecId, ec) -> p ec) . IntMap.toList . _eClass)
-    --go ecs
-        where
-            go :: Monad m => [EClassId] -> EGraphST m [EClassId]
-            go [] = pure []
-            go (ecId:ecs) = do ec <- p <$> getEClass ecId
-                               ecs' <- go ecs
-                               if ec
-                                  then pure (ecId:ecs')
-                                  else pure ecs'
 
 updateFitness :: Monad m => Double -> EClassId -> EGraphST m ()
 updateFitness f ecId = do
@@ -189,7 +175,7 @@ getTopDLEClassIn     = getTopECLassIn False
 getTopFitEClassNotIn :: Monad m => Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
 getTopFitEClassNotIn = getTopECLassNotIn True
 getTopDLEClassNotIn :: Monad m => Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
-getTopDLEClassNotIn  = getTopECLassNotIn True
+getTopDLEClassNotIn  = getTopECLassNotIn False
 getTopFitEClassWithSize :: Monad m => Int -> Int -> EGraphST m [EClassId]
 getTopFitEClassWithSize = getTopEClassWithSize True
 getTopDLEClassWithSize :: Monad m => Int -> Int -> EGraphST m [EClassId]

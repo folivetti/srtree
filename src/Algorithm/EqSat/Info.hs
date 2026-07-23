@@ -33,9 +33,6 @@ import Algorithm.EqSat.Queries
 
 import qualified Data.Set as TrueSet
 
-
-import Debug.Trace
-
 -- * Data related functions 
 
 -- | join data from two e-classes
@@ -175,7 +172,7 @@ combineConsts (Bin op l r) = evalOp' l r
 insertFitness :: Monad m => EClassId -> Double -> [Target] -> EGraphST m ()
 insertFitness eId' fit params =
   do eId <- canonical eId'
-     tree <- getBestExpr' eId
+     tree <- getBestExpr eId
      let p = fromIntegral (length params)
      let f_compl = countNodes tree * log (countUniqueTokens tree) + p * (log (2 * pi * exp(1 - log 3)) - log p) / 2.0
      ec <- getEClass eId
@@ -203,11 +200,4 @@ insertDL eId fit' =
      modify' $ over (eDB . dlRangeDB) (insertRange eId fit)
              . over (eDB . sizeDLDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith RangeSet.union sz RangeSet.empty)
 
--- | TODO: remove from here gets the best expression given the default cost function
-getBestExpr' :: Monad m => EClassId -> EGraphST m (Fix SRTree)
-getBestExpr' eid = do
-  eid' <- canonical eid
-  best <- (_best . _info) <$> getEClass eid'
-  childs <- mapM getBestExpr' $ childrenOf best
-  pure . Fix $ replaceChildren childs best
 

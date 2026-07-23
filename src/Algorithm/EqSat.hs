@@ -25,7 +25,7 @@ import Data.Function (on)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (intercalate, minimumBy)
+import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (mapMaybe)
@@ -33,8 +33,6 @@ import Data.SRTree
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as Set
 import Control.Monad ( zipWithM )
-
-import Debug.Trace
 
 -- | The `Scheduler` stores a map with the banned iterations of a certain rule . 
 -- TODO: make it more customizable.
@@ -69,9 +67,6 @@ recalculateBest costFun eid =
                  c  = costFun n
              pure (c + sum cc, Fix $ replaceChildren nc enode) -- | otherwise, returns the cost of the node + children and the expression so far
 
-        minimumBy' f [] = Nothing
-        minimumBy' f xs = Just $ minimumBy f xs
-
         fillUpCosts :: IntMap EClass -> CostMap -> CostMap
         fillUpCosts classes = go (IntMap.keysSet classes)
           where
@@ -84,9 +79,12 @@ recalculateBest costFun eid =
                   Nothing -> (d, cm)
                   Just ecl ->
                     let currentCost = Map.lookup eid cm
-                        minCost     = minimumBy' (compare `on` fst)
-                                    $ mapMaybe (nodeCost cm)
-                                    $ Set.toList (_eNodes ecl)
+                        minCost     = Set.foldl' (\acc en -> case nodeCost cm en of
+                                          Nothing -> acc
+                                          Just c  -> case acc of
+                                            Nothing  -> Just c
+                                            Just c'  -> Just (if fst c <= fst c' then c else c')
+                                        ) Nothing (_eNodes ecl)
                         (changed, cm') = case (currentCost, minCost) of
                           (_, Nothing)            -> (False, cm)
                           (Nothing, Just new)     -> (True, Map.insert eid new cm)
@@ -94,9 +92,15 @@ recalculateBest costFun eid =
                             | fst old <= fst new  -> (False, cm)
                             | otherwise           -> (True, Map.insert eid new cm)
                         d' = if changed
-                             then IntSet.union d (IntSet.fromList (map fst (Set.toList (_parents ecl))))
+                             then Set.foldl' (\acc (pid, _) -> IntSet.insert pid acc) d (_parents ecl)
                              else d
                     in d' `seq` cm' `seq` (d', cm')
+
+-- | replaces the equality rules with two one-way rules
+replaceEqRules :: Rule -> [Rule]
+replaceEqRules (p1 :=> p2)  = [p1 :=> p2]
+replaceEqRules (p1 :==: p2) = [p1 :=> p2, p2 :=> p1]
+replaceEqRules (r :| cond)  = map (:| cond) $ replaceEqRules r
 
 -- | run equality saturation for a number of iterations
 runEqSat :: Monad m => CostFun -> [Rule] -> Int -> EGraphST m (Bool, Int)
@@ -104,12 +108,6 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
     where
         rules' = concatMap replaceEqRules rules
         compiledRules = map (\r -> (r, compileToQuery (source r))) rules'
-
-        -- replaces the equality rules with two one-way rules
-        replaceEqRules :: Rule -> [Rule]
-        replaceEqRules (p1 :=> p2)  = [p1 :=> p2]
-        replaceEqRules (p1 :==: p2) = [p1 :=> p2, p2 :=> p1]
-        replaceEqRules (r :| cond)  = map (:| cond) $ replaceEqRules r
 
         go it sch compiled =
           do -- reset dirty flag before processing this iteration
@@ -150,30 +148,19 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
 -- | apply a single step of merge-only equality saturation
 applySingleMergeOnlyEqSat :: Monad m => CostFun -> [Rule] -> EGraphST m ()
 applySingleMergeOnlyEqSat costFun rules =
-  do db <- gets (_patDB . _eDB) -- createDB
-     let matchSch        = matchWithScheduler 10
+  do let matchSch        = matchWithScheduler 10
          matchAll        = zipWithM matchSch [0..]
-         (rls, sch')     = runState (matchAll rules') IntMap.empty
-     --matches <- mapM (\rule -> map (rule,) <$> match (source rule)) $ concat rls
-     --mapM_ (uncurry (applyMergeOnlyMatch costFun)) $ take 500 $ concat matches
+         (rls, _)        = runState (matchAll rules') IntMap.empty
      matches <- getNMatches 500 rls
      rebuild costFun
-     -- recalculate heights
-     --calculateHeights
       where
         rules' = concatMap replaceEqRules rules
-
-        -- replaces the equality rules with two one-way rules
-        replaceEqRules :: Rule -> [Rule]
-        replaceEqRules (p1 :=> p2)  = [p1 :=> p2]
-        replaceEqRules (p1 :==: p2) = [p1 :=> p2, p2 :=> p1]
-        replaceEqRules (r :| cond)  = map (:| cond) $ replaceEqRules r
 
         getNMatches n []       = pure []
         getNMatches 0 _        = pure []
         getNMatches n ([]:rss) = getNMatches n rss
         getNMatches n ((r:rs):rss) = do matches <- map (r,) <$> match (source r)
-                                        let (x, y) = splitAt n matches
+                                        let (x, _) = splitAt n matches
                                             m      = length x
                                         if m == n
                                            then pure matches

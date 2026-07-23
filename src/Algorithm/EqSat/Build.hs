@@ -20,10 +20,9 @@ module Algorithm.EqSat.Build where
 import System.Random (Random (randomR), StdGen)
 import Control.Lens ( over )
 import Control.Monad ( forM_, when, foldM, forM )
-import Data.Maybe ( fromMaybe, catMaybes )
+import Data.Maybe
 import Data.SRTree
 import Algorithm.EqSat.Egraph
---import Algorithm.EqSat.Info
 import Algorithm.EqSat.DB
 import qualified Data.IntMap.Strict as IntMap
 import Data.Map.Strict ( Map )
@@ -35,11 +34,8 @@ import Control.Monad.Identity
 import Data.SRTree.Recursion (cataM)
 import Algorithm.EqSat.Info
 import qualified Data.IntSet as IntSet
-import Data.Maybe
 
-import Data.List ( nub )
 import qualified Data.Set as RangeSet
-import Debug.Trace (trace, traceShow)
 
 -- | adds a new or existing e-node (merging if necessary)
 add :: Monad m => CostFun -> ENode -> EGraphST m EClassId
@@ -257,22 +253,6 @@ modifyEClass costFun ecId =
 
 -- * DB
 
--- | `createDB` creates a database of patterns from an e-graph
--- it simply calls addToDB for every pair (e-node, e-class id) from
--- the e-graph.
-createDB :: Monad m => EGraphST m DB
-createDB = do modify' $ over (eDB . patDB) (const Map.empty)
-              ecls <- gets (HashMap.toList . _eNodeToEClass)
-              mapM_ (uncurry addToDB) ecls
-              gets (_patDB . _eDB)
-{-# INLINE createDB #-}
-
-createDBBest :: Monad m => EGraphST m DB
-createDBBest = do modify' $ over (eDB . patDB) (const Map.empty)
-                  ecls <- gets (Prelude.map (\(eId, ec) -> (_best (_info ec), eId)) . IntMap.toList . _eClass)
-                  mapM_ (uncurry addToDB) ecls
-                  gets (_patDB . _eDB)
-
 -- | `addToDB` adds an e-node and e-class id to the database
 addToDB :: Monad m => ENode -> EClassId -> EGraphST m () -- State DB ()
 addToDB enode' eid = do
@@ -305,16 +285,11 @@ populate (Just tId) (eid:eids) = let nextTrie = IntMap.lookup eid (_trie tId)
 {-# INLINE populate #-}
 
 canonizeMap :: Monad m => (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m (Map ClassOrVar ClassOrVar, ClassOrVar)
-canonizeMap (subst, cv) = (,cv) <$> traverse g subst -- Map.fromList <$> traverse f (Map.toList subst)
+canonizeMap (subst, cv) = (,cv) <$> traverse g subst
   where
     g :: Monad m => ClassOrVar -> EGraphST m ClassOrVar
     g (Left e2) = Left <$> canonical e2
     g e2        = pure e2
-
-    f :: Monad m => (ClassOrVar, ClassOrVar) -> EGraphST m (ClassOrVar, ClassOrVar)
-    f (e1, Left e2) = do e2' <- canonical e2
-                         pure (e1, Left e2')
-    f (e1, e2)      = pure (e1, e2)
 {-# INLINE canonizeMap #-}
 
 applyMatch :: Monad m => CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m ()
@@ -328,20 +303,6 @@ applyMatch costFun rule match' =
           merge costFun (getInt (snd match)) new_eclass
           pure ()
 {-# INLINE applyMatch #-}
-
-applyMergeOnlyMatch :: Monad m => CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m ()
-applyMergeOnlyMatch costFun rule match' =
-  do let conds = getConditions rule
-     match       <- canonizeMap match'
-     validHeight <- isValidHeight match
-     validConds  <- mapM (`isValidConditions` match) conds
-     when (validHeight && and validConds) $
-       do maybe_eid <- classOfENode costFun (fst match) (target rule)
-          case maybe_eid of
-            Nothing  -> pure ()
-            Just eid -> do merge costFun (getInt (snd match)) eid
-                           pure ()
-{-# INLINE applyMergeOnlyMatch #-}
 
 -- | gets the e-node of the target of the rule
 -- TODO: add consts and modify
@@ -401,12 +362,6 @@ countParamsEg eg rt = countParams . runIdentity $ getBestExpr rt `evalStateT` eg
 countParamsUniqEg :: EGraph -> EClassId -> Int
 countParamsUniqEg eg rt = countParamsUniq . runIdentity $ getBestExpr rt `evalStateT` eg
 
-
--- | gets the best expression given the default cost function
-getBestExpr :: Monad m => EClassId -> EGraphST m (Fix SRTree)
-getBestExpr eid = do best <- (_best . _info) <$> getEClass eid
-                     childs <- mapM getBestExpr $ childrenOf best
-                     pure . Fix $ replaceChildren childs best
 
 getBestENode eid = (_best . _info) <$> getEClass eid
 {-# INLINE getBestENode #-}
@@ -541,16 +496,16 @@ getAllChildEClasses eId' = do
 
 getAllChildBestEClasses :: Monad m => EClassId -> EGraphST m [EClassId]
 getAllChildBestEClasses eId' = do
-  nub <$> go eId'
+  IntSet.toList <$> go IntSet.empty eId'
   where
-    go :: Monad m => EClassId -> EGraphST m [EClassId]
-    go n = do node <- (_best . _info) <$> getEClass n
-              let hasTerminal = (null . childrenOf) node
-              eids <- mapM canonical $ childrenOf node
-              if hasTerminal
-                then pure [n]
-                else do eids' <- mapM go eids
-                        pure ((n : eids) <> concat eids')
+    go :: Monad m => IntSet.IntSet -> EClassId -> EGraphST m IntSet.IntSet
+    go acc n
+      | IntSet.member n acc = pure acc
+      | otherwise = do
+          let acc' = IntSet.insert n acc
+          node <- (_best . _info) <$> getEClass n
+          eids <- mapM canonical $ childrenOf node
+          foldM go acc' eids
 
 getAllChildBestEClassesRep :: Monad m => EClassId -> EGraphST m [EClassId]
 getAllChildBestEClassesRep eId' = do

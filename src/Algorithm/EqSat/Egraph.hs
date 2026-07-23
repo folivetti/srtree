@@ -44,7 +44,6 @@ import qualified Data.Vector.Unboxed as VU
 
 import GHC.Generics
 
-import Debug.Trace
 
 type EClassId     = Int -- NOTE: DO NOT CHANGE THIS, this will break the use of IntMap and IntSet
 type ClassIdMap   = IntMap
@@ -215,7 +214,19 @@ emptyGraph = EGraph IntMap.empty HashMap.empty IntMap.empty emptyDB
 
 -- | returns an empty e-graph DB
 emptyDB :: EGraphDB
-emptyDB = EDB Set.empty Set.empty IntSet.empty Map.empty RangeSet.empty RangeSet.empty IntMap.empty IntMap.empty IntMap.empty IntSet.empty 0 False
+emptyDB = EDB
+  Set.empty
+  Set.empty
+  IntSet.empty
+  Map.empty
+  RangeSet.empty
+  RangeSet.empty
+  IntMap.empty
+  IntMap.empty
+  IntMap.empty
+  IntSet.empty
+  0
+  False
 {-# INLINE emptyDB #-}
 
 -- | Creates a new e-class from an e-class id, a new e-node,
@@ -250,6 +261,13 @@ canonize = mapM canonical  -- applies canonical to the children
 getEClass :: Monad m => EClassId -> EGraphST m EClass
 getEClass c = do c' <- canonical c; gets ((IntMap.! c') . _eClass)
 {-# INLINE getEClass #-}
+
+-- | gets the best expression given the default cost function
+getBestExpr :: Monad m => EClassId -> EGraphST m (Fix SRTree)
+getBestExpr eid = do
+  best <- (_best . _info) <$> getEClass eid
+  childs <- mapM getBestExpr $ childrenOf best
+  pure . Fix $ replaceChildren childs best
 
 -- | Creates a singleton trie from an e-class id
 trie :: EClassId -> IntMap IntTrie -> IntTrie
