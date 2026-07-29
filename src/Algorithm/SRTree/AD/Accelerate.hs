@@ -19,6 +19,14 @@ import Data.Vector.Storable qualified as VS
 import Prelude hiding (zipWith, replicate, sum, map, log, abs, sqrt, recip)
 import Algorithm.SRTree.AD.CompiledAD
 
+import Data.IORef (IORef, newIORef, readIORef, modifyIORef')
+import System.IO.Unsafe (unsafePerformIO)
+import System.CPUTime (getCPUTime)
+import Data.Time.Clock.POSIX (getPOSIXTime, POSIXTime)
+import Control.Exception (evaluate)
+import System.IO (stderr, hPutStrLn)
+import Control.Monad (when)
+
 {-# INLINE diffPureAcc #-}
 diffPureAcc :: Op -> Exp Double -> Exp Double -> Exp Double -> Exp Double -> Exp (Double, Double)
 diffPureAcc Add dx _  _  _  = A.lift (dx, dx)
@@ -105,27 +113,100 @@ derivativeAcc Recip   = A.negate . A.recip . (A.^(2 :: Exp Int))
 derivativeAcc Cube    = (3*) . (A.^(2 :: Exp Int))
 {-# INLINE derivativeAcc #-}
 
+-- Profiling counters (CPU time)
+{-# NOINLINE compileTime #-}
+compileTime :: IORef Integer
+compileTime = unsafePerformIO (newIORef 0)
+
+{-# NOINLINE compileCount #-}
+compileCount :: IORef Int
+compileCount = unsafePerformIO (newIORef 0)
+
+{-# NOINLINE evalTime #-}
+evalTime :: IORef Integer
+evalTime = unsafePerformIO (newIORef 0)
+
+{-# NOINLINE evalCount #-}
+evalCount :: IORef Int
+evalCount = unsafePerformIO (newIORef 0)
+
+-- Profiling counters (wall time)
+{-# NOINLINE compileWall #-}
+compileWall :: IORef Double
+compileWall = unsafePerformIO (newIORef 0)
+
+{-# NOINLINE evalWall #-}
+evalWall :: IORef Double
+evalWall = unsafePerformIO (newIORef 0)
+
+-- | Single-worker target: exactly 1 thread, bypasses the env-var-based
+-- defaultTarget (which is a CAF initialized before setEnv takes effect).
+{-# NOINLINE singleWorker #-}
+singleWorker :: CPU.Native
+singleWorker = unsafePerformIO (CPU.createTarget [0])
+
 -- | Compiles the AST into an LLVM JIT closure.
 -- Call this exactly ONCE before your NLopt optimization loop.
 compileAccelerateTree :: CompiledTree -> [VU.Vector Double] -> VU.Vector Double -> (VS.Vector Double -> (Double, VS.Vector Double))
 compileAccelerateTree ct xss ys =
     let
-        -- Run the LLVM compiler to generate the native closure
-        -- The type of jittedFunc is: Vector Double -> (Scalar Double, Vector Double)
-        jittedFunc = CPU.run1 (buildAccGraph ct xss ys)
+        jittedFunc = unsafePerformIO $ do
+            t0cpu <- getCPUTime
+            t0wal <- getPOSIXTime
+            let !jf = CPU.run1With singleWorker (buildAccGraph ct xss ys)
+            t1cpu <- getCPUTime
+            t1wal <- getPOSIXTime
+            modifyIORef' compileTime (+ (t1cpu - t0cpu))
+            modifyIORef' compileWall (+ realToFrac (t1wal - t0wal))
+            modifyIORef' compileCount (+ 1)
+            pure jf
 
-    in \theta ->
-        let
-            -- Convert unboxed vector to Accelerate array
-            thetaArr = A.fromList (Z :. VS.length theta) (VS.toList theta)
-
-            -- Execute the compiled C/Assembly code
+    in \theta -> unsafePerformIO $ do
+        t0cpu <- getCPUTime
+        t0wal <- getPOSIXTime
+        let thetaArr = A.fromList (Z :. VS.length theta) (VS.toList theta)
             (objArr, gradArr) = jittedFunc thetaArr
-
-            -- Extract results back to Haskell primitives
             obj  = A.indexArray objArr Z
             grad = VS.fromList (A.toList gradArr)
-        in (obj, grad)
+        evaluate obj
+        evaluate (VS.length grad)
+        t1cpu <- getCPUTime
+        t1wal <- getPOSIXTime
+        modifyIORef' evalTime (+ (t1cpu - t0cpu))
+        modifyIORef' evalWall (+ realToFrac (t1wal - t0wal))
+        modifyIORef' evalCount (+ 1)
+        cnt <- readIORef evalCount
+        when (cnt `Prelude.mod` 100 Prelude.== 0) $ do
+            cc <- readIORef compileCount
+            ct <- readIORef compileTime
+            cw <- readIORef compileWall
+            ec <- readIORef evalCount
+            et <- readIORef evalTime
+            ew <- readIORef evalWall
+            let ctSec :: Double = Prelude.fromIntegral ct Prelude./ 1e12
+                cwSec :: Double = cw
+                etSec :: Double = Prelude.fromIntegral et Prelude./ 1e12
+                ewSec :: Double = ew
+                avgCompile :: Double
+                    | cc Prelude.> 0 = ctSec Prelude./ Prelude.fromIntegral cc
+                    | Prelude.otherwise = 0
+                avgEval :: Double
+                    | ec Prelude.> 0 = etSec Prelude./ Prelude.fromIntegral ec
+                    | Prelude.otherwise = 0
+                totalWall :: Double = cwSec Prelude.+ ewSec
+                totalCpu  :: Double = ctSec Prelude.+ etSec
+                efficiency :: Double
+                    | totalWall Prelude.> 0 = totalCpu Prelude./ totalWall
+                    | Prelude.otherwise = 1
+            hPutStrLn stderr $ Prelude.unwords
+                [ "[ACCEL] compile:", show cc, "calls, cpu:", show ctSec, "s, wall:", show cwSec, "s"
+                , "eval:", show ec, "calls, cpu:", show etSec, "s, wall:", show ewSec, "s"
+                , "total_cpu:", show totalCpu, "s, total_wall:", show totalWall, "s"
+                , "efficiency:", show efficiency
+                , "avg_compile(cpu):", show avgCompile, "s"
+                , "avg_eval(cpu):", show avgEval, "s"
+                ]
+        pure (obj, grad)
 
 
 -- | Builds the AST in the Accelerate EDSL
@@ -151,9 +232,9 @@ buildAccGraph ct xss ys theta = A.lift (obj, gradPacked)
     forward = foldl' step IntMap.empty [0 .. root]
       where
         step acc key
-          | Prelude.not (dyn VU.! key) =
-              let statVec = ctStatic ct VB.! key
-              in IntMap.insert key (A.use (A.fromList (Z :. m) (VU.toList statVec))) acc
+              | Prelude.not (dyn VU.! key) =
+                  let statVec = VU.slice (key * m) m (ctStatic ct)
+                  in IntMap.insert key (A.use (A.fromList (Z :. m) (VU.toList statVec))) acc
           | otherwise =
               IntMap.insert key (evalNode key acc) acc
 

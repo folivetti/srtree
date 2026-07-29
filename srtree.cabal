@@ -81,6 +81,7 @@ library
         , random >=1.2 && <1.4
         , split >=0.2.5 && <0.3
         , statistics
+        , time
         , unordered-containers
         , vector >=0.12 && <0.14
         , zlib >=0.6.3 && <0.8

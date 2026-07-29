@@ -54,19 +54,18 @@ import Control.Monad.State.Strict
 import Control.Monad.Identity
 
 
-import Control.Parallel.Strategies (parList, rdeepseq, using)
 import Data.List (transpose)
 import System.IO.Unsafe (unsafePerformIO)
 import Control.Concurrent (getNumCapabilities)
-
---import UnliftIO.Async
+import Control.Concurrent.Async (forConcurrently)
+import Control.Exception (evaluate)
 
 import qualified Data.Map.Strict as Map
 import Algorithm.SRTree.AD.CompiledAD
 
 compileTree :: [VU.Vector Double] -> VU.Vector Double -> Maybe (VU.Vector Double) -> Fix SRTree -> CompiledTree
 compileTree xss ys mYErr tree =
-    CompiledTree { ctNodes = nodes, ctRoot = root, ctDyn = dynArr, ctStatic = staticArr, ctM = m }
+    CompiledTree { ctNodes = nodes, ctRoot = root, ctDyn = dynArr, ctStatic = staticArr, ctM = m, ctNPred = root + 1 }
   where
     yErr = fromJust mYErr
     m    = VU.length ys
@@ -78,9 +77,12 @@ compileTree xss ys mYErr tree =
 
     nodes     = VB.fromList (IntMap.elems int2key)
     dynArr    = VU.fromList (IntMap.elems dynMap)
-    -- dense array indexed by node id (0..root), O(1) access in the hot loop;
-    -- dynamic ids get an empty placeholder since they're recomputed per-theta.
-    staticArr = VB.generate (root + 1) (\i -> IntMap.findWithDefault VU.empty i static)
+    -- flat [node * m + row]; dynamic-node slots are 0-filled (evalGrad checks dyn first).
+    stride    = root + 1
+    staticArr = VU.generate (stride * m) $ \ix ->
+        let (key, row) = ix `quotRem` m
+            vec        = IntMap.findWithDefault VU.empty key static
+        in if VU.null vec then 0 else VU.unsafeIndex vec row
 
     leftToRight (Uni f mt)    = Uni f <$> mt
     leftToRight (Bin f ml mr) = Bin f <$> ml <*> mr
@@ -159,7 +161,7 @@ evalGrad ct theta = runST $ do
           | key > root = pure ()
           | otherwise  = do
               v <- if not (VU.unsafeIndex dyn key)
-                     then pure (VU.unsafeIndex (VB.unsafeIndex static key) row)
+                     then pure (VU.unsafeIndex static (key * stride + row))
                      else case VB.unsafeIndex nodes key of
                             Param ix   -> pure (V.unsafeIndex theta ix)
                             Uni f t    -> evalFun f <$> VUM.unsafeRead fwd t
@@ -215,6 +217,7 @@ evalGrad ct theta = runST $ do
     nodes  = ctNodes ct
     dyn    = ctDyn ct
     static = ctStatic ct
+    stride = ctNPred ct
 
 -- Pure local-derivative rules, scalar version (same math as the original
 -- vectorized `diffPure`, applied per-row in the fused loop above).
@@ -272,7 +275,9 @@ compileTreeMulti :: [VU.Vector Double]
                  -> [CompiledTree]
 compileTreeMulti xss ys mYErr tree =
     let nRows     = VU.length ys
-        numChunks = max 1 $ nRows `div` 10000 -- 8 * unsafePerformIO getNumCapabilities
+        minChunkSize = 2000
+        numChunks = max 1 (min numCapabilities (nRows `div` minChunkSize))
+        numCapabilities = unsafePerformIO getNumCapabilities
         ysChunks  = chunkVector numChunks ys
         -- transpose groups the chunks by slice rather than by feature
         xssChunks = Data.List.transpose (map (chunkVector numChunks) xss)
@@ -283,13 +288,9 @@ compileTreeMulti xss ys mYErr tree =
 
 -- | Evaluates the gradient across all compiled chunks in parallel.
 evalGradMulti :: [CompiledTree] -> V.Vector Double -> (Double, V.Vector Double)
-evalGradMulti cts theta =
-    let -- parList rdeepseq fully evaluates the (Double, V.Vector Double) tuples in parallel
-        results = map (`evalGrad` theta) cts `using` parList rdeepseq
-
-        -- Accumulate the total objective
-        totalObj = sum $ map fst results
-
-        -- Accumulate the gradients (element-wise vector addition)
-        totalGrad = foldl1' (V.zipWith (+)) (map snd results)
-    in (totalObj, totalGrad)
+evalGradMulti [ct] theta = evalGrad ct theta
+evalGradMulti cts theta = unsafePerformIO $ do
+    results <- forConcurrently cts $ \ct -> evaluate (evalGrad ct theta)
+    let totalObj   = sum $ map fst results
+        totalGrad  = foldl1' (V.zipWith (+)) (map snd results)
+    pure (totalObj, totalGrad)

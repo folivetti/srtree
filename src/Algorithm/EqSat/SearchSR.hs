@@ -66,7 +66,7 @@ fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) tree theta
     else (val, theta)
   where
     nParams       = countParamsUniq tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
-    (theta, _, _) = minimizeNLL' VAR1 SingleThread (NLL distribution) mYErr nIter x y tree thetaOrig
+    (theta, _, _) = minimizeNLL' VAR1 MultiThread (NLL distribution) mYErr nIter x y tree thetaOrig
     evalF a b c   = negate $ compileLoss a (buildLoss (NLL distribution) (fromIntegral (V.length b)) tree) b c $ if nParams == 0 then thetaOrig else theta
     val           = evalF x_val y_val mYErr_val
 
