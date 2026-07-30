@@ -77,12 +77,14 @@ compileTree xss ys mYErr tree =
 
     nodes     = VB.fromList (IntMap.elems int2key)
     dynArr    = VU.fromList (IntMap.elems dynMap)
-    -- flat [node * m + row]; dynamic-node slots are 0-filled (evalGrad checks dyn first).
+    -- flat [node * m + row]; built with one memcpy per static node instead
+    -- of stride*m individual quotRem + IntMap lookups.
     stride    = root + 1
-    staticArr = VU.generate (stride * m) $ \ix ->
-        let (key, row) = ix `quotRem` m
-            vec        = IntMap.findWithDefault VU.empty key static
-        in if VU.null vec then 0 else VU.unsafeIndex vec row
+    staticArr = VU.create $ do
+        arr <- VUM.replicate (stride * m) 0
+        forM_ (IntMap.toList static) $ \(key, vec) ->
+            VU.copy (VUM.slice (key * m) m arr) vec
+        pure arr
 
     leftToRight (Uni f mt)    = Uni f <$> mt
     leftToRight (Bin f ml mr) = Bin f <$> ml <*> mr
