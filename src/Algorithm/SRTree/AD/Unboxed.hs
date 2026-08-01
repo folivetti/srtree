@@ -26,6 +26,7 @@ module Algorithm.SRTree.AD.Unboxed
          , compileTreeMulti
          , evalGradMulti
          , evalGrad
+         , evalGradVec
          , CompiledTree(..)
          ) where
 
@@ -65,14 +66,22 @@ import Algorithm.SRTree.AD.CompiledAD
 
 compileTree :: [VU.Vector Double] -> VU.Vector Double -> Maybe (VU.Vector Double) -> Fix SRTree -> CompiledTree
 compileTree xss ys mYErr tree =
-    CompiledTree { ctNodes = nodes, ctRoot = root, ctDyn = dynArr, ctStatic = staticArr, ctM = m, ctNPred = root + 1 }
+    CompiledTree { ctNodes = nodes, ctRoot = root, ctDyn = dynArr, ctStatic = staticArr, ctM = m, ctNPred = root + 1
+                 , ctKind = kindArr, ctArg = argArr, ctArg2 = arg2Arr, ctFcode = fcodeArr, ctOcode = ocodeArr }
   where
     yErr = fromJust mYErr
     m    = VU.length ys
 
+    -- Rewrite x ** 2.0 into the unary Square kernel (x*x, fcode 17):
+    -- the loss wrap ((tree - y) ** 2) / m is the single hottest subgraph in
+    -- every NLopt call, and replacing the per-element pow with a multiply
+    -- avoids the slow ** (x**2.0 == x*x exactly, and the derivative 2x
+    -- matches), so no numerical semantics change.
+    tree' = rewritePowSq tree
+
     -- state: (structural CSE map, id -> node, id -> isDynamic, id -> static value, counter)
     (_, int2key, dynMap, static, (subtract 1) -> root) =
-        cataM leftToRight alg tree
+        cataM leftToRight alg tree'
           `execState` (Map.empty, IntMap.empty, IntMap.empty, IntMap.empty, 0)
 
     nodes     = VB.fromList (IntMap.elems int2key)
@@ -85,6 +94,31 @@ compileTree xss ys mYErr tree =
         forM_ (IntMap.toList static) $ \(key, vec) ->
             VU.copy (VUM.slice (key * m) m arr) vec
         pure arr
+
+    -- compact unboxed per-id code arrays (length root+1) so the hot row loop
+    -- never touches the boxed `nodes` vector nor dispatches through the
+    -- function-returning evalOp/evalFun
+    kindArr  = VU.generate (root + 1) $ \k -> case int2key IntMap.! k of
+        Var _     -> 0
+        Param _   -> 1
+        Const _   -> 2
+        Uni _ _   -> 3
+        Bin _ _ _ -> 4
+    argArr   = VU.generate (root + 1) $ \k -> case int2key IntMap.! k of
+        Var ix    -> ix
+        Param ix  -> ix
+        Uni _ t   -> t
+        Bin _ l _ -> l
+        Const _   -> 0
+    arg2Arr  = VU.generate (root + 1) $ \k -> case int2key IntMap.! k of
+        Bin _ _ r -> r
+        _         -> 0
+    fcodeArr = VU.generate (root + 1) $ \k -> case int2key IntMap.! k of
+        Uni f _   -> fromEnum f
+        _         -> 0
+    ocodeArr = VU.generate (root + 1) $ \k -> case int2key IntMap.! k of
+        Bin op _ _ -> fromEnum op
+        _          -> 0
 
     leftToRight (Uni f mt)    = Uni f <$> mt
     leftToRight (Bin f ml mr) = Bin f <$> ml <*> mr
@@ -134,6 +168,19 @@ compileTree xss ys mYErr tree =
             modify' (insEntry key d mv)
             gets (getKeyS key)
 
+-- Rewrite Bin Power t (Const 2.0) into the unary Square kernel. Exact at
+-- the Double level (x ** 2.0 == x * x, both correctly rounded) and the
+-- gradient rule for Square is 2x, identical to Pow(x, 2). Avoiding the
+-- per-element pow() is worth a measurable fraction of the AD time because
+-- the loss wrap (tree - y) ** 2 appears in every NLopt objective/gradient
+-- call.
+rewritePowSq :: Fix SRTree -> Fix SRTree
+rewritePowSq = cata alg
+  where
+    alg :: SRTree (Fix SRTree) -> Fix SRTree
+    alg (Bin Power t (Fix (Const 2.0))) = Fix (Uni Square t)
+    alg n                                = Fix n
+
 -- ---------------------------------------------------------------------
 -- Per-theta evaluation: the hot path, called once per NLopt objective/
 -- gradient call. Forward pass only recomputes dynamic nodes (ids are
@@ -163,12 +210,15 @@ evalGrad ct theta = runST $ do
           | key > root = pure ()
           | otherwise  = do
               v <- if not (VU.unsafeIndex dyn key)
-                     then pure (VU.unsafeIndex static (key * stride + row))
-                     else case VB.unsafeIndex nodes key of
-                            Param ix   -> pure (V.unsafeIndex theta ix)
-                            Uni f t    -> evalFun f <$> VUM.unsafeRead fwd t
-                            Bin op l r -> evalOp op <$> VUM.unsafeRead fwd l <*> VUM.unsafeRead fwd r
-                            _          -> error "evalGrad: unreachable"
+                     then pure (VU.unsafeIndex static (key * m + row))
+                     else case VU.unsafeIndex kind key of
+                            1 -> pure (V.unsafeIndex theta (VU.unsafeIndex arg key))
+                            3 -> do x <- VUM.unsafeRead fwd (VU.unsafeIndex arg key)
+                                    pure (evalFunCode (VU.unsafeIndex fcode key) x)
+                            4 -> do xl <- VUM.unsafeRead fwd (VU.unsafeIndex arg key)
+                                    xr <- VUM.unsafeRead fwd (VU.unsafeIndex arg2 key)
+                                    pure (evalOpCode (VU.unsafeIndex ocode key) xl xr)
+                            _ -> error "evalGrad: unreachable"
               VUM.unsafeWrite fwd key v
               forwardLoop row (key + 1)
 
@@ -180,19 +230,22 @@ evalGrad ct theta = runST $ do
           | otherwise = do
               when (VU.unsafeIndex dyn key) $ do
                 v <- VUM.unsafeRead adj key
-                case VB.unsafeIndex nodes key of
-                  Bin op l r -> do
+                case VU.unsafeIndex kind key of
+                  4 -> do
+                    let l = VU.unsafeIndex arg key
+                        r = VU.unsafeIndex arg2 key
                     xl <- VUM.unsafeRead fwd l
                     xr <- VUM.unsafeRead fwd r
                     fg <- VUM.unsafeRead fwd key
-                    let (dl, dr) = diffScalar op v xl xr fg
+                    let (dl, dr) = diffScalarCode (VU.unsafeIndex ocode key) v xl xr fg
                     VUM.unsafeModify adj (+ dl) l
                     VUM.unsafeModify adj (+ dr) r
-                  Uni f t -> do
+                  3 -> do
+                    let t = VU.unsafeIndex arg key
                     x <- VUM.unsafeRead fwd t
-                    VUM.unsafeModify adj (+ v * derivative f x) t
-                  Param ix -> VUM.unsafeModify gradM (+ v) ix
-                  _        -> pure ()
+                    VUM.unsafeModify adj (+ v * derivFunCode (VU.unsafeIndex fcode key) x) t
+                  1 -> VUM.unsafeModify gradM (+ v) (VU.unsafeIndex arg key)
+                  _ -> pure ()
               backwardLoop (key - 1)
 
         rowLoop !row
@@ -216,30 +269,352 @@ evalGrad ct theta = runST $ do
     root   = ctRoot ct
     m      = ctM ct
     p      = V.length theta
-    nodes  = ctNodes ct
+    kind   = ctKind ct
+    arg    = ctArg ct
+    arg2   = ctArg2 ct
+    fcode  = ctFcode ct
+    ocode  = ctOcode ct
     dyn    = ctDyn ct
     static = ctStatic ct
-    stride = ctNPred ct
 
--- Pure local-derivative rules, scalar version (same math as the original
--- vectorized `diffPure`, applied per-row in the fused loop above).
-diffScalar :: Op -> Double -> Double -> Double -> Double -> (Double, Double)
-diffScalar Add dx _  _  _  = (dx, dx)
-diffScalar Sub dx _  _  _  = (dx, negate dx)
-diffScalar Mul dx fx gy _  = (dx * gy, dx * fx)
-diffScalar Div dx _  gy fg = (dx / gy, dx * (negate fg / gy))
-diffScalar Power dx fx gy fg =
+-- ---------------------------------------------------------------------
+-- Node-outer (vectorized-over-rows) evaluation: mirrors reverseModeGraph's
+-- shape (one full length-m column per node, node-major loops) so the inner
+-- loops are fused per node over all rows, with the static/dynamic pattern
+-- decided once per node instead of once per row. Uses the same flat
+-- [node * m + row] layout and compact op-code dispatch as `evalGrad`, but
+-- trades the O(nodes + params) scratch of the row-fused version for the
+-- O(nodes * m) fwd/adj columns of the massiv-style whole-column kernel.
+evalGradVec :: CompiledTree -> V.Vector Double -> (Double, V.Vector Double)
+evalGradVec ct theta = runST $ do
+    fwd   <- VUM.new len   -- [node * m + row]; every dynamic column is written before any read
+    adj   <- VUM.replicate len 0   -- [node * m + row]
+    gradM <- VUM.replicate p 0
+
+    -- forward: recompute only dynamic nodes, one full column each
+    let goFwd !key
+          | key > root = pure ()
+          | otherwise  = do
+              if VU.unsafeIndex dyn key
+                then case VU.unsafeIndex kind key of
+                  1 -> {-# SCC "fwdParam" #-} VUM.set (VUM.slice (key * m) m fwd) (V.unsafeIndex theta (VU.unsafeIndex arg key))
+                  3 -> do
+                    let t  = VU.unsafeIndex arg key
+                        fc = VU.unsafeIndex fcode key
+                        kb = key * m
+                        tb = t * m
+                    if VU.unsafeIndex dyn t
+                      then {-# SCC "fwdUniD" #-} forRows m $ \i -> do
+                        x <- VUM.unsafeRead fwd (tb + i)
+                        VUM.unsafeWrite fwd (kb + i) (evalFunCode fc x)
+                      else {-# SCC "fwdUniS" #-} forRows m $ \i ->
+                        VUM.unsafeWrite fwd (kb + i) (evalFunCode fc (VU.unsafeIndex static (tb + i)))
+                  4 -> do
+                    let l  = VU.unsafeIndex arg key
+                        r  = VU.unsafeIndex arg2 key
+                        oc = VU.unsafeIndex ocode key
+                        dl = VU.unsafeIndex dyn l
+                        dr = VU.unsafeIndex dyn r
+                        kb = key * m
+                        lb = l * m
+                        rb = r * m
+                    case (dl, dr) of
+                      (True, True)   -> {-# SCC "fwdBinTT" #-} fwdBin fwd 0 oc kb lb rb
+                      (True, False)  -> {-# SCC "fwdBinTS" #-} fwdBin fwd 1 oc kb lb rb
+                      (False, True)  -> {-# SCC "fwdBinST" #-} fwdBin fwd 2 oc kb lb rb
+                      (False, False) -> pure ()  -- unreachable: a dynamic Bin always has a dynamic child
+                  _ -> pure ()
+                else pure ()  -- static node: column already in `static`
+              goFwd (key + 1)
+
+        -- objective = sum over rows of the root column
+        rootBase = root * m
+        sumCol v !base = go 0 0
+          where go !i !acc | i >= m = pure acc
+                           | otherwise = VUM.unsafeRead v (base + i) >>= \vv -> go (i + 1) (acc + vv)
+        sumStatic !base = go 0 0
+          where go !i !acc | i >= m = pure acc
+                           | otherwise = go (i + 1) (acc + VU.unsafeIndex static (base + i))
+    goFwd 0
+    obj <- if VU.unsafeIndex dyn root
+             then {-# SCC "objSumFwd" #-} sumCol fwd rootBase
+             else {-# SCC "objSumStatic" #-} sumStatic rootBase
+    -- seed the root adjoint: d(obj)/d(root value) = 1 for every row
+    when (VU.unsafeIndex dyn root) $ {-# SCC "seedAdj" #-} VUM.set (VUM.slice (root * m) m adj) 1
+
+    -- backward: nodes from root down to 0 (valid reverse-topological order)
+    let goBwd !key
+          | key < 0 = pure ()
+          | otherwise = do
+              bwdNode key
+              goBwd (key - 1)
+
+        bwdNode key
+          | not (VU.unsafeIndex dyn key) = pure ()  -- no Param in subtree
+          | otherwise = case VU.unsafeIndex kind key of
+              4 -> do
+                let l  = VU.unsafeIndex arg key
+                    r  = VU.unsafeIndex arg2 key
+                    oc = VU.unsafeIndex ocode key
+                    dl = VU.unsafeIndex dyn l
+                    dr = VU.unsafeIndex dyn r
+                    kb = key * m
+                    lb = l * m
+                    rb = r * m
+                case (dl, dr) of
+                  (True, True)   -> {-# SCC "bwdBinTT" #-} bwdBin fwd adj 0 oc kb lb rb
+                  (True, False)  -> {-# SCC "bwdBinTS" #-} bwdBin fwd adj 1 oc kb lb rb
+                  (False, True)  -> {-# SCC "bwdBinST" #-} bwdBin fwd adj 2 oc kb lb rb
+                  (False, False) -> pure ()  -- no dynamic children to propagate to
+              3 -> do
+                let t  = VU.unsafeIndex arg key
+                    fc = VU.unsafeIndex fcode key
+                    kb = key * m
+                    tb = t * m
+                if VU.unsafeIndex dyn t
+                  then {-# SCC "bwdUni" #-} forRows m $ \i -> do
+                    v <- VUM.unsafeRead adj (kb + i)
+                    x <- VUM.unsafeRead fwd (tb + i)
+                    c <- VUM.unsafeRead adj (tb + i)
+                    VUM.unsafeWrite adj (tb + i) (c + v * derivFunCode fc x)
+                  else pure ()  -- static child: no Param below, nothing to accumulate
+              1 -> do
+                let a  = VU.unsafeIndex arg key
+                    kb = key * m
+                {-# SCC "bwdParam" #-} do
+                  s <- sumCol adj kb
+                  VUM.unsafeModify gradM (+ s) a
+              _ -> pure ()
+    goBwd root
+
+    gradFrozen <- VU.unsafeFreeze gradM
+    pure (obj, V.convert gradFrozen)
+  where
+    root   = ctRoot ct
+    m      = ctM ct
+    p      = V.length theta
+    stride = root + 1
+    len    = stride * m
+    kind   = ctKind ct
+    arg    = ctArg ct
+    arg2   = ctArg2 ct
+    fcode  = ctFcode ct
+    ocode  = ctOcode ct
+    dyn    = ctDyn ct
+    static = ctStatic ct
+
+    -- Forward binary kernels: `combo` 0=TT, 1=TS, 2=ST (SS is unreachable
+    -- for dynamic nodes). The opcode is dispatched ONCE per node; the loop
+    -- helpers are INLINE with the literal operator so each row iteration
+    -- is a tight fused kernel with no per-element `case oc of` dispatch.
+    fwdBin :: VUM.MVector s Double -> Int -> Int -> Int -> Int -> Int -> ST s ()
+    fwdBin fwd combo oc kb lb rb = case (combo, oc) of
+      (0, 0) -> fwdTT fwd (+) kb lb rb
+      (0, 1) -> fwdTT fwd (-) kb lb rb
+      (0, 2) -> fwdTT fwd (*) kb lb rb
+      (0, 3) -> fwdTT fwd (/) kb lb rb
+      (0, 4) -> fwdTT fwd (**) kb lb rb
+      (0, 5) -> fwdTT fwd (\l r -> abs l ** r) kb lb rb
+      (0, 6) -> fwdTT fwd (\l r -> l / sqrt (1 + r * r)) kb lb rb
+      (1, 0) -> fwdTS fwd (+) kb lb rb
+      (1, 1) -> fwdTS fwd (-) kb lb rb
+      (1, 2) -> fwdTS fwd (*) kb lb rb
+      (1, 3) -> fwdTS fwd (/) kb lb rb
+      (1, 4) -> fwdTS fwd (**) kb lb rb
+      (1, 5) -> fwdTS fwd (\l r -> abs l ** r) kb lb rb
+      (1, 6) -> fwdTS fwd (\l r -> l / sqrt (1 + r * r)) kb lb rb
+      (2, 0) -> fwdST fwd (+) kb lb rb
+      (2, 1) -> fwdST fwd (-) kb lb rb
+      (2, 2) -> fwdST fwd (*) kb lb rb
+      (2, 3) -> fwdST fwd (/) kb lb rb
+      (2, 4) -> fwdST fwd (**) kb lb rb
+      (2, 5) -> fwdST fwd (\l r -> abs l ** r) kb lb rb
+      (2, 6) -> fwdST fwd (\l r -> l / sqrt (1 + r * r)) kb lb rb
+      _      -> pure ()
+    {-# INLINE fwdBin #-}
+
+    -- Backward binary kernels: same dispatch structure, `diff` is the local
+    -- (dl/dchild, dr/dchild) rule keyed on the opcode.
+    bwdBin :: VUM.MVector s Double -> VUM.MVector s Double -> Int -> Int -> Int -> Int -> Int -> ST s ()
+    bwdBin fwd adj combo oc kb lb rb = case (combo, oc) of
+      (0, 0) -> bwdTT fwd adj (\dx _ _ _ -> (dx, dx)) kb lb rb
+      (0, 1) -> bwdTT fwd adj (\dx _ _ _ -> (dx, negate dx)) kb lb rb
+      (0, 2) -> bwdTT fwd adj (\dx fx gy _ -> (dx * gy, dx * fx)) kb lb rb
+      (0, 3) -> bwdTT fwd adj (\dx _ gy fg -> (dx / gy, dx * (negate fg / gy))) kb lb rb
+      (0, 4) -> bwdTT fwd adj (\dx fx gy fg -> (fixNaN (dx * gy * fg / fx), fixNaN (dx * fg * log fx))) kb lb rb
+      (0, 5) -> bwdTT fwd adj (\dx fx gy fg ->
+                 let v2 = abs fx in (fixNaN (dx * (fx * gy) * fg / (v2 * v2)), fixNaN (dx * fg * log (abs fx)))) kb lb rb
+      (0, 6) -> bwdTT fwd adj (\dx fx gy _ ->
+                 let dxl = dx * (recip . sqrt . (+1) . (^(2::Int))) gy
+                     dxy = fx * gy * dxl ^ (3::Int)
+                 in (dxl, dxy)) kb lb rb
+      (1, 0) -> bwdTS fwd adj (\dx _ _ _ -> (dx, dx)) kb lb rb
+      (1, 1) -> bwdTS fwd adj (\dx _ _ _ -> (dx, negate dx)) kb lb rb
+      (1, 2) -> bwdTS fwd adj (\dx fx gy _ -> (dx * gy, dx * fx)) kb lb rb
+      (1, 3) -> bwdTS fwd adj (\dx _ gy fg -> (dx / gy, dx * (negate fg / gy))) kb lb rb
+      (1, 4) -> bwdTS fwd adj (\dx fx gy fg -> (fixNaN (dx * gy * fg / fx), fixNaN (dx * fg * log fx))) kb lb rb
+      (1, 5) -> bwdTS fwd adj (\dx fx gy fg ->
+                 let v2 = abs fx in (fixNaN (dx * (fx * gy) * fg / (v2 * v2)), fixNaN (dx * fg * log (abs fx)))) kb lb rb
+      (1, 6) -> bwdTS fwd adj (\dx fx gy _ ->
+                 let dxl = dx * (recip . sqrt . (+1) . (^(2::Int))) gy
+                     dxy = fx * gy * dxl ^ (3::Int)
+                 in (dxl, dxy)) kb lb rb
+      (2, 0) -> bwdST fwd adj (\dx _ _ _ -> (dx, dx)) kb lb rb
+      (2, 1) -> bwdST fwd adj (\dx _ _ _ -> (dx, negate dx)) kb lb rb
+      (2, 2) -> bwdST fwd adj (\dx fx gy _ -> (dx * gy, dx * fx)) kb lb rb
+      (2, 3) -> bwdST fwd adj (\dx _ gy fg -> (dx / gy, dx * (negate fg / gy))) kb lb rb
+      (2, 4) -> bwdST fwd adj (\dx fx gy fg -> (fixNaN (dx * gy * fg / fx), fixNaN (dx * fg * log fx))) kb lb rb
+      (2, 5) -> bwdST fwd adj (\dx fx gy fg ->
+                 let v2 = abs fx in (fixNaN (dx * (fx * gy) * fg / (v2 * v2)), fixNaN (dx * fg * log (abs fx)))) kb lb rb
+      (2, 6) -> bwdST fwd adj (\dx fx gy _ ->
+                 let dxl = dx * (recip . sqrt . (+1) . (^(2::Int))) gy
+                     dxy = fx * gy * dxl ^ (3::Int)
+                 in (dxl, dxy)) kb lb rb
+      _      -> pure ()
+    {-# INLINE bwdBin #-}
+
+    fwdTT fwd op kb lb rb = forRows m $ \i -> do
+      xl <- VUM.unsafeRead fwd (lb + i)
+      xr <- VUM.unsafeRead fwd (rb + i)
+      VUM.unsafeWrite fwd (kb + i) (op xl xr)
+    {-# INLINE fwdTT #-}
+
+    fwdTS fwd op kb lb rb = forRows m $ \i -> do
+      xl <- VUM.unsafeRead fwd (lb + i)
+      VUM.unsafeWrite fwd (kb + i) (op xl (VU.unsafeIndex static (rb + i)))
+    {-# INLINE fwdTS #-}
+
+    fwdST fwd op kb lb rb = forRows m $ \i -> do
+      xr <- VUM.unsafeRead fwd (rb + i)
+      VUM.unsafeWrite fwd (kb + i) (op (VU.unsafeIndex static (lb + i)) xr)
+    {-# INLINE fwdST #-}
+
+    bwdTT fwd adj diff kb lb rb = forRows m $ \i -> do
+      v  <- VUM.unsafeRead adj (kb + i)
+      xl <- VUM.unsafeRead fwd (lb + i)
+      xr <- VUM.unsafeRead fwd (rb + i)
+      fg <- VUM.unsafeRead fwd (kb + i)
+      let (gl, gr) = diff v xl xr fg
+      a <- VUM.unsafeRead adj (lb + i)
+      VUM.unsafeWrite adj (lb + i) (a + gl)
+      b <- VUM.unsafeRead adj (rb + i)
+      VUM.unsafeWrite adj (rb + i) (b + gr)
+    {-# INLINE bwdTT #-}
+
+    bwdTS fwd adj diff kb lb rb = forRows m $ \i -> do
+      v  <- VUM.unsafeRead adj (kb + i)
+      xl <- VUM.unsafeRead fwd (lb + i)
+      fg <- VUM.unsafeRead fwd (kb + i)
+      let (gl, _) = diff v xl (VU.unsafeIndex static (rb + i)) fg
+      a <- VUM.unsafeRead adj (lb + i)
+      VUM.unsafeWrite adj (lb + i) (a + gl)
+    {-# INLINE bwdTS #-}
+
+    bwdST fwd adj diff kb lb rb = forRows m $ \i -> do
+      v  <- VUM.unsafeRead adj (kb + i)
+      xr <- VUM.unsafeRead fwd (rb + i)
+      fg <- VUM.unsafeRead fwd (kb + i)
+      let (_, gr) = diff v (VU.unsafeIndex static (lb + i)) xr fg
+      b <- VUM.unsafeRead adj (rb + i)
+      VUM.unsafeWrite adj (rb + i) (b + gr)
+    {-# INLINE bwdST #-}
+
+-- Unboxed ST loop over the m data rows; always inlined so the per-node
+-- bodies above are fused into a single tail-recursive kernel per node.
+forRows :: Int -> (Int -> ST s ()) -> ST s ()
+forRows !n f = go 0
+  where
+    go !i | i >= n    = pure ()
+          | otherwise = f i >> go (i + 1)
+{-# INLINE forRows #-}
+
+-- Inline scalar eval/derivative kernels keyed on fromEnum codes (Op and
+-- Function), replacing the function-returning evalOp/evalFun dispatch.
+evalOpCode :: Int -> Double -> Double -> Double
+evalOpCode 0 = (+)
+evalOpCode 1 = (-)
+evalOpCode 2 = (*)
+evalOpCode 3 = (/)
+evalOpCode 4 = (**)
+evalOpCode 5 = \l r -> abs l ** r
+evalOpCode 6 = \l r -> l / sqrt (1 + r * r)
+evalOpCode _ = error "evalOpCode: bad op code"
+{-# INLINE evalOpCode #-}
+
+evalFunCode :: Int -> Double -> Double
+evalFunCode 0  = id
+evalFunCode 1  = abs
+evalFunCode 2  = sin
+evalFunCode 3  = cos
+evalFunCode 4  = tan
+evalFunCode 5  = sinh
+evalFunCode 6  = cosh
+evalFunCode 7  = tanh
+evalFunCode 8  = asin
+evalFunCode 9  = acos
+evalFunCode 10 = atan
+evalFunCode 11 = asinh
+evalFunCode 12 = acosh
+evalFunCode 13 = atanh
+evalFunCode 14 = sqrt
+evalFunCode 15 = \x -> sqrt (abs x)
+evalFunCode 16 = \x -> signum x * abs x ** (1 / 3)
+evalFunCode 17 = \x -> x * x
+evalFunCode 18 = log
+evalFunCode 19 = \x -> log (abs x)
+evalFunCode 20 = exp
+evalFunCode 21 = recip
+evalFunCode 22 = \x -> x * x * x
+evalFunCode _  = error "evalFunCode: bad function code"
+{-# INLINE evalFunCode #-}
+
+derivFunCode :: Int -> Double -> Double
+derivFunCode 0  = const 1
+derivFunCode 1  = \x -> x / abs x
+derivFunCode 2  = cos
+derivFunCode 3  = negate . sin
+derivFunCode 4  = \x -> 1 / (cos x * cos x)
+derivFunCode 5  = cosh
+derivFunCode 6  = sinh
+derivFunCode 7  = \x -> 1 - tanh x * tanh x
+derivFunCode 8  = \x -> 1 / sqrt (1 - x * x)
+derivFunCode 9  = \x -> -1 / sqrt (1 - x * x)
+derivFunCode 10 = \x -> 1 / (1 + x * x)
+derivFunCode 11 = \x -> 1 / sqrt (1 + x * x)
+derivFunCode 12 = \x -> 1 / (sqrt (x - 1) * sqrt (x + 1))
+derivFunCode 13 = \x -> 1 / (1 - x * x)
+derivFunCode 14 = \x -> 1 / (2 * sqrt x)
+derivFunCode 15 = \x -> x / (2 * abs x ** (3 / 2))
+derivFunCode 16 = \x -> 1 / (3 * (x * x) ** (1 / 3))
+derivFunCode 17 = (* 2)
+derivFunCode 18 = recip
+derivFunCode 19 = recip
+derivFunCode 20 = exp
+derivFunCode 21 = \x -> -1 / (x * x)
+derivFunCode 22 = \x -> 3 * x * x
+derivFunCode _  = error "derivFunCode: bad function code"
+{-# INLINE derivFunCode #-}
+
+-- Pure local-derivative rules keyed on fromEnum Op, scalar version (same
+-- math as the original vectorized `diffPure`, applied per-row above).
+diffScalarCode :: Int -> Double -> Double -> Double -> Double -> (Double, Double)
+diffScalarCode 0 dx _  _  _  = (dx, dx)
+diffScalarCode 1 dx _  _  _  = (dx, negate dx)
+diffScalarCode 2 dx fx gy _  = (dx * gy, dx * fx)
+diffScalarCode 3 dx _  gy fg = (dx / gy, dx * (negate fg / gy))
+diffScalarCode 4 dx fx gy fg =
     ( fixNaN (dx * gy * fg / fx)
     , fixNaN (dx * fg * log fx) )
-diffScalar PowerAbs dx fx gy fg =
+diffScalarCode 5 dx fx gy fg =
     let v2 = abs fx
     in ( fixNaN (dx * (fx * gy) * fg / (v2 * v2))
        , fixNaN (dx * fg * log (abs fx)) )
-diffScalar AQ dx fx gy _ =
+diffScalarCode 6 dx fx gy _ =
     let dxl = dx * (recip . sqrt . (+1) . (^(2::Int))) gy
         dxy = fx * gy * dxl ^ (3::Int)
     in (dxl, dxy)
-{-# INLINE diffScalar #-}
+diffScalarCode _ _ _ _ _ = error "diffScalarCode: bad op code"
+{-# INLINE diffScalarCode #-}
 
 fixNaN :: Double -> Double
 fixNaN x = if isNaN x then 0 else x
@@ -289,8 +664,15 @@ compileTreeMulti xss ys mYErr tree =
     in [ compileTree xs y err tree | (xs, y, err) <- zip3 xssChunks ysChunks errChunks ]
 
 -- | Evaluates the gradient across all compiled chunks in parallel.
+-- The node-outer `evalGradVec` kernel is memory-bandwidth-bound (it streams
+-- stride*m fwd/adj columns), so it does not scale across cores: splitting
+-- the data into chunks and running it in parallel is equal-or-slower than
+-- the whole-data single-thread call. The row-fused `evalGrad` kernel uses
+-- O(nodes) scratch per chunk and is compute-bound, so it parallelizes
+-- almost linearly. Strategy: single chunk (no parallelism, e.g. -N1) uses
+-- the fast vectorized kernel; multiple chunks use row-fused per chunk.
 evalGradMulti :: [CompiledTree] -> V.Vector Double -> (Double, V.Vector Double)
-evalGradMulti [ct] theta = evalGrad ct theta
+evalGradMulti [ct] theta = evalGradVec ct theta
 evalGradMulti cts theta = unsafePerformIO $ do
     results <- forConcurrently cts $ \ct -> evaluate (evalGrad ct theta)
     let totalObj   = sum $ map fst results

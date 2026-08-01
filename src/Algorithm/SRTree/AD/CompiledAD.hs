@@ -29,4 +29,9 @@ data CompiledTree = CompiledTree
   , ctStatic :: VU.Vector Double                     -- flat [node * m + row]; 0-filled for dynamic ids
   , ctM      :: !Int
   , ctNPred  :: !Int                                 -- root + 1 (stride for flat static)
+  , ctKind   :: !(VU.Vector Int)                     -- id -> node kind: 0 Var, 1 Param, 2 Const, 3 Uni, 4 Bin
+  , ctArg    :: !(VU.Vector Int)                     -- id -> Param: param ix; Uni: child id; Bin: left id
+  , ctArg2   :: !(VU.Vector Int)                     -- id -> Bin: right id; else 0
+  , ctFcode  :: !(VU.Vector Int)                     -- id -> Uni: fromEnum Function
+  , ctOcode  :: !(VU.Vector Int)                     -- id -> Bin: fromEnum Op
   }
