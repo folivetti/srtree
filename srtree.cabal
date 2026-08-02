@@ -70,6 +70,7 @@ library
         , bytestring >=0.11 && <0.13
         , containers >=0.6.7 && <0.9
         , deepseq
+        , directory
         , exceptions
         , filepath >=1.4.0.0 && <1.6
         , hashable
@@ -111,6 +112,7 @@ executable bench
         , containers >=0.6.7 && <0.9
         , criterion
         , deepseq
+        , directory
         , exceptions
         , filepath >=1.4.0.0 && <1.6
         , hashable
@@ -147,6 +149,7 @@ executable bench-eqsat
         , containers >=0.6.7 && <0.9
         , criterion
         , deepseq
+        , directory
         , exceptions
         , filepath >=1.4.0.0 && <1.6
         , hashable
@@ -182,6 +185,7 @@ executable srtree-report
         , bytestring
         , containers
         , deepseq
+        , directory
         , exceptions
         , filepath
         , hashable
@@ -222,6 +226,7 @@ test-suite srtree-test
         , bytestring >=0.11 && <0.13
         , containers >=0.6.7 && <0.9
         , deepseq
+        , directory
         , exceptions
         , filepath >=1.4.0.0 && <1.6
         , hashable

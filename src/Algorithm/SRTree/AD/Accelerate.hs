@@ -19,13 +19,15 @@ import Data.Vector.Storable qualified as VS
 import Prelude hiding (zipWith, replicate, sum, map, log, abs, sqrt, recip)
 import Algorithm.SRTree.AD.CompiledAD
 
-import Data.IORef (IORef, newIORef, readIORef, modifyIORef')
+import Data.IORef (IORef, newIORef, readIORef, modifyIORef', writeIORef)
 import System.IO.Unsafe (unsafePerformIO)
 import System.CPUTime (getCPUTime)
 import Data.Time.Clock.POSIX (getPOSIXTime, POSIXTime)
 import Control.Exception (evaluate)
-import System.IO (stderr, hPutStrLn)
+import System.IO (stderr, hPutStrLn, openBinaryFile, hFileSize, hClose, IOMode(..))
 import Control.Monad (when)
+import System.Directory (getXdgDirectory, XdgDirectory(..), listDirectory, doesFileExist, removeFile)
+import System.FilePath ((</>))
 
 {-# INLINE diffPureAcc #-}
 diffPureAcc :: Op -> Exp Double -> Exp Double -> Exp Double -> Exp Double -> Exp (Double, Double)
@@ -139,11 +141,63 @@ compileWall = unsafePerformIO (newIORef 0)
 evalWall :: IORef Double
 evalWall = unsafePerformIO (newIORef 0)
 
+-- | One-time flag so the zero-byte cache sweep runs only once per process.
+{-# NOINLINE cacheCleaned #-}
+cacheCleaned :: IORef Bool
+cacheCleaned = unsafePerformIO (newIORef False)
+
 -- | Single-worker target: exactly 1 thread, bypasses the env-var-based
 -- defaultTarget (which is a CAF initialized before setEnv takes effect).
 {-# NOINLINE singleWorker #-}
 singleWorker :: CPU.Native
 singleWorker = unsafePerformIO (CPU.createTarget [0])
+
+-- | accelerate-llvm-native caches each JIT-compiled kernel as <hash>.o and
+-- <hash>.so in the XDG cache dir, but the cache is not crash-safe: hits are
+-- validated only by 'doesFileExist', and the .so is written non-atomically by
+-- the system linker. An interrupted or concurrent link step leaves a zero-byte
+-- .so, which dlopen then rejects with "file too short" on every later run.
+-- A valid .so is never zero bytes, so we heal the cache by deleting zero-byte
+-- .so/.o files once per process before compiling.
+{-# NOINLINE cleanZeroByteCache #-}
+cleanZeroByteCache :: IO ()
+cleanZeroByteCache = do
+  dir <- getXdgDirectory XdgCache "accelerate"
+  emptyFiles <- walkZeroByte dir
+  Prelude.mapM_ removeFile emptyFiles
+  when (Prelude.not (Prelude.null emptyFiles)) $
+    hPutStrLn stderr ("accelerate: removed " Prelude.++ show (Prelude.length emptyFiles) Prelude.++ " corrupt (zero-byte) cache file(s)")
+
+walkZeroByte :: FilePath -> IO [FilePath]
+walkZeroByte dir = do
+  entries <- listDirectory dir
+  results <- Prelude.mapM go entries
+  pure (Prelude.concat results)
+  where
+    go e = do
+      let p = dir </> e
+      isFile <- doesFileExist p
+      if isFile
+        then do
+          sz <- fileSize p
+          pure [ p | sz Prelude.== 0 ]
+        else walkZeroByte p
+    fileSize :: FilePath -> IO Integer
+    fileSize p = do
+      h <- openBinaryFile p ReadMode
+      s <- hFileSize h
+      hClose h
+      pure s
+
+-- | Run the one-time cache sweep; guarded so it only walks the (possibly very
+-- large) cache directory once per process.
+{-# NOINLINE ensureCleanCache #-}
+ensureCleanCache :: IORef Bool -> IO ()
+ensureCleanCache done = do
+  already <- readIORef done
+  when (Prelude.not already) $ do
+    cleanZeroByteCache
+    writeIORef done True
 
 -- | Compiles the AST into an LLVM JIT closure.
 -- Call this exactly ONCE before your NLopt optimization loop.
@@ -151,6 +205,7 @@ compileAccelerateTree :: CompiledTree -> [VU.Vector Double] -> VU.Vector Double 
 compileAccelerateTree ct xss ys =
     let
         jittedFunc = unsafePerformIO $ do
+            ensureCleanCache cacheCleaned
             t0cpu <- getCPUTime
             t0wal <- getPOSIXTime
             let !jf = CPU.run1With singleWorker (buildAccGraph ct xss ys)
@@ -176,36 +231,7 @@ compileAccelerateTree ct xss ys =
         modifyIORef' evalWall (+ realToFrac (t1wal - t0wal))
         modifyIORef' evalCount (+ 1)
         cnt <- readIORef evalCount
-        when (cnt `Prelude.mod` 100 Prelude.== 0) $ do
-            cc <- readIORef compileCount
-            ct <- readIORef compileTime
-            cw <- readIORef compileWall
-            ec <- readIORef evalCount
-            et <- readIORef evalTime
-            ew <- readIORef evalWall
-            let ctSec :: Double = Prelude.fromIntegral ct Prelude./ 1e12
-                cwSec :: Double = cw
-                etSec :: Double = Prelude.fromIntegral et Prelude./ 1e12
-                ewSec :: Double = ew
-                avgCompile :: Double
-                    | cc Prelude.> 0 = ctSec Prelude./ Prelude.fromIntegral cc
-                    | Prelude.otherwise = 0
-                avgEval :: Double
-                    | ec Prelude.> 0 = etSec Prelude./ Prelude.fromIntegral ec
-                    | Prelude.otherwise = 0
-                totalWall :: Double = cwSec Prelude.+ ewSec
-                totalCpu  :: Double = ctSec Prelude.+ etSec
-                efficiency :: Double
-                    | totalWall Prelude.> 0 = totalCpu Prelude./ totalWall
-                    | Prelude.otherwise = 1
-            hPutStrLn stderr $ Prelude.unwords
-                [ "[ACCEL] compile:", show cc, "calls, cpu:", show ctSec, "s, wall:", show cwSec, "s"
-                , "eval:", show ec, "calls, cpu:", show etSec, "s, wall:", show ewSec, "s"
-                , "total_cpu:", show totalCpu, "s, total_wall:", show totalWall, "s"
-                , "efficiency:", show efficiency
-                , "avg_compile(cpu):", show avgCompile, "s"
-                , "avg_eval(cpu):", show avgEval, "s"
-                ]
+
         pure (obj, grad)
 
 
