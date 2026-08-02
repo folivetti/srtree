@@ -59,32 +59,35 @@ while p arg prog = do if (p arg)
                               while p arg' prog
                       else pure arg
 
-fitnessFun :: Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> Target -> (Double, Target)
-fitnessFun nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) tree thetaOrig =
+fitnessFun :: Bool -> Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> Target -> (Double, Target)
+fitnessFun skipVal nIter distribution (x, y, mYErr) (x_val, y_val, mYErr_val) tree thetaOrig =
   if isNaN val
     then (-(1/0), theta)
     else (val, theta)
   where
     nParams       = countParamsUniq tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
-    (theta, _, _) = minimizeNLL' VAR1 MultiThread (NLL distribution) mYErr nIter x y tree thetaOrig
+    (theta, loss, _) = minimizeNLL' VAR1 MultiThread (NLL distribution) mYErr nIter x y tree thetaOrig
     evalF a b c   = negate $ compileLoss a (buildLoss (NLL distribution) (fromIntegral (V.length b)) tree) b c $ if nParams == 0 then thetaOrig else theta
-    val           = evalF x_val y_val mYErr_val
+    -- at folds=1 the validation split is the training data itself, so the
+    -- train loss returned by minimizeNLL' already is the val loss; skipping
+    -- the separate compileLoss below avoids re-evaluating every expression.
+    val           = if skipVal then negate loss else evalF x_val y_val mYErr_val
 
 --{-# INLINE fitnessFun #-}
 
-fitnessFunRep :: Int -> Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> RndEGraph (Double, Target)
-fitnessFunRep nRep nIter distribution dataTrain dataVal tree = do
+fitnessFunRep :: Bool -> Int -> Int -> Distribution -> DataSet -> DataSet -> Fix SRTree -> RndEGraph (Double, Target)
+fitnessFunRep skipVal nRep nIter distribution dataTrain dataVal tree = do
     let nParams = countParamsUniq tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
     thetaOrigs <- replicateM nRep (rnd $ randomVec nParams)
-    let fits = maximumBy (compare `on` fst) $ Prelude.map (fitnessFun nIter distribution dataTrain dataVal tree) thetaOrigs
+    let fits = maximumBy (compare `on` fst) $ Prelude.map (fitnessFun skipVal nIter distribution dataTrain dataVal tree) thetaOrigs
     pure fits
 --{-# INLINE fitnessFunRep #-}
 
 
-fitnessMV :: Bool -> Int -> Int -> Distribution -> [(DataSet, DataSet)] -> Fix SRTree -> RndEGraph (Double, [Target])
-fitnessMV shouldReparam nRep nIter distribution dataTrainsVals _tree = do
+fitnessMV :: Bool -> Bool -> Int -> Int -> Distribution -> [(DataSet, DataSet)] -> Fix SRTree -> RndEGraph (Double, [Target])
+fitnessMV skipVal shouldReparam nRep nIter distribution dataTrainsVals _tree = do
   let tree = if shouldReparam then relabelParams _tree else relabelParamsOrder _tree
-  response <- forM dataTrainsVals $ \(dt, dv) -> fitnessFunRep nRep nIter distribution dt dv tree
+  response <- forM dataTrainsVals $ \(dt, dv) -> fitnessFunRep skipVal nRep nIter distribution dt dv tree
   pure (minimum (Prelude.map fst response), Prelude.map snd response)
 
 

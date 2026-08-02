@@ -290,75 +290,82 @@ evalGrad ct theta = runST $ do
 -- O(nodes * m) fwd/adj columns of the massiv-style whole-column kernel.
 evalGradVec :: CompiledTree -> V.Vector Double -> (Double, V.Vector Double)
 evalGradVec ct theta = runST $ do
-    fwd   <- VUM.new len   -- [node * m + row]; every dynamic column is written before any read
-    adj   <- VUM.replicate len 0   -- [node * m + row]
+    -- Per-chunk buffers of O(stride * chunk) instead of one O(stride * m)
+    -- allocation per call: the fwd/adj matrices are streamed one chunk of
+    -- `chunk` rows at a time, so the per-call allocation drops ~m/chunk x
+    -- (and the working set stays L3-resident). The chunk partition does not
+    -- change any value: each row is independent, the objective row sums
+    -- accumulate in order and the gradient accumulates row-sums per chunk.
+    fwd   <- VUM.new (stride * chunk)   -- [node * nb + i]; dynamic columns written before read
+    adj   <- VUM.replicate (stride * chunk) 0   -- [node * nb + i]
     gradM <- VUM.replicate p 0
 
-    forwardPassRange ct theta fwd 0 m
-
-    -- objective = sum over rows of the root column
-    let rootBase = root * m
-        sumCol v !base = go 0 0
-          where go !i !acc | i >= m = pure acc
-                           | otherwise = VUM.unsafeRead v (base + i) >>= \vv -> go (i + 1) (acc + vv)
-        sumStatic !base = go 0 0
-          where go !i !acc | i >= m = pure acc
-                           | otherwise = go (i + 1) (acc + VU.unsafeIndex static (base + i))
-    obj <- if VU.unsafeIndex dyn root
-             then {-# SCC "objSumFwd" #-} sumCol fwd rootBase
-             else {-# SCC "objSumStatic" #-} sumStatic rootBase
-    -- seed the root adjoint: d(obj)/d(root value) = 1 for every row
-    when (VU.unsafeIndex dyn root) $ {-# SCC "seedAdj" #-} VUM.set (VUM.slice (root * m) m adj) 1
-
-    -- backward: nodes from root down to 0 (valid reverse-topological order)
-    let goBwd !key
-          | key < 0 = pure ()
+    let go !start !acc
+          | start >= m = do
+              gradFrozen <- VU.unsafeFreeze gradM
+              pure (acc, V.convert gradFrozen)
           | otherwise = do
-              bwdNode key
-              goBwd (key - 1)
+              let nb = min chunk (m - start)
+                  s0 = start
+              forwardPassRange ct theta fwd s0 nb
+              -- objective contribution = sum over this chunk's rows of root
+              s <- if VU.unsafeIndex dyn root
+                     then {-# SCC "objSumFwd" #-} sumCol fwd (root * nb) nb
+                     else {-# SCC "objSumStatic" #-} sumStatic (root * m + s0) nb
+              -- seed the root adjoint: d(obj)/d(root value) = 1 per row
+              unless (s0 == 0) $ VUM.set adj 0   -- reuse the buffer; keep it clean
+              when (VU.unsafeIndex dyn root) $ {-# SCC "seedAdj" #-} VUM.set (VUM.slice (root * nb) nb adj) 1
+              -- backward: nodes from root down to 0 (valid reverse-topological order)
+              let goBwd !key
+                    | key < 0 = pure ()
+                    | otherwise = do
+                        bwdNode key
+                        goBwd (key - 1)
 
-        bwdNode key
-          | not (VU.unsafeIndex dyn key) = pure ()  -- no Param in subtree
-          | otherwise = case VU.unsafeIndex kind key of
-              4 -> do
-                let l  = VU.unsafeIndex arg key
-                    r  = VU.unsafeIndex arg2 key
-                    oc = VU.unsafeIndex ocode key
-                    dl = VU.unsafeIndex dyn l
-                    dr = VU.unsafeIndex dyn r
-                    kb = key * m
-                    lb = l * m
-                    rb = r * m
-                case (dl, dr) of
-                  (True, True)   -> {-# SCC "bwdBinTT" #-} bwdBin m static fwd adj 0 oc kb lb rb
-                  (True, False)  -> {-# SCC "bwdBinTS" #-} bwdBin m static fwd adj 1 oc kb lb rb
-                  (False, True)  -> {-# SCC "bwdBinST" #-} bwdBin m static fwd adj 2 oc kb lb rb
-                  (False, False) -> pure ()  -- no dynamic children to propagate to
-              3 -> do
-                let t  = VU.unsafeIndex arg key
-                    fc = VU.unsafeIndex fcode key
-                    kb = key * m
-                    tb = t * m
-                if VU.unsafeIndex dyn t
-                  then {-# SCC "bwdUni" #-} bwdUni m fwd adj fc kb tb
-                  else pure ()  -- static child: no Param below, nothing to accumulate
-              1 -> do
-                let a  = VU.unsafeIndex arg key
-                    kb = key * m
-                {-# SCC "bwdParam" #-} do
-                  s <- sumCol adj kb
-                  VUM.unsafeModify gradM (+ s) a
-              _ -> pure ()
-    goBwd root
+                  bwdNode key
+                    | not (VU.unsafeIndex dyn key) = pure ()  -- no Param in subtree
+                    | otherwise = case VU.unsafeIndex kind key of
+                        4 -> do
+                          let l  = VU.unsafeIndex arg key
+                              r  = VU.unsafeIndex arg2 key
+                              oc = VU.unsafeIndex ocode key
+                              dl = VU.unsafeIndex dyn l
+                              dr = VU.unsafeIndex dyn r
+                              kb = key * nb
+                              lb = l * nb
+                              rb = r * nb
+                              ls = l * m + s0
+                              rs = r * m + s0
+                          case (dl, dr) of
+                            (True, True)   -> {-# SCC "bwdBinTT" #-} bwdBin nb static fwd adj 0 oc kb lb rb ls rs
+                            (True, False)  -> {-# SCC "bwdBinTS" #-} bwdBin nb static fwd adj 1 oc kb lb rb ls rs
+                            (False, True)  -> {-# SCC "bwdBinST" #-} bwdBin nb static fwd adj 2 oc kb lb rb ls rs
+                            (False, False) -> pure ()  -- no dynamic children to propagate to
+                        3 -> do
+                          let t  = VU.unsafeIndex arg key
+                              fc = VU.unsafeIndex fcode key
+                              kb = key * nb
+                              tb = t * nb
+                          if VU.unsafeIndex dyn t
+                            then {-# SCC "bwdUni" #-} bwdUni nb fwd adj fc kb tb
+                            else pure ()  -- static child: no Param below, nothing to accumulate
+                        1 -> do
+                          let a  = VU.unsafeIndex arg key
+                              kb = key * nb
+                          {-# SCC "bwdParam" #-} do
+                            s' <- sumCol adj kb nb
+                            VUM.unsafeModify gradM (+ s') a
+                        _ -> pure ()
+              goBwd root
+              go (start + nb) (acc + s)
 
-    gradFrozen <- VU.unsafeFreeze gradM
-    pure (obj, V.convert gradFrozen)
+    go 0 0
   where
     root   = ctRoot ct
     m      = ctM ct
     p      = V.length theta
     stride = root + 1
-    len    = stride * m
+    chunk  = 1024
     kind   = ctKind ct
     arg    = ctArg ct
     arg2   = ctArg2 ct
@@ -366,6 +373,13 @@ evalGradVec ct theta = runST $ do
     ocode  = ctOcode ct
     dyn    = ctDyn ct
     static = ctStatic ct
+
+    sumCol v vbase !n = go 0 0
+      where go !i !acc | i >= n = pure acc
+                       | otherwise = VUM.unsafeRead v (vbase + i) >>= \vv -> go (i + 1) (acc + vv)
+    sumStatic sbase !n = go 0 0
+      where go !i !acc | i >= n = pure acc
+                       | otherwise = go (i + 1) (acc + VU.unsafeIndex static (sbase + i))
 
 -- ---------------------------------------------------------------------
 -- Forward-only objective evaluation: runs the forward pass and the row
@@ -502,42 +516,44 @@ fwdBin nb static fwd combo oc kb lb rb ls rs = case (combo, oc) of
 {-# INLINE fwdBin #-}
 
 -- Backward binary kernels: same dispatch structure, `diff` is the local
--- (dl/dchild, dr/dchild) rule keyed on the opcode.
-bwdBin :: Int -> VU.Vector Double -> VUM.MVector s Double -> VUM.MVector s Double -> Int -> Int -> Int -> Int -> Int -> ST s ()
-bwdBin m static fwd adj combo oc kb lb rb = case (combo, oc) of
-  (0, 0) -> bwdTT m fwd adj (\dx _ _ _ -> (dx, dx)) kb lb rb
-  (0, 1) -> bwdTT m fwd adj (\dx _ _ _ -> (dx, negate dx)) kb lb rb
-  (0, 2) -> bwdTT m fwd adj (\dx fx gy _ -> (dx * gy, dx * fx)) kb lb rb
-  (0, 3) -> bwdTT m fwd adj (\dx _ gy fg -> (dx / gy, dx * (negate fg / gy))) kb lb rb
-  (0, 4) -> bwdTT m fwd adj (\dx fx gy fg -> (fixNaN (dx * gy * fg / fx), fixNaN (dx * fg * log fx))) kb lb rb
-  (0, 5) -> bwdTT m fwd adj (\dx fx gy fg ->
+-- (dl/dchild, dr/dchild) rule keyed on the opcode. `nb` is the number of
+-- rows in this chunk, `ls`/`rs` are the static column bases already offset
+-- by the chunk start (used by the TS/ST variants).
+bwdBin :: Int -> VU.Vector Double -> VUM.MVector s Double -> VUM.MVector s Double -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> ST s ()
+bwdBin nb static fwd adj combo oc kb lb rb ls rs = case (combo, oc) of
+  (0, 0) -> bwdTT nb fwd adj (\dx _ _ _ -> (dx, dx)) kb lb rb
+  (0, 1) -> bwdTT nb fwd adj (\dx _ _ _ -> (dx, negate dx)) kb lb rb
+  (0, 2) -> bwdTT nb fwd adj (\dx fx gy _ -> (dx * gy, dx * fx)) kb lb rb
+  (0, 3) -> bwdTT nb fwd adj (\dx _ gy fg -> (dx / gy, dx * (negate fg / gy))) kb lb rb
+  (0, 4) -> bwdTT nb fwd adj (\dx fx gy fg -> (fixNaN (dx * gy * fg / fx), fixNaN (dx * fg * log fx))) kb lb rb
+  (0, 5) -> bwdTT nb fwd adj (\dx fx gy fg ->
              let v2 = abs fx in (fixNaN (dx * (fx * gy) * fg / (v2 * v2)), fixNaN (dx * fg * log (abs fx)))) kb lb rb
-  (0, 6) -> bwdTT m fwd adj (\dx fx gy _ ->
+  (0, 6) -> bwdTT nb fwd adj (\dx fx gy _ ->
              let dxl = dx * (recip . sqrt . (+1) . (^(2::Int))) gy
                  dxy = fx * gy * dxl ^ (3::Int)
              in (dxl, dxy)) kb lb rb
-  (1, 0) -> bwdTS m static fwd adj (\dx _ _ _ -> (dx, dx)) kb lb rb
-  (1, 1) -> bwdTS m static fwd adj (\dx _ _ _ -> (dx, negate dx)) kb lb rb
-  (1, 2) -> bwdTS m static fwd adj (\dx fx gy _ -> (dx * gy, dx * fx)) kb lb rb
-  (1, 3) -> bwdTS m static fwd adj (\dx _ gy fg -> (dx / gy, dx * (negate fg / gy))) kb lb rb
-  (1, 4) -> bwdTS m static fwd adj (\dx fx gy fg -> (fixNaN (dx * gy * fg / fx), fixNaN (dx * fg * log fx))) kb lb rb
-  (1, 5) -> bwdTS m static fwd adj (\dx fx gy fg ->
-             let v2 = abs fx in (fixNaN (dx * (fx * gy) * fg / (v2 * v2)), fixNaN (dx * fg * log (abs fx)))) kb lb rb
-  (1, 6) -> bwdTS m static fwd adj (\dx fx gy _ ->
+  (1, 0) -> bwdTS nb static fwd adj (\dx _ _ _ -> (dx, dx)) kb lb rs
+  (1, 1) -> bwdTS nb static fwd adj (\dx _ _ _ -> (dx, negate dx)) kb lb rs
+  (1, 2) -> bwdTS nb static fwd adj (\dx fx gy _ -> (dx * gy, dx * fx)) kb lb rs
+  (1, 3) -> bwdTS nb static fwd adj (\dx _ gy fg -> (dx / gy, dx * (negate fg / gy))) kb lb rs
+  (1, 4) -> bwdTS nb static fwd adj (\dx fx gy fg -> (fixNaN (dx * gy * fg / fx), fixNaN (dx * fg * log fx))) kb lb rs
+  (1, 5) -> bwdTS nb static fwd adj (\dx fx gy fg ->
+             let v2 = abs fx in (fixNaN (dx * (fx * gy) * fg / (v2 * v2)), fixNaN (dx * fg * log (abs fx)))) kb lb rs
+  (1, 6) -> bwdTS nb static fwd adj (\dx fx gy _ ->
              let dxl = dx * (recip . sqrt . (+1) . (^(2::Int))) gy
                  dxy = fx * gy * dxl ^ (3::Int)
-             in (dxl, dxy)) kb lb rb
-  (2, 0) -> bwdST m static fwd adj (\dx _ _ _ -> (dx, dx)) kb lb rb
-  (2, 1) -> bwdST m static fwd adj (\dx _ _ _ -> (dx, negate dx)) kb lb rb
-  (2, 2) -> bwdST m static fwd adj (\dx fx gy _ -> (dx * gy, dx * fx)) kb lb rb
-  (2, 3) -> bwdST m static fwd adj (\dx _ gy fg -> (dx / gy, dx * (negate fg / gy))) kb lb rb
-  (2, 4) -> bwdST m static fwd adj (\dx fx gy fg -> (fixNaN (dx * gy * fg / fx), fixNaN (dx * fg * log fx))) kb lb rb
-  (2, 5) -> bwdST m static fwd adj (\dx fx gy fg ->
-             let v2 = abs fx in (fixNaN (dx * (fx * gy) * fg / (v2 * v2)), fixNaN (dx * fg * log (abs fx)))) kb lb rb
-  (2, 6) -> bwdST m static fwd adj (\dx fx gy _ ->
+             in (dxl, dxy)) kb lb rs
+  (2, 0) -> bwdST nb static fwd adj (\dx _ _ _ -> (dx, dx)) kb ls rb
+  (2, 1) -> bwdST nb static fwd adj (\dx _ _ _ -> (dx, negate dx)) kb ls rb
+  (2, 2) -> bwdST nb static fwd adj (\dx fx gy _ -> (dx * gy, dx * fx)) kb ls rb
+  (2, 3) -> bwdST nb static fwd adj (\dx _ gy fg -> (dx / gy, dx * (negate fg / gy))) kb ls rb
+  (2, 4) -> bwdST nb static fwd adj (\dx fx gy fg -> (fixNaN (dx * gy * fg / fx), fixNaN (dx * fg * log fx))) kb ls rb
+  (2, 5) -> bwdST nb static fwd adj (\dx fx gy fg ->
+             let v2 = abs fx in (fixNaN (dx * (fx * gy) * fg / (v2 * v2)), fixNaN (dx * fg * log (abs fx)))) kb ls rb
+  (2, 6) -> bwdST nb static fwd adj (\dx fx gy _ ->
              let dxl = dx * (recip . sqrt . (+1) . (^(2::Int))) gy
                  dxy = fx * gy * dxl ^ (3::Int)
-             in (dxl, dxy)) kb lb rb
+             in (dxl, dxy)) kb ls rb
   _      -> pure ()
 {-# INLINE bwdBin #-}
 
@@ -557,7 +573,7 @@ fwdST nb static fwd op kb lb rb = forRows nb $ \i -> do
   VUM.unsafeWrite fwd (kb + i) (op (VU.unsafeIndex static (lb + i)) xr)
 {-# INLINE fwdST #-}
 
-bwdTT m fwd adj diff kb lb rb = forRows m $ \i -> do
+bwdTT nb fwd adj diff kb lb rb = forRows nb $ \i -> do
   v  <- VUM.unsafeRead adj (kb + i)
   xl <- VUM.unsafeRead fwd (lb + i)
   xr <- VUM.unsafeRead fwd (rb + i)
@@ -569,20 +585,20 @@ bwdTT m fwd adj diff kb lb rb = forRows m $ \i -> do
   VUM.unsafeWrite adj (rb + i) (b + gr)
 {-# INLINE bwdTT #-}
 
-bwdTS m static fwd adj diff kb lb rb = forRows m $ \i -> do
+bwdTS nb static fwd adj diff kb lb rs = forRows nb $ \i -> do
   v  <- VUM.unsafeRead adj (kb + i)
   xl <- VUM.unsafeRead fwd (lb + i)
   fg <- VUM.unsafeRead fwd (kb + i)
-  let (gl, _) = diff v xl (VU.unsafeIndex static (rb + i)) fg
+  let (gl, _) = diff v xl (VU.unsafeIndex static (rs + i)) fg
   a <- VUM.unsafeRead adj (lb + i)
   VUM.unsafeWrite adj (lb + i) (a + gl)
 {-# INLINE bwdTS #-}
 
-bwdST m static fwd adj diff kb lb rb = forRows m $ \i -> do
+bwdST nb static fwd adj diff kb ls rb = forRows nb $ \i -> do
   v  <- VUM.unsafeRead adj (kb + i)
   xr <- VUM.unsafeRead fwd (rb + i)
   fg <- VUM.unsafeRead fwd (kb + i)
-  let (_, gr) = diff v (VU.unsafeIndex static (lb + i)) xr fg
+  let (_, gr) = diff v (VU.unsafeIndex static (ls + i)) xr fg
   b <- VUM.unsafeRead adj (rb + i)
   VUM.unsafeWrite adj (rb + i) (b + gr)
 {-# INLINE bwdST #-}
@@ -626,36 +642,37 @@ fwdUniD' nb fwd f kb tb = forRows nb $ \i -> do
 {-# INLINE fwdUniD' #-}
 
 -- Backward unary kernel: derivative of the function, dispatched once per
--- node and inlined into the accumulation loop.
+-- node and inlined into the accumulation loop. `nb` is the number of rows
+-- in the current chunk.
 bwdUni :: Int -> VUM.MVector s Double -> VUM.MVector s Double -> Int -> Int -> Int -> ST s ()
-bwdUni m fwd adj fc kb tb = case fc of
-  0  -> bwdUni' m fwd adj (\_ -> 1) kb tb
-  1  -> bwdUni' m fwd adj (\x -> x / abs x) kb tb
-  2  -> bwdUni' m fwd adj cos kb tb
-  3  -> bwdUni' m fwd adj (negate . sin) kb tb
-  4  -> bwdUni' m fwd adj (\x -> 1 / (cos x * cos x)) kb tb
-  5  -> bwdUni' m fwd adj cosh kb tb
-  6  -> bwdUni' m fwd adj sinh kb tb
-  7  -> bwdUni' m fwd adj (\x -> 1 - tanh x * tanh x) kb tb
-  8  -> bwdUni' m fwd adj (\x -> 1 / sqrt (1 - x * x)) kb tb
-  9  -> bwdUni' m fwd adj (\x -> -1 / sqrt (1 - x * x)) kb tb
-  10 -> bwdUni' m fwd adj (\x -> 1 / (1 + x * x)) kb tb
-  11 -> bwdUni' m fwd adj (\x -> 1 / sqrt (1 + x * x)) kb tb
-  12 -> bwdUni' m fwd adj (\x -> 1 / (sqrt (x - 1) * sqrt (x + 1))) kb tb
-  13 -> bwdUni' m fwd adj (\x -> 1 / (1 - x * x)) kb tb
-  14 -> bwdUni' m fwd adj (\x -> 1 / (2 * sqrt x)) kb tb
-  15 -> bwdUni' m fwd adj (\x -> x / (2 * abs x ** (3 / 2))) kb tb
-  16 -> bwdUni' m fwd adj (\x -> 1 / (3 * (x * x) ** (1 / 3))) kb tb
-  17 -> bwdUni' m fwd adj (\x -> 2 * x) kb tb
-  18 -> bwdUni' m fwd adj recip kb tb
-  19 -> bwdUni' m fwd adj recip kb tb
-  20 -> bwdUni' m fwd adj exp kb tb
-  21 -> bwdUni' m fwd adj (\x -> -1 / (x * x)) kb tb
-  22 -> bwdUni' m fwd adj (\x -> 3 * x * x) kb tb
+bwdUni nb fwd adj fc kb tb = case fc of
+  0  -> bwdUni' nb fwd adj (\_ -> 1) kb tb
+  1  -> bwdUni' nb fwd adj (\x -> x / abs x) kb tb
+  2  -> bwdUni' nb fwd adj cos kb tb
+  3  -> bwdUni' nb fwd adj (negate . sin) kb tb
+  4  -> bwdUni' nb fwd adj (\x -> 1 / (cos x * cos x)) kb tb
+  5  -> bwdUni' nb fwd adj cosh kb tb
+  6  -> bwdUni' nb fwd adj sinh kb tb
+  7  -> bwdUni' nb fwd adj (\x -> 1 - tanh x * tanh x) kb tb
+  8  -> bwdUni' nb fwd adj (\x -> 1 / sqrt (1 - x * x)) kb tb
+  9  -> bwdUni' nb fwd adj (\x -> -1 / sqrt (1 - x * x)) kb tb
+  10 -> bwdUni' nb fwd adj (\x -> 1 / (1 + x * x)) kb tb
+  11 -> bwdUni' nb fwd adj (\x -> 1 / sqrt (1 + x * x)) kb tb
+  12 -> bwdUni' nb fwd adj (\x -> 1 / (sqrt (x - 1) * sqrt (x + 1))) kb tb
+  13 -> bwdUni' nb fwd adj (\x -> 1 / (1 - x * x)) kb tb
+  14 -> bwdUni' nb fwd adj (\x -> 1 / (2 * sqrt x)) kb tb
+  15 -> bwdUni' nb fwd adj (\x -> x / (2 * abs x ** (3 / 2))) kb tb
+  16 -> bwdUni' nb fwd adj (\x -> 1 / (3 * (x * x) ** (1 / 3))) kb tb
+  17 -> bwdUni' nb fwd adj (\x -> 2 * x) kb tb
+  18 -> bwdUni' nb fwd adj recip kb tb
+  19 -> bwdUni' nb fwd adj recip kb tb
+  20 -> bwdUni' nb fwd adj exp kb tb
+  21 -> bwdUni' nb fwd adj (\x -> -1 / (x * x)) kb tb
+  22 -> bwdUni' nb fwd adj (\x -> 3 * x * x) kb tb
   _  -> pure ()
 {-# INLINE bwdUni #-}
 
-bwdUni' m fwd adj f kb tb = forRows m $ \i -> do
+bwdUni' nb fwd adj f kb tb = forRows nb $ \i -> do
   v <- VUM.unsafeRead adj (kb + i)
   x <- VUM.unsafeRead fwd (tb + i)
   c <- VUM.unsafeRead adj (tb + i)
