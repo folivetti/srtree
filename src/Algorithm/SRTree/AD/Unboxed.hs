@@ -820,17 +820,17 @@ compileTreeMulti xss ys mYErr tree =
     in [ compileTree xs y err tree | (xs, y, err) <- zip3 xssChunks ysChunks errChunks ]
 
 -- | Evaluates the gradient across all compiled chunks in parallel.
--- The node-outer `evalGradVec` kernel is memory-bandwidth-bound (it streams
--- stride*m fwd/adj columns), so it does not scale across cores: splitting
--- the data into chunks and running it in parallel is equal-or-slower than
--- the whole-data single-thread call. The row-fused `evalGrad` kernel uses
--- O(nodes) scratch per chunk and is compute-bound, so it parallelizes
--- almost linearly. Strategy: single chunk (no parallelism, e.g. -N1) uses
--- the fast vectorized kernel; multiple chunks use row-fused per chunk.
+-- Each chunk is evaluated by the fast node-outer `evalGradVec` kernel on
+-- its own slice of the data. The kernel is now chunked internally (O(stride
+-- * 1024) per-call buffers, L3-resident) and is compute-bound rather than
+-- memory-bandwidth-bound, so splitting the data into one chunk per core and
+-- running the kernels concurrently scales almost linearly. The objective
+-- and gradient accumulate across chunks (same math per row; only the FP
+-- summation order across chunk boundaries differs).
 evalGradMulti :: [CompiledTree] -> V.Vector Double -> (Double, V.Vector Double)
 evalGradMulti [ct] theta = evalGradVec ct theta
 evalGradMulti cts theta = unsafePerformIO $ do
-    results <- forConcurrently cts $ \ct -> evaluate (evalGrad ct theta)
+    results <- forConcurrently cts $ \ct -> evaluate (evalGradVec ct theta)
     let totalObj   = sum $ map fst results
         totalGrad  = foldl1' (V.zipWith (+)) (map snd results)
     pure (totalObj, totalGrad)
