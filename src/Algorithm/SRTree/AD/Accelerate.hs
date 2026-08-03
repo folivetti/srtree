@@ -6,28 +6,38 @@
 
 module Algorithm.SRTree.AD.Accelerate
   ( compileAccelerateTree
+  , encodeTree, Encoded(..)
+  , multiWorker
   ) where
 
 import Data.SRTree
 import Data.Array.Accelerate as A
 import Data.Array.Accelerate.LLVM.Native as CPU
+import Data.Array.Accelerate.Sugar.Array (Array(..))
+import qualified Data.Array.Accelerate.Representation.Array as R
+import Data.Array.Accelerate.Array.Unique (newUniqueArray)
 import Data.IntMap.Strict qualified as IntMap
+import Data.IntSet qualified as ISet
 import Data.Vector.Unboxed qualified as VU
-import Data.Vector.Generic qualified as VG
+import Data.Vector.Unboxed.Mutable qualified as VUM
 import Data.Vector qualified as VB
 import Data.Vector.Storable qualified as VS
 import Prelude hiding (zipWith, replicate, sum, map, log, abs, sqrt, recip)
 import Algorithm.SRTree.AD.CompiledAD
 
-import Data.IORef (IORef, newIORef, readIORef, modifyIORef', writeIORef)
+import Data.IORef (IORef, newIORef, readIORef, modifyIORef', atomicModifyIORef', writeIORef)
 import System.IO.Unsafe (unsafePerformIO)
-import System.CPUTime (getCPUTime)
-import Data.Time.Clock.POSIX (getPOSIXTime, POSIXTime)
+import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import Control.Exception (evaluate)
+import Control.Concurrent (getNumCapabilities)
 import System.IO (stderr, hPutStrLn, openBinaryFile, hFileSize, hClose, IOMode(..))
 import Control.Monad (when)
+import System.Environment (lookupEnv)
 import System.Directory (getXdgDirectory, XdgDirectory(..), listDirectory, doesFileExist, removeFile)
 import System.FilePath ((</>))
+import Data.List (foldl', init)
+import qualified Data.List
+import qualified Data.Map.Strict as Map
 
 {-# INLINE diffPureAcc #-}
 diffPureAcc :: Op -> Exp Double -> Exp Double -> Exp Double -> Exp Double -> Exp (Double, Double)
@@ -115,7 +125,68 @@ derivativeAcc Recip   = A.negate . A.recip . (A.^(2 :: Exp Int))
 derivativeAcc Cube    = (3*) . (A.^(2 :: Exp Int))
 {-# INLINE derivativeAcc #-}
 
--- Profiling counters (CPU time)
+-- ----------------------------------------------------------------------------
+-- Fixed-shape interpreter (design E): one compiled kernel handles every tree.
+-- The kernel AST depends only on the shape constants below; all per-tree
+-- structure arrives as runtime inputs (metaF / widthF / parentF). Padding is
+-- chosen from the measured shape distribution (data.tsv, maxSize 30): max
+-- level width 9, max depth 15, max in-degree 3. Trees that overflow fall back
+-- to the Phase-2 JIT.
+-- ----------------------------------------------------------------------------
+maxDepth, maxWidth, maxParents :: Int
+maxDepth  = 16   -- levels, >= observed depth 15
+maxWidth  = 16   -- nodes per level, >= observed max width 9
+maxParents = 4   -- parents per node, > observed max in-degree 3
+
+-- metaF field offsets (one Int per node slot per field)
+kKind, kGid, kArg, kArg2, kFcode, kOcode, kDyn, kFields :: Int
+kKind   = 0
+kGid    = 1
+kArg    = 2
+kArg2   = 3
+kFcode  = 4
+kOcode  = 5
+kDyn    = 6
+kFields = 7
+
+-- Node kind codes (mirror compileTree in Unboxed.hs)
+kVar, kParam, kConst, kUni, kBin, kNop :: Int
+kVar   = 0
+kParam = 1
+kConst = 2
+kUni   = 3
+kBin   = 4
+kNop   = 5
+
+-- | Runtime dispatch over Function code (fromEnum), select chain.
+evalFunCode :: Exp Int -> Exp Double -> Exp Double
+evalFunCode c x = go [Id .. Cube]
+  where
+    go []       = 0
+    go (f : fs) = (c A.== A.constant (fromEnum f)) ? (evalFunAcc f x, go fs)
+
+-- | Runtime dispatch over Op code (fromEnum), select chain.
+evalOpCode :: Exp Int -> Exp Double -> Exp Double -> Exp Double
+evalOpCode c l r = go [Add .. AQ]
+  where
+    go []       = 0
+    go (o : os) = (c A.== A.constant (fromEnum o)) ? (evalOpAcc o l r, go os)
+
+-- | Runtime dispatch over Function code for the unary derivative.
+derivFunCode :: Exp Int -> Exp Double -> Exp Double
+derivFunCode c x = go [Id .. Cube]
+  where
+    go []       = 0
+    go (f : fs) = (c A.== A.constant (fromEnum f)) ? (derivativeAcc f x, go fs)
+
+-- | Runtime dispatch over Op code for both binary partials (dx applied).
+diffOpCode :: Exp Int -> Exp Double -> Exp Double -> Exp Double -> Exp Double -> Exp (Double, Double)
+diffOpCode c dx fx gy fg = go [Add .. AQ]
+  where
+    go []       = A.lift (A.constant 0, A.constant 0)
+    go (o : os) = (c A.== A.constant (fromEnum o)) ? (diffPureAcc o dx fx gy fg, go os)
+
+-- Profiling counters (wall clock)
 {-# NOINLINE compileTime #-}
 compileTime :: IORef Integer
 compileTime = unsafePerformIO (newIORef 0)
@@ -132,25 +203,33 @@ evalTime = unsafePerformIO (newIORef 0)
 evalCount :: IORef Int
 evalCount = unsafePerformIO (newIORef 0)
 
--- Profiling counters (wall time)
-{-# NOINLINE compileWall #-}
-compileWall :: IORef Double
-compileWall = unsafePerformIO (newIORef 0)
-
-{-# NOINLINE evalWall #-}
-evalWall :: IORef Double
-evalWall = unsafePerformIO (newIORef 0)
-
 -- | One-time flag so the zero-byte cache sweep runs only once per process.
 {-# NOINLINE cacheCleaned #-}
 cacheCleaned :: IORef Bool
 cacheCleaned = unsafePerformIO (newIORef False)
 
--- | Single-worker target: exactly 1 thread, bypasses the env-var-based
--- defaultTarget (which is a CAF initialized before setEnv takes effect).
-{-# NOINLINE singleWorker #-}
-singleWorker :: CPU.Native
-singleWorker = unsafePerformIO (CPU.createTarget [0])
+-- | Multi-worker target spanning all RTS capabilities (respects the -N flag;
+-- no setNumCapabilities hijack, unlike the env-var-based defaultTarget which
+-- is a CAF initialized before setEnv takes effect).
+{-# NOINLINE multiWorker #-}
+multiWorker :: CPU.Native
+multiWorker = unsafePerformIO $ do
+  ncaps <- getNumCapabilities
+  CPU.createTarget [0 .. ncaps - 1]
+
+-- | Wrap an offset-0 'VU.Vector' into an Accelerate 'Vector' without copying.
+-- The 'Array' newtype constructor and the internal 'R.Array'/'newUniqueArray'
+-- constructors are exposed by the accelerate package, so we can share the same
+-- ForeignPtr the vector already owns (the ctStatic columns are immutable, so
+-- sharing is safe). If the vector has a non-zero offset we fall back to a copy.
+mkAccVector :: VU.Vector Double -> Array DIM1 Double
+mkAccVector v = Array (R.Array ((), len) (unsafePerformIO (newUniqueArray fp')))
+  where
+    vs = VS.convert v
+    (fp, off, len) = VS.unsafeToForeignPtr vs
+    fp' = case off of
+            0 -> fp
+            _ -> let (f, _, _) = VS.unsafeToForeignPtr (VS.fromList (VS.toList vs)) in f
 
 -- | accelerate-llvm-native caches each JIT-compiled kernel as <hash>.o and
 -- <hash>.so in the XDG cache dir, but the cache is not crash-safe: hits are
@@ -201,78 +280,380 @@ ensureCleanCache done = do
 
 -- | Compiles the AST into an LLVM JIT closure.
 -- Call this exactly ONCE before your NLopt optimization loop.
+--
+-- The static columns (data, precomputed subexpressions, loss wrap inputs) are
+-- no longer baked into the LLVM IR as constants. Instead the entire padded
+-- ctStatic column block is passed as a single zero-copy array input, and the
+-- evaluation is split into chunks of `chunkSize` rows. Each chunk runs the same
+-- compiled kernel (base row and chunk length arrive as scalar inputs, so the
+-- AST is identical across chunks and the JIT happens exactly once per tree).
+-- This removes the ~25MB of per-tree LLVM constants (the dominant compile
+-- cost) and keeps the working set of each kernel cache-resident.
 compileAccelerateTree :: CompiledTree -> [VU.Vector Double] -> VU.Vector Double -> (VS.Vector Double -> (Double, VS.Vector Double))
-compileAccelerateTree ct xss ys =
+compileAccelerateTree ct _xss _ys
+    | interpEnabled = compileAccelerateInterp ct _xss _ys
+    | otherwise     = compileAccelerateTreeJIT ct _xss _ys
+
+-- | Compiled per-tree kernel. The graph 'buildAccGraph' closes over the tree's
+-- structure and 'ctM' (row stride), with the static columns arriving at runtime,
+-- so two 'CompiledTree's with the same structure and 'm' compile to the same
+-- kernel and can safely share one.
+type CompiledKernel = A.Array DIM1 Double -> A.Scalar Int -> A.Scalar Int -> A.Array DIM1 Double -> (A.Scalar Double, A.Array DIM1 Double)
+
+-- | Bounded process-wide cache from a canonical tree signature to its compiled
+-- kernel. Per-tree-structure reuse (not cross-tree sharing, which was the
+-- unstable interpreter) avoids repeated LLVM JIT for repeated trees, and the
+-- reuse is exactly the same object reuse that the Phase-2 path already relies on.
+{-# NOINLINE kernelCache #-}
+kernelCache :: IORef (Map.Map String CompiledKernel)
+kernelCache = unsafePerformIO (newIORef Map.empty)
+
+{-# NOINLINE kernelCacheLimit #-}
+kernelCacheLimit :: Int
+kernelCacheLimit = 2048
+
+kernelSig :: CompiledTree -> String
+kernelSig ct = show (VU.toList (ctDyn ct), VB.toList (ctNodes ct), ctRoot ct, ctM ct)
+
+-- | Look up a compiled kernel for this tree, compiling and caching it on a miss.
+getKernel :: CompiledTree -> CompiledKernel
+getKernel ct = unsafePerformIO $ do
+    let sig = kernelSig ct
+    c <- readIORef kernelCache
+    case Map.lookup sig c of
+      Just jf -> pure jf
+      Nothing -> do
+          logTreeStats ct
+          ensureCleanCache cacheCleaned
+          w0 <- getCurrentTime
+          let !jf = CPU.runNWith multiWorker (buildAccGraph ct)
+          w1 <- getCurrentTime
+          let dt = realToFrac (diffUTCTime w1 w0) :: Double
+          debug ("[acc] compile " Prelude.++ show dt Prelude.++ " s")
+          modifyIORef' compileTime (Prelude.round (dt * 1e9) +)
+          modifyIORef' compileCount (+ 1)
+          atomicModifyIORef' kernelCache $ \m ->
+              let m' = if Map.size m Prelude.>= kernelCacheLimit
+                         then Map.insert sig jf (Map.deleteMin m)
+                         else Map.insert sig jf m
+              in (m', ())
+          pure jf
+
+compileAccelerateTreeJIT :: CompiledTree -> [VU.Vector Double] -> VU.Vector Double -> (VS.Vector Double -> (Double, VS.Vector Double))
+compileAccelerateTreeJIT ct _xss _ys =
     let
-        jittedFunc = unsafePerformIO $ do
-            ensureCleanCache cacheCleaned
-            t0cpu <- getCPUTime
-            t0wal <- getPOSIXTime
-            let !jf = CPU.run1With singleWorker (buildAccGraph ct xss ys)
-            t1cpu <- getCPUTime
-            t1wal <- getPOSIXTime
-            modifyIORef' compileTime (+ (t1cpu - t0cpu))
-            modifyIORef' compileWall (+ realToFrac (t1wal - t0wal))
-            modifyIORef' compileCount (+ 1)
-            pure jf
+        m          = ctM ct
+        chunkSize  = readChunkSize
+        nchunks    = Prelude.max 1 (Prelude.div (m + chunkSize - 1) chunkSize)
+        chunkSizes = [ if k Prelude.< nchunks - 1 then chunkSize else m - (nchunks - 1) * chunkSize
+                     | k <- [0 .. nchunks - 1] ]
+        bases      = Data.List.scanl (+) 0 (Data.List.init chunkSizes)
+
+        staticA    = mkAccVector (ctStatic ct)
+
+        jittedFunc = getKernel ct
+
+        runChunk :: VS.Vector Double -> Vector Double -> Int -> Int -> IO (Double, VS.Vector Double)
+        runChunk theta thetaArr base cs = do
+            let baseS = A.fromList Z [base]   :: Scalar Int
+                csS   = A.fromList Z [cs]     :: Scalar Int
+                (objArr, gradArr) = jittedFunc staticA baseS csS thetaArr
+                obj  = A.indexArray objArr Z
+                grad = VS.fromList (A.toList gradArr)
+            evaluate obj
+            evaluate (VS.length grad)
+            pure (obj, grad)
 
     in \theta -> unsafePerformIO $ do
-        t0cpu <- getCPUTime
-        t0wal <- getPOSIXTime
+        w0 <- getCurrentTime
         let thetaArr = A.fromList (Z :. VS.length theta) (VS.toList theta)
-            (objArr, gradArr) = jittedFunc thetaArr
-            obj  = A.indexArray objArr Z
-            grad = VS.fromList (A.toList gradArr)
+        results <- Prelude.mapM (Prelude.uncurry (runChunk theta thetaArr)) (Prelude.zip bases chunkSizes)
+        let obj  = foldl' (+) 0 (Prelude.fmap Prelude.fst results)
+            grads = Prelude.fmap Prelude.snd results
+            grad = case grads of
+                     []     -> VS.empty
+                     g : gs -> foldl' (VS.zipWith (+)) g gs
         evaluate obj
         evaluate (VS.length grad)
-        t1cpu <- getCPUTime
-        t1wal <- getPOSIXTime
-        modifyIORef' evalTime (+ (t1cpu - t0cpu))
-        modifyIORef' evalWall (+ realToFrac (t1wal - t0wal))
+        w1 <- getCurrentTime
+        let dt = realToFrac (diffUTCTime w1 w0) :: Double
+        debug ("[acc] eval " Prelude.++ show dt Prelude.++ " s")
+        modifyIORef' evalTime (Prelude.round (dt * 1e9) +)
         modifyIORef' evalCount (+ 1)
-        cnt <- readIORef evalCount
 
         pure (obj, grad)
 
+-- | Chunk size (rows per kernel run), overridable via ACC_CHUNK for sweeps.
+-- 25974 (m/4) measured best on data.tsv (103896 rows): 4 chunks keeps the
+-- working set cache-resident without per-launch overhead dominating.
+{-# NOINLINE readChunkSize #-}
+readChunkSize :: Int
+readChunkSize = unsafePerformIO $ do
+    m <- lookupEnv "ACC_CHUNK"
+    case m of
+        Just s -> case reads s of
+                    [(n, "")] | n Prelude.> 0 -> pure n
+                    _                 -> pure 25974
+        Nothing -> pure 25974
 
--- | Builds the AST in the Accelerate EDSL
+-- | Print diagnostics to stderr when the ACC_DEBUG environment variable is set.
+{-# NOINLINE debug #-}
+debug :: String -> IO ()
+debug msg = do
+  m <- lookupEnv "ACC_DEBUG"
+  case m of
+    Just _  -> hPutStrLn stderr msg
+    Nothing -> pure ()
+
+-- | Per-tree shape statistics: BFS levels from the root, level widths, depth,
+-- and the child-count / in-degree histograms. Used to size the fixed-shape
+-- interpreter's per-level arrays and to validate the per-parent child-count
+-- gather (design E) against real trees.
+data TreeStats = TreeStats
+  { tsNodes      :: !Int
+  , tsDepth      :: !Int
+  , tsWidths     :: [Int]
+  , tsMaxWidth   :: !Int
+  , tsChildHist  :: !(VU.Vector Int)  -- index = #children, value = #nodes
+  , tsParentHist :: !(VU.Vector Int)  -- index = #parents, value = #nodes
+  }
+
+treeStats :: CompiledTree -> TreeStats
+treeStats ct = TreeStats n d ws mw ch ph
+  where
+    nodes = ctNodes ct
+    root  = ctRoot ct
+    n     = ctNPred ct
+    levels = bfsLevels nodes root
+    d     = Prelude.length levels
+    ws    = Data.List.map Prelude.length levels
+    mw    = Prelude.maximum ws
+
+    -- child count per node (arity), from the node structure
+    chVec = VU.fromList (Data.List.map (\k -> Prelude.length (children (nodes VB.! k))) [0 .. n - 1])
+    ch    = histogram (Prelude.maximum (VU.toList chVec)) chVec
+    -- in-degree per node, from the child relation of the node structure only
+    -- (NOT ctArg/ctArg2: for Var leaves ctArg holds the *variable index*, which
+    -- collides with the node-id range and would fabricate spurious parents).
+    indeg = Prelude.foldl' bump (VU.replicate n (0 :: Int)) edgeList
+      where
+        edgeList = [ (c, k) | k <- [0 .. n - 1], c <- children (nodes VB.! k) ]
+        bump v (c, _) = v VU.// [(c, (v VU.! c) + 1)]
+    ph    = histogram (Prelude.maximum (VU.toList indeg)) indeg
+
+    histogram :: Int -> VU.Vector Int -> VU.Vector Int
+    histogram maxK xs = VU.create $ do
+        v <- VUM.replicate (maxK + 1) 0
+        VU.forM_ xs $ \x -> VUM.modify v (+ 1) x
+        pure v
+
+    children :: SRTree Int -> [Int]
+    children nd = case nd of
+        Var _     -> []
+        Param _   -> []
+        Const _   -> []
+        Uni _ t   -> [t]
+        Bin _ l r -> [l, r]
+
+-- | BFS levels (each level is the list of node ids in row-major order).
+bfsLevels :: VB.Vector (SRTree Int) -> Int -> [[Int]]
+bfsLevels nodes root = go [root] ISet.empty
+  where
+    go [] _     = []
+    go cur seen = cur : go next seen'
+      where
+        next = [ c | k <- cur, c <- childrenOf (nodes VB.! k), ISet.notMember c seen ]
+        seen' = Prelude.foldl' (flip ISet.insert) seen next
+    childrenOf nd = case nd of
+        Var _     -> []
+        Param _   -> []
+        Const _   -> []
+        Uni _ t   -> [t]
+        Bin _ l r -> [l, r]
+
+showTreeStats :: TreeStats -> String
+showTreeStats (TreeStats n d ws mw ch ph) =
+    "nodes=" Prelude.++ show n
+    Prelude.++ " lenNodes=" Prelude.++ show n
+    Prelude.++ " depth=" Prelude.++ show d
+    Prelude.++ " maxwidth=" Prelude.++ show mw
+    Prelude.++ " widths=" Prelude.++ show ws
+    Prelude.++ " childHist=" Prelude.++ show (VU.toList ch)
+    Prelude.++ " parentHist=" Prelude.++ show (VU.toList ph)
+
+-- | Append one line per compiled tree when SRTREE_ACC_STATS is set (value is
+-- the log path, or the default /tmp/trees.log when empty / "1"). The steady
+-- compile happens once per tree, so this is at most ~a few hundred lines.
+logTreeStats :: CompiledTree -> IO ()
+logTreeStats ct = do
+  m <- lookupEnv "SRTREE_ACC_STATS"
+  case m of
+    Nothing -> pure ()
+    Just v  -> do
+      let path = case v of
+                   ""  -> "/tmp/trees.log"
+                   "1" -> "/tmp/trees.log"
+                   _   -> v
+      appendFile path (showTreeStats (treeStats ct) Prelude.++ "\n")
+
+-- | Per-tree runtime metadata for the fixed-shape interpreter. All vectors are
+-- padded to the fixed shape; overflow slots are NOP (kind kNop, arg 0).
+data Encoded = Encoded
+  { encMeta   :: !(VU.Vector Int)   -- [(slot * kFields) + field], len maxDepth*maxWidth*kFields
+  , encWidth  :: !(VU.Vector Int)   -- [level] actual node count, len maxDepth
+  , encParent :: !(VU.Vector Int)   -- [((level*maxWidth+pos)*maxParents)+k] = parentPos*4+slot, -1 if none
+  }
+
+-- | Encode a 'CompiledTree' into fixed-shape runtime metadata. Returns 'Nothing'
+-- when the tree exceeds the fixed shape (falls back to the Phase-2 JIT).
+encodeTree :: CompiledTree -> Maybe Encoded
+encodeTree ct
+    | d Prelude.> maxDepth Prelude.|| Prelude.any (Prelude.> maxWidth) widths Prelude.|| VU.any (Prelude.> maxParents) indeg = Nothing
+    | otherwise = Just Encoded { encMeta = meta, encWidth = widthV, encParent = parentV }
+  where
+    nodes  = ctNodes ct
+    root   = ctRoot ct
+    n      = ctNPred ct
+    levels = bfsLevels nodes root
+    d      = Prelude.length levels
+    widths = Data.List.map Prelude.length levels
+
+    -- node id -> (level, position in level)
+    posMap :: IntMap.IntMap (Int, Int)
+    posMap = IntMap.fromList [ (nodeId, (ℓ, i)) | (ℓ, lvl) <- Prelude.zip [0 ..] levels
+                                                , (i, nodeId) <- Prelude.zip [0 ..] lvl ]
+
+    lvlWidth :: Int -> Int
+    lvlWidth ℓ = if ℓ Prelude.< d then widths Prelude.!! ℓ else 0
+    nodeAt :: Int -> Int -> Int
+    nodeAt ℓ i = (levels Prelude.!! ℓ) Prelude.!! i
+
+    kindOf :: Int -> Int -> Int
+    kindOf ℓ i = if i Prelude.< lvlWidth ℓ then ctKind ct VU.! nodeAt ℓ i else kNop
+    gidOf  ℓ i = if i Prelude.< lvlWidth ℓ then nodeAt ℓ i else 0
+    dynOf  ℓ i = if i Prelude.< lvlWidth ℓ then (if ctDyn ct VU.! nodeAt ℓ i then 1 else 0) else 0
+
+    -- arg: Var->var ix, Param->param ix, Const->0, Uni->child pos in level+1,
+    -- Bin->left child pos in level+1
+    argOf ℓ i
+      | i Prelude.>= lvlWidth ℓ = 0
+      | otherwise = case ctKind ct VU.! k of
+          0 -> ctArg ct VU.! k          -- kVar: variable index
+          1 -> ctArg ct VU.! k          -- kParam: param index
+          2 -> 0                        -- kConst
+          3 -> Prelude.snd (posMap IntMap.! (ctArg ct VU.! k))  -- kUni: child pos
+          4 -> Prelude.snd (posMap IntMap.! (ctArg ct VU.! k))  -- kBin: left child pos
+          _ -> 0
+      where k = nodeAt ℓ i
+    arg2Of ℓ i
+      | i Prelude.>= lvlWidth ℓ = 0
+      | otherwise = case ctKind ct VU.! k of
+          4 -> Prelude.snd (posMap IntMap.! (ctArg2 ct VU.! k))  -- kBin: right child pos
+          _ -> 0
+      where k = nodeAt ℓ i
+    fcodeOf ℓ i = if i Prelude.< lvlWidth ℓ Prelude.&& ctKind ct VU.! nodeAt ℓ i Prelude.== kUni
+                      then ctFcode ct VU.! nodeAt ℓ i else 0
+    ocodeOf ℓ i = if i Prelude.< lvlWidth ℓ Prelude.&& ctKind ct VU.! nodeAt ℓ i Prelude.== kBin
+                      then ctOcode ct VU.! nodeAt ℓ i else 0
+
+    meta :: VU.Vector Int
+    meta = VU.generate (maxDepth * maxWidth * kFields) $ \ix ->
+        let (slot, field) = ix `quotRem` kFields
+            (ℓ, i)       = slot `quotRem` maxWidth
+        in case field of
+             f | f Prelude.== kKind  -> kindOf ℓ i
+               | f Prelude.== kGid   -> gidOf ℓ i
+               | f Prelude.== kArg   -> argOf ℓ i
+               | f Prelude.== kArg2  -> arg2Of ℓ i
+               | f Prelude.== kFcode -> fcodeOf ℓ i
+               | f Prelude.== kOcode -> ocodeOf ℓ i
+               | otherwise           -> dynOf ℓ i
+
+    widthV :: VU.Vector Int
+    widthV = VU.fromList (Data.List.map lvlWidth [0 .. maxDepth - 1])
+
+    -- in-degree per node (number of parents), used for the overflow check.
+    indeg :: VU.Vector Int
+    indeg = Prelude.foldl' bump (VU.replicate n (0 :: Int)) edgeList
+      where
+        edgeList = [ (c, k) | k <- [0 .. n - 1], c <- childrenIds (nodes VB.! k) ]
+        bump v (c, _) = v VU.// [(c, (v VU.! c) + 1)]
+    childrenIds :: SRTree Int -> [Int]
+    childrenIds nd = case nd of
+        Uni _ t   -> [t]
+        Bin _ l r -> [l, r]
+        _         -> []
+
+    -- per-child parent list: [(parentPos, slotCode)] with slotCode
+    -- 0 = Uni child, 1 = Bin left, 2 = Bin right.
+    parentList :: Int -> [(Int, Int)]
+    parentList c =
+        [ (Prelude.snd (posMap IntMap.! p), slot)
+        | p <- [0 .. n - 1]
+        , (slot) <- childSlots (nodes VB.! p) c ]
+      where
+        childSlots :: SRTree Int -> Int -> [Int]
+        childSlots nd ch = case nd of
+            Uni _ t   -> [0 | t Prelude.== ch]
+            Bin _ l r -> [1 | l Prelude.== ch] Prelude.++ [2 | r Prelude.== ch]
+            _         -> []
+
+    parentV :: VU.Vector Int
+    parentV = VU.generate (maxDepth * maxWidth * maxParents) $ \ix ->
+        let (slot, k) = ix `quotRem` maxParents
+            (ℓ, i)   = slot `quotRem` maxWidth
+        in if i Prelude.< lvlWidth ℓ
+             then case Data.List.drop k (parentList (nodeAt ℓ i)) of
+                    (p, s) : _ -> p * 4 + s
+                    []         -> -1
+             else -1
+
+
+-- | Builds the AST in the Accelerate EDSL. The static column block is a kernel
+-- input (not baked constants), and the row range comes in as scalar inputs, so
+-- the same compiled kernel can be run over any contiguous chunk of rows.
 buildAccGraph :: CompiledTree
-              -> [VU.Vector Double]
-              -> VU.Vector Double
-              -> Acc (Array DIM1 Double)
+              -> Acc (Vector Double)   -- static columns, flat [key * m + row]
+              -> Acc (Scalar Int)       -- first row of this chunk
+              -> Acc (Scalar Int)       -- number of rows in this chunk
+              -> Acc (Vector Double)    -- theta
               -> Acc (Scalar Double, Vector Double)
-buildAccGraph ct xss ys theta = A.lift (obj, gradPacked)
+buildAccGraph ct staticIn baseIn csIn theta = A.lift (obj, gradPacked)
   where
     root  = ctRoot ct
     m     = ctM ct
-    p     = VU.length (ctDyn ct) -- Approximation, count actual params below
     nodes = ctNodes ct
     dyn   = ctDyn ct
 
-    mShape = A.constant (Z :. m)
+    base :: Exp Int
+    base = A.the baseIn
+    cs   :: Exp Int
+    cs   = A.the csIn
+
+    csShape :: Exp (Z :. Int)
+    csShape = A.lift (Z :. cs)
+
+    -- column for a static node key: rows [base, base + cs)
+    statCol :: Int -> Acc (Vector Double)
+    statCol k = A.generate csShape (\ix -> staticIn A.!! (A.constant (k * m) + base + A.indexHead ix))
 
     -- 1. FORWARD PASS
-    -- We build a static map of array expressions.
-    -- Static data is baked directly into the graph via A.use
     forward :: IntMap.IntMap (Acc (Array DIM1 Double))
     forward = foldl' step IntMap.empty [0 .. root]
       where
         step acc key
-              | Prelude.not (dyn VU.! key) =
-                  let statVec = VU.slice (key * m) m (ctStatic ct)
-                  in IntMap.insert key (A.use (A.fromList (Z :. m) (VU.toList statVec))) acc
-          | otherwise =
-              IntMap.insert key (evalNode key acc) acc
+              | Prelude.not (dyn VU.! key) = IntMap.insert key (statCol key) acc
+              | otherwise = IntMap.insert key (evalNode key acc) acc
 
         evalNode key acc = case nodes VB.! key of
-            Param ix -> A.fill mShape (theta A.!! A.constant ix)
-            Uni f t  -> A.map (evalFunAcc f) (acc IntMap.! t)
+            Param ix   -> A.fill csShape (theta A.!! A.constant ix)
+            Uni f t    -> A.map (evalFunAcc f) (acc IntMap.! t)
             Bin op l r -> A.zipWith (evalOpAcc op) (acc IntMap.! l) (acc IntMap.! r)
-            Var ix   -> A.use (A.fromList (Z :. m) (VU.toList (xss Prelude.!! ix)))
-            Const c  -> A.fill mShape (A.constant c)
+            Var _      -> Prelude.error "buildAccGraph: Var node is static (unreachable)"
+            Const _    -> Prelude.error "buildAccGraph: Const node is static (unreachable)"
 
     -- 2. BACKWARD PASS (Adjoints)
-    initAdjoints = IntMap.singleton root (A.fill mShape 1.0)
+    initAdjoints = IntMap.singleton root (A.fill csShape 1.0)
 
     adjoints :: IntMap.IntMap (Acc (Array DIM1 Double))
     adjoints = foldl' bwdStep initAdjoints [root, root - 1 .. 0]
@@ -281,7 +662,7 @@ buildAccGraph ct xss ys theta = A.lift (obj, gradPacked)
           | Prelude.not (dyn VU.! key) = adj
           | otherwise = case nodes VB.! key of
               Bin op l r ->
-                  let v  = IntMap.findWithDefault (A.fill mShape 0.0) key adj
+                  let v  = IntMap.findWithDefault (A.fill csShape 0.0) key adj
                       xl = forward IntMap.! l
                       xr = forward IntMap.! r
                       fg = forward IntMap.! key
@@ -295,7 +676,7 @@ buildAccGraph ct xss ys theta = A.lift (obj, gradPacked)
                   in IntMap.insertWith (A.zipWith (+)) r dr adjL
 
               Uni f t ->
-                  let v  = IntMap.findWithDefault (A.fill mShape 0.0) key adj
+                  let v  = IntMap.findWithDefault (A.fill csShape 0.0) key adj
                       x  = forward IntMap.! t
                       dt = A.zipWith (*) v (A.map (derivativeAcc f) x)
                   in IntMap.insertWith (A.zipWith (+)) t dt adj
@@ -308,15 +689,11 @@ buildAccGraph ct xss ys theta = A.lift (obj, gradPacked)
     obj = A.sum (forward IntMap.! root)
 
     -- Pre-calculate the scalar gradient for every Param node.
-    -- We use findWithDefault to safely handle "dead" branches of the AST
-    -- that were optimized out and never received an adjoint.
     paramAdjoints :: [(Int, Exp Double)]
-    paramAdjoints = [ (ix, A.the (A.sum (IntMap.findWithDefault (A.fill mShape 0.0) k adjoints)))
+    paramAdjoints = [ (ix, A.the (A.sum (IntMap.findWithDefault (A.fill csShape 0.0) k adjoints)))
                     | (k, Param ix) <- Prelude.zip [0..] (VB.toList nodes) ]
 
     -- Generate a gradient array that EXACTLY matches the shape of the input theta.
-    -- For each parameter index `i`, we fold over the known Param nodes and sum
-    -- their gradients. Accelerate compiles this into a highly optimized select block.
     gradPacked = A.generate (A.shape theta) $ \(I1 i) ->
         foldr (\(ix, val) acc -> i A.== A.constant ix ? (acc + val, acc)) 0.0 paramAdjoints
 
@@ -325,3 +702,232 @@ fst4 (T4 a _ _ _) = a
 snd4 (T4 _ b _ _) = b
 thd4 (T4 _ _ c _) = c
 fth4 (T4 _ _ _ d) = d
+
+-- ----------------------------------------------------------------------------
+-- Fixed-shape interpreter kernel (design E). The AST depends only on the shape
+-- constants, NOT on the tree: every tree arrives as runtime inputs (staticIn /
+-- metaF / widthF / parentF), so the kernel compiles exactly once per process
+-- and every tree runs the same native executable.
+-- ----------------------------------------------------------------------------
+buildAccInterpGraph
+  :: Acc (Vector Double)   -- staticIn: ctStatic flat [node * m + row]
+  -> Acc (Scalar Int)      -- m: total rows
+  -> Acc (Scalar Int)      -- base: first row of this chunk
+  -> Acc (Scalar Int)      -- cs: rows in this chunk
+  -> Acc (Vector Double)   -- theta
+  -> Acc (Vector Int)      -- metaF: per-slot node metadata
+  -> Acc (Vector Int)      -- widthF: per-level actual node count
+  -> Acc (Vector Int)      -- parentF: per-slot parent list (pos*4+slot, -1 none)
+  -> Acc (Scalar Double, Vector Double)
+buildAccInterpGraph staticIn mIn baseIn csIn theta metaF widthF parentF = A.lift (obj, gradPacked)
+  where
+    m    = A.the mIn
+    base = A.the baseIn
+    cs   = A.the csIn
+
+    -- width of a level (runtime)
+    wAt :: Int -> Exp Int
+    wAt ℓ = widthF A.!! A.constant ℓ
+
+    -- static value of a node with global id gid, for chunk row
+    staticVal :: Exp Int -> Exp Int -> Exp Double
+    staticVal gid row = staticIn A.!! (gid*m + base + row)
+
+    -- read a metadata field for a slot
+    metaAt :: Exp Int -> Int -> Exp Int
+    metaAt slot field = metaF A.!! (slot*7 + A.constant field)
+
+    -- 1. FORWARD PASS (leaves upward): fwdVals !! ℓ is level ℓ; level ℓ reads
+    -- its children from level ℓ+1 (they are one BFS level below by definition).
+    fwdVals :: [Acc (Matrix Double)]
+    fwdVals = Data.List.map fwdLevel [0 .. maxDepth]
+      where
+        fwdLevel ℓ
+          | ℓ Prelude.== maxDepth = A.fill (A.lift (Z :. A.constant 0 :. cs)) (A.constant 0)
+          | otherwise             = buildFwd ℓ (fwdVals Prelude.!! (ℓ+1))
+
+        buildFwd :: Int -> Acc (Matrix Double) -> Acc (Matrix Double)
+        buildFwd ℓ fwdNext =
+            A.generate (A.lift (Z :. wAt ℓ :. cs)) $ \(I2 i row) ->
+              let slot = A.constant (ℓ*maxWidth) + i
+                  kind  = metaAt slot kKind
+                  gid   = metaAt slot kGid
+                  arg   = metaAt slot kArg
+                  arg2  = metaAt slot kArg2
+                  fcode = metaAt slot kFcode
+                  ocode = metaAt slot kOcode
+                  dyn   = metaAt slot kDyn A.== A.constant 1
+
+                  -- gather a child value from level ℓ+1 (runtime position pos)
+                  childVal :: Exp Int -> Exp Double
+                  childVal pos =
+                      let cslot = A.constant ((ℓ+1)*maxWidth) + pos
+                          cDyn  = metaF A.!! (cslot*7 + A.constant kDyn) A.== A.constant 1
+                          cGid  = metaF A.!! (cslot*7 + A.constant kGid)
+                          dynVal  = fwdNext A.!! (pos*cs + row)
+                          statVal = staticVal cGid row
+                      in cDyn ? (dynVal, statVal)
+
+                  paramVal = theta A.!! arg
+                  uniVal   = evalFunCode fcode (childVal arg)
+                  binVal   = evalOpCode ocode (childVal arg) (childVal arg2)
+                  dynamicVal = (kind A.== A.constant kParam) ? (paramVal,
+                               (kind A.== A.constant kUni) ? (uniVal,
+                               (kind A.== A.constant kBin) ? (binVal, 0)))
+              in dyn ? (dynamicVal, staticVal gid row)
+
+    -- 2. BACKWARD PASS (root downward): adjVals !! ℓ is the adjoint of level ℓ.
+    adjVals :: [Acc (Matrix Double)]
+    adjVals = Data.List.map adjLevel [0 .. maxDepth - 1]
+      where
+        adjLevel 0 = A.fill (A.lift (Z :. wAt 0 :. cs)) (A.constant 1)
+        adjLevel ℓ = buildAdj ℓ (adjVals Prelude.!! (ℓ-1))
+
+        buildAdj :: Int -> Acc (Matrix Double) -> Acc (Matrix Double)
+        buildAdj ℓ adjPrev =
+            A.generate (A.lift (Z :. wAt ℓ :. cs)) $ \(I2 i row) ->
+              let slot = A.constant (ℓ*maxWidth) + i
+                  c0 = parentF A.!! (slot*4 + A.constant 0)
+                  c1 = parentF A.!! (slot*4 + A.constant 1)
+                  c2 = parentF A.!! (slot*4 + A.constant 2)
+                  c3 = parentF A.!! (slot*4 + A.constant 3)
+
+                  contrib :: Exp Int -> Exp Double
+                  contrib c = (c A.>= A.constant 0) ? ( (adjPrev A.!! (cpos*cs + row)) * partial, 0)
+                    where
+                      cpos  = c `A.quot` A.constant 4
+                      cslot = c `A.rem` A.constant 4
+                      partial = partialCode cpos cslot
+
+                  partialCode :: Exp Int -> Exp Int -> Exp Double
+                  partialCode ppos slot =
+                      let pbase = A.constant ((ℓ-1)*maxWidth) + ppos
+                          pKind  = metaF A.!! (pbase*7 + A.constant kKind)
+                          pFcode = metaF A.!! (pbase*7 + A.constant kFcode)
+                          pOcode = metaF A.!! (pbase*7 + A.constant kOcode)
+                          pArg   = metaF A.!! (pbase*7 + A.constant kArg)
+                          pArg2  = metaF A.!! (pbase*7 + A.constant kArg2)
+                          fwdSelf = (fwdVals Prelude.!! ℓ) A.!! (i*cs + row)
+                          fwdL    = (fwdVals Prelude.!! ℓ) A.!! (pArg*cs + row)
+                          fwdR    = (fwdVals Prelude.!! ℓ) A.!! (pArg2*cs + row)
+                          fwdP    = (fwdVals Prelude.!! (ℓ-1)) A.!! (ppos*cs + row)
+                          t12     = diffOpCode pOcode (A.constant 1) fwdL fwdR fwdP
+                          dl      = A.fst t12
+                          dr      = A.snd t12
+                          uniP = (pKind A.== A.constant kUni) ? (derivFunCode pFcode fwdSelf, 0)
+                          binP = (pKind A.== A.constant kBin) ? ((slot A.== A.constant 1) ? (dl, dr), 0)
+                      in uniP + binP
+
+              in (contrib c0) + (contrib c1) + (contrib c2) + (contrib c3)
+
+    -- 3. EXTRACTION
+    -- per-level per-node forward row sums (fold innermost / row dimension)
+    fwdSums :: [Acc (Vector Double)]
+    fwdSums = Data.List.map (\fwdL -> A.fold (+) (A.constant 0) fwdL) fwdVals
+    -- objective = total sum of root's forward values
+    obj = A.sum (fwdSums Prelude.!! 0)
+
+    -- per-level per-node adjoint row sums (fold innermost / row dimension)
+    nodeSums :: [Acc (Vector Double)]
+    nodeSums = Data.List.map (\adjL -> A.fold (+) (A.constant 0) adjL) adjVals
+    -- scalar sum of adjoints of a given (level, pos) node
+    slotSum :: Int -> Int -> Exp Double
+    slotSum ℓ i = (A.constant i A.< wAt ℓ) ? ((nodeSums Prelude.!! ℓ) A.!! A.constant i, 0)
+
+    gradPacked = A.generate (A.shape theta) $ \(I1 ix) ->
+        foldr (step ix) (A.constant 0) [ (ℓ, i) | ℓ <- [0 .. maxDepth - 1], i <- [0 .. maxWidth - 1] ]
+      where
+        step ix (ℓ, i) acc =
+            let slot = A.constant (ℓ*maxWidth + i)
+                kind = metaF A.!! (slot*7 + A.constant kKind)
+                arg  = metaF A.!! (slot*7 + A.constant kArg)
+                isParam = (kind A.== A.constant kParam) A.&& (arg A.== ix)
+            in isParam ? (acc + slotSum ℓ i, acc)
+
+-- | The interpreter kernel compiled once per process (tree-independent AST).
+{-# NOINLINE interpKernel #-}
+interpKernel
+  :: Vector Double -> Scalar Int -> Scalar Int -> Scalar Int
+  -> Vector Double -> Vector Int -> Vector Int -> Vector Int
+  -> (Scalar Double, Vector Double)
+interpKernel = unsafePerformIO $ do
+    ensureCleanCache cacheCleaned
+    w0 <- getCurrentTime
+    let !jf = CPU.runNWith multiWorker buildAccInterpGraph
+    w1 <- getCurrentTime
+    let dt = realToFrac (diffUTCTime w1 w0) :: Double
+    debug ("[acc-interp] compile " Prelude.++ show dt Prelude.++ " s")
+    modifyIORef' compileTime (Prelude.round (dt * 1e9) +)
+    modifyIORef' compileCount (+ 1)
+    pure jf
+
+-- | One-time gate for the interpreter backend (ACC_INTERP=1); cached per process.
+{-# NOINLINE interpEnabled #-}
+interpEnabled :: Bool
+interpEnabled = unsafePerformIO (do m <- lookupEnv "ACC_INTERP"; pure (m Prelude.== Just "1"))
+
+-- | Build a fixed-length 'Array DIM1 Int' from an unboxed Int vector (copies).
+mkAccIVector :: VU.Vector Int -> Vector Int
+mkAccIVector v = A.fromList (Z :. VU.length v) (VU.toList v)
+
+-- | Interpreter entry point: encodes the tree, then runs every chunk through
+-- the single compiled kernel. Falls back to the Phase-2 JIT if the tree
+-- exceeds the fixed shape (e.g. an unusually deep/wide tree).
+compileAccelerateInterp :: CompiledTree -> [VU.Vector Double] -> VU.Vector Double -> (VS.Vector Double -> (Double, VS.Vector Double))
+compileAccelerateInterp ct _xss _ys =
+    case encodeTree ct of
+      Nothing -> compileAccelerateTree ct _xss _ys
+      Just enc ->
+        let m         = ctM ct
+            chunkSize = readChunkSize
+            nchunks   = Prelude.max 1 (Prelude.div (m + chunkSize - 1) chunkSize)
+            chunkSizes = [ if k Prelude.< nchunks - 1 then chunkSize else m - (nchunks - 1) * chunkSize
+                         | k <- [0 .. nchunks - 1] ]
+            bases     = Data.List.scanl (+) 0 (Data.List.init chunkSizes)
+
+            staticA = mkAccVector (ctStatic ct)
+            metaF   = mkAccIVector (encMeta enc)
+            widthF  = mkAccIVector (encWidth enc)
+            parentF = mkAccIVector (encParent enc)
+            mS      = A.fromList Z [m] :: Scalar Int
+
+            runChunk :: VS.Vector Double -> Vector Double -> Int -> Int -> IO (Double, VS.Vector Double)
+            runChunk _theta thetaArr base cs = do
+                let baseS = A.fromList Z [base] :: Scalar Int
+                    csS   = A.fromList Z [cs]   :: Scalar Int
+                wK0 <- getCurrentTime
+                let (objArr, gradArr) = interpKernel staticA mS baseS csS thetaArr metaF widthF parentF
+                    obj  = A.indexArray objArr Z
+                evaluate obj
+                wK1 <- getCurrentTime
+                let kt = realToFrac (diffUTCTime wK1 wK0) :: Double
+                wG0 <- getCurrentTime
+                let grad = VS.fromList (A.toList gradArr)
+                evaluate (VS.length grad)
+                wG1 <- getCurrentTime
+                let gt = realToFrac (diffUTCTime wG1 wG0) :: Double
+                debug ("[acc-interp] chunk base=" Prelude.++ show base Prelude.++ " cs=" Prelude.++ show cs
+                       Prelude.++ " kernel=" Prelude.++ show kt Prelude.++ " s grad=" Prelude.++ show gt Prelude.++ " s")
+                pure (obj, grad)
+
+        in \theta -> unsafePerformIO $ do
+            w0 <- getCurrentTime
+            wT0 <- getCurrentTime
+            let thetaArr = A.fromList (Z :. VS.length theta) (VS.toList theta)
+            wT1 <- getCurrentTime
+            let tht = realToFrac (diffUTCTime wT1 wT0) :: Double
+            debug ("[acc-interp] thetaMarsh " Prelude.++ show tht Prelude.++ " s (n=" Prelude.++ show (VS.length theta) Prelude.++ ")")
+            results <- Prelude.mapM (Prelude.uncurry (runChunk theta thetaArr)) (Prelude.zip bases chunkSizes)
+            let obj  = foldl' (+) 0 (Prelude.fmap Prelude.fst results)
+                grads = Prelude.fmap Prelude.snd results
+                grad = case grads of
+                         []     -> VS.empty
+                         g : gs -> foldl' (VS.zipWith (+)) g gs
+            evaluate obj
+            evaluate (VS.length grad)
+            w1 <- getCurrentTime
+            let dt = realToFrac (diffUTCTime w1 w0) :: Double
+            debug ("[acc-interp] eval " Prelude.++ show dt Prelude.++ " s")
+            modifyIORef' evalTime (Prelude.round (dt * 1e9) +)
+            modifyIORef' evalCount (+ 1)
+            pure (obj, grad)
