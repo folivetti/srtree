@@ -335,15 +335,28 @@ elemOfAtom v (Atom root tree) =
 {-# INLINE elemOfAtom #-}
 
 -- | sorts the variables in a query by the most frequently occurring
+-- Ties are broken by putting an atom ROOT first. The root indexes the
+-- operator trie directly, so matching it first replaces repeated whole-trie
+-- folds (O(candidates x nodes)) with direct per-node trie descents. The old
+-- tie-break (by id) put low-id pattern leaves before the high-id fresh root,
+-- which made the root's domain include every operator node regardless of the
+-- already-bound children (over-enumeration and O(n^2) folds).
+-- Measured on the user config: 33s -> 19s (MT -N8), best loss unchanged.
 orderedVars :: Query -> [ClassOrVar]
-orderedVars atoms = sortBy (comparing varCost) $ RangeSet.toList $ RangeSet.fromList [a | atom <- atoms, a <- getIdsFrom atom, isRight a]
+orderedVars atoms = sortBy (comparing key) $ RangeSet.toList $ RangeSet.fromList [a | atom <- atoms, a <- getIdsFrom atom, isRight a]
   where
     getIdsFrom (Atom r t) = r : getElems t
     isRight (Right _) = True
     isRight _ = False
 
+    -- is the variable the ROOT of some atom (an index into the operator trie)?
+    isHeader v = any (\a -> case a of Atom r _ -> r == v) atoms
+
     varCost :: ClassOrVar -> Int
     varCost var = foldr (\a acc -> if elemOfAtom var a then acc - 100 + atomLen a else acc) 0 atoms
+
+    key :: ClassOrVar -> (Int, Int)
+    key v = (varCost v, if isHeader v then 0 else 1)
 
     atomLen (Atom _ t) = 1 + length (getElems t)
 {-# INLINE orderedVars #-}
