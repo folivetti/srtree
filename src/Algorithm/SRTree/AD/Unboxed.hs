@@ -29,6 +29,7 @@ module Algorithm.SRTree.AD.Unboxed
          , evalGradVec
          , evalLossVec
          , CompiledTree(..)
+         , setMTPopParallel
          ) where
 
 import Control.Monad (forM_, foldM, when, unless)
@@ -61,6 +62,7 @@ import System.IO.Unsafe (unsafePerformIO)
 import Control.Concurrent (getNumCapabilities)
 import Control.Concurrent.Async (forConcurrently)
 import Control.Exception (evaluate)
+import Data.IORef (IORef, newIORef, writeIORef, readIORef)
 
 import qualified Data.Map.Strict as Map
 import Algorithm.SRTree.AD.CompiledAD
@@ -809,8 +811,8 @@ compileTreeMulti :: [VU.Vector Double]
 compileTreeMulti xss ys mYErr tree =
     let nRows     = VU.length ys
         minChunkSize = 2000
-        numChunks = max 1 (min numCapabilities (nRows `div` minChunkSize))
-        numCapabilities = unsafePerformIO getNumCapabilities
+        numChunks = max 1 (min cap (nRows `div` minChunkSize))
+        cap       = if mtSingleChunk then 1 else unsafePerformIO getNumCapabilities
         ysChunks  = chunkVector numChunks ys
         -- transpose groups the chunks by slice rather than by feature
         xssChunks = Data.List.transpose (map (chunkVector numChunks) xss)
@@ -818,6 +820,22 @@ compileTreeMulti xss ys mYErr tree =
                       Just e  -> map Just (chunkVector numChunks e)
                       Nothing -> replicate (length ysChunks) Nothing
     in [ compileTree xs y err tree | (xs, y, err) <- zip3 xssChunks ysChunks errChunks ]
+
+-- | When True, the MultiThread backend compiles/evaluates each tree on a
+-- single chunk so a higher-level population-parallel driver (eggp's fitness
+-- batch) owns the cores instead of oversubscribing the per-tree chunk split.
+{-# NOINLINE mtSingleChunk #-}
+mtSingleChunk :: Bool
+mtSingleChunk = unsafePerformIO (readIORef mtParGate)
+
+mtParGate :: IORef Bool
+mtParGate = unsafePerformIO (newIORef False)
+{-# NOINLINE mtParGate #-}
+
+-- | Enable/disable single-chunk (non-oversubscribing) mode for the MultiThread
+-- backend; called around a population-parallel fitness batch.
+setMTPopParallel :: Bool -> IO ()
+setMTPopParallel b = writeIORef mtParGate b
 
 -- | Evaluates the gradient across all compiled chunks in parallel.
 -- Each chunk is evaluated by the fast node-outer `evalGradVec` kernel on

@@ -18,9 +18,15 @@ import Data.SRTree.Datasets
 import Data.SRTree.Eval (compileLoss)
 import System.Random
 import Control.Monad.State.Strict
+import Control.Concurrent (getNumCapabilities)
+import Control.Concurrent.Async (mapConcurrently)
+import Data.Maybe (catMaybes)
+import Control.Exception (evaluate)
+import qualified Control.DeepSeq as DeepSeq
 import Algorithm.EqSat.Egraph
 import Algorithm.SRTree.Likelihoods
 import Algorithm.SRTree.AD (ADBackEnd(..))
+import Algorithm.SRTree.AD.Unboxed (setMTPopParallel)
 import qualified Data.IntMap as IM
 import qualified Data.IntSet as IntSet
 import qualified Data.SRTree.Random as Random
@@ -33,6 +39,7 @@ import Algorithm.EqSat.Build
 import Data.SRTree.Random
 import Algorithm.EqSat.Queries
 import Data.List ( maximumBy )
+import qualified Data.List as Data.List
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.Vector.Unboxed as V
 
@@ -45,6 +52,54 @@ io = lift . lift
 rnd :: StateT StdGen IO a -> RndEGraph a
 rnd = lift
 {-# INLINE rnd #-}
+
+-- | Run an 'RndEGraph' action against a read-only egraph snapshot with the given
+-- generator (for concurrent workers that do not mutate the shared egraph).
+runRndEGraph :: EGraph -> StdGen -> RndEGraph a -> IO a
+runRndEGraph eg g m = do
+  ((a, _), _) <- runStateT (runStateT m eg) g
+  pure a
+{-# INLINE runRndEGraph #-}
+
+-- | Fit a batch of e-classes in parallel, then insert the results serially.
+-- Semantics mirror 'updateIfNothing' (skip already-fitted) unless 'force' is
+-- True. The shared 'StdGen' is split once; each worker gets its own generator,
+-- so the global draw sequence differs from the serial search (acceptable).
+-- While the batch runs, the MultiThread backend is switched to single-chunk so
+-- cores go to the batch rather than oversubscribing the inner per-tree split.
+fitBatch :: Bool
+         -> (Fix SRTree -> RndEGraph (Double, [Target]))
+         -> [EClassId]
+         -> RndEGraph ()
+fitBatch force fitFun ecs0 = do
+  ecs <- Prelude.mapM canonical ecs0
+  jobs <- fmap catMaybes $ forM ecs $ \ec -> do
+            mf <- getFitness ec
+            if force || mf == Nothing
+               then Just . (,) ec <$> getBestExpr ec
+               else pure Nothing
+  case jobs of
+    [] -> pure ()
+    _  -> do
+      nCaps <- io getNumCapabilities
+      g0 <- rnd get
+      let (seed, g1) = random g0 :: (Int, StdGen)
+          gs    = [ mkStdGen (seed + fromIntegral i) | i <- [0 .. length jobs - 1] ]
+          jobsG = [ (ec, tree, g) | ((ec, tree), g) <- zip jobs gs ]
+          chunk k xs = [ [ xs !! j | j <- [i, i + k .. length xs - 1] ] | i <- [0 .. k - 1] ]
+      rnd (put g1)
+      eg <- get
+      io (setMTPopParallel True)
+      results <- io $ fmap concat (mapConcurrently (mapM (runJob eg fitFun)) (chunk nCaps jobsG))
+      io (setMTPopParallel False)
+      forM_ results $ \(ec0, f, p) -> insertFitness ec0 f p
+  where
+    runJob :: EGraph -> (Fix SRTree -> RndEGraph (Double, [Target])) -> (EClassId, Fix SRTree, StdGen) -> IO (EClassId, Double, [Target])
+    runJob eg fit' (ec, tree, g) = do
+      (f, p) <- runRndEGraph eg g (fit' tree)
+      f' <- evaluate (DeepSeq.force f)
+      p' <- evaluate (DeepSeq.force p)
+      pure (ec, f', p')
 
 myCost :: SRTree Int -> Int
 myCost (Var _)     = 1

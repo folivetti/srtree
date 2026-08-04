@@ -25,6 +25,10 @@ import Algorithm.SRTree.AD.Accelerate
 data ADBackEnd = SingleThread | MultiThread | Accelerate deriving (Read, Show)
 
 compileFunAndGrad :: ADBackEnd -> [VU.Vector Double] -> VU.Vector Double -> Maybe (VU.Vector Double) -> Fix SRTree -> V.Vector Double -> (Double, V.Vector Double)
-compileFunAndGrad SingleThread xss ys mYerr tree = evalGrad (compileTree xss ys mYerr tree)
-compileFunAndGrad MultiThread xss ys mYerr tree  = evalGradMulti (compileTreeMulti xss ys mYerr tree)
+compileFunAndGrad SingleThread xss ys mYerr tree =
+    let ct = compileTree xss ys mYerr tree
+    in \theta -> evalGrad ct theta
+compileFunAndGrad MultiThread xss ys mYerr tree =
+    let cts = compileTreeMulti xss ys mYerr tree
+    in \theta -> evalGradMulti cts theta
 compileFunAndGrad Accelerate xss ys mYerr tree   = compileAccelerateTree (compileTree xss ys mYerr tree) xss ys
