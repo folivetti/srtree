@@ -132,7 +132,6 @@ compileTree xss ys mYErr tree =
     alg = insertKey
 
     graph      (a, _, _, _, _) = a
-    getKeyS  k (a, _, _, _, _) = a Map.! k
     isDynSt  k (_, _, d, _, _) = d IntMap.! k
     getStat  k (_, _, _, s, _) = s IntMap.! k
 
@@ -161,15 +160,22 @@ compileTree xss ys mYErr tree =
     evalStatic (Bin op l r) = VU.zipWith (evalOp op) <$> gets (getStat l) <*> gets (getStat r)
     evalStatic (Param _)    = error "compileTree: evalStatic called on a Param node (unreachable)"
 
+    -- Data.Map is unreliable with NaN-valued keys (Ord Double is not a valid
+    -- total order for NaN: insert(Const NaN) then member/lookup can disagree),
+    -- and eqsat constant folding can yield Const NaN nodes. So do a single
+    -- direct lookup; on a miss, return the fresh id that insEntry assigns
+    -- instead of looking the key back up. Repeated NaN nodes simply get
+    -- separate ids (no CSE), which is harmless since their static value is
+    -- recomputed identically.
     insertKey key = do
-        isCached <- gets ((key `Map.member`) . graph)
-        if isCached
-          then gets (getKeyS key)
-          else do
+        cached <- gets (Map.lookup key . graph)
+        case cached of
+          Just v  -> pure v
+          Nothing -> do
             d  <- nodeIsDynamic key
             mv <- if d then pure Nothing else Just <$> evalStatic key
-            modify' (insEntry key d mv)
-            gets (getKeyS key)
+            fresh <- state $ \st@(_, _, _, _, c) -> let st' = insEntry key d mv st in (c, st')
+            pure fresh
 
 -- Rewrite (a) Bin Power t (Const 2.0) into the unary Square kernel and
 -- (b) Bin Div t (Const c) into Bin Mul t (Const (1/c)). Both are exact at

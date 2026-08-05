@@ -24,6 +24,7 @@ import Control.Lens (element, makeLenses, view, over, (&), (+~), (-~), (.~), (^.
 --import Control.Monad (forM, forM_, when, foldM, void)
 import Data.List ( intercalate, foldl' )
 import Control.Monad.State.Strict hiding ( get, put )
+import GHC.Stack (HasCallStack)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import Data.Map.Strict (Map)
@@ -236,10 +237,12 @@ createEClass cId enode' info h = EClass cId (Set.singleton enode') Set.empty h i
 {-# INLINE createEClass #-}
 
 -- | gets the canonical id of an e-class with full path compression
-canonical :: Monad m => EClassId -> EGraphST m EClassId
+canonical :: (Monad m, HasCallStack) => EClassId -> EGraphST m EClassId
 canonical eclassId =
   do m <- gets _canonicalMap
-     let oneStep = m IntMap.! eclassId
+     let oneStep = case IntMap.lookup eclassId m of
+           Just x -> x
+           Nothing -> error $ "CANON_MISSING eid=" <> show eclassId <> " mapSize=" <> show (IntMap.size m)
      if oneStep == eclassId
         then pure eclassId
         else do
@@ -258,8 +261,11 @@ canonize = mapM canonical  -- applies canonical to the children
 {-# INLINE canonize #-}
 
 -- | gets an e-class with id `c` (auto-canonizes)
-getEClass :: Monad m => EClassId -> EGraphST m EClass
-getEClass c = do c' <- canonical c; gets ((IntMap.! c') . _eClass)
+getEClass :: (Monad m, HasCallStack) => EClassId -> EGraphST m EClass
+getEClass c = do c' <- canonical c; gets $ \eg -> case IntMap.lookup c' (_eClass eg) of
+                                   Just ec -> ec
+                                   Nothing -> error $ "GETECLASS_MISSING eid=" <> show c'
+                                             <> " nClasses=" <> show (IntMap.size (_eClass eg))
 {-# INLINE getEClass #-}
 
 -- | gets the best expression given the default cost function

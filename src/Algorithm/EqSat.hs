@@ -56,16 +56,18 @@ recalculateBest costFun eid =
     do classes <- gets _eClass
        let costs = fillUpCosts classes Map.empty
        eid' <- canonical eid
-       pure $ snd $ costs Map.! eid'
+       case Map.lookup eid' costs of
+         Just (_, t) -> pure t
+         Nothing     -> error $ "EQSAT_RECALC_MISSING eid=" <> show eid'
+                              <> " nClasses=" <> show (IntMap.size classes)
+                              <> " costSize=" <> show (Map.size costs)
     where
-        nodeCost :: CostMap -> ENode -> Maybe (Int, Fix SRTree)
+        nodeCost :: CostMap -> ENode -> (Int, Fix SRTree)
         nodeCost costMap enode =
-          do optChildren <- traverse (costMap Map.!?) (childrenOf enode) -- | gets the cost of the children, if one is missing, returns Nothing
-             let cc = map fst optChildren
-                 nc = map snd optChildren
-                 n  = replaceChildren cc enode
-                 c  = costFun n
-             pure (c + sum cc, Fix $ replaceChildren nc enode) -- | otherwise, returns the cost of the node + children and the expression so far
+          let (cc, nc) = unzip [ maybe (0, Fix (Const 0)) id (costMap Map.!? cid) | cid <- childrenOf enode ]
+              n  = replaceChildren cc enode
+              c  = costFun n
+          in (c + sum cc, Fix $ replaceChildren nc enode) -- | missing children (cyclic classes) get cost 0 so every class is costed
 
         fillUpCosts :: IntMap EClass -> CostMap -> CostMap
         fillUpCosts classes = go (IntMap.keysSet classes)
@@ -79,12 +81,11 @@ recalculateBest costFun eid =
                   Nothing -> (d, cm)
                   Just ecl ->
                     let currentCost = Map.lookup eid cm
-                        minCost     = Set.foldl' (\acc en -> case nodeCost cm en of
-                                          Nothing -> acc
-                                          Just c  -> case acc of
-                                            Nothing  -> Just c
-                                            Just c'  -> Just (if fst c <= fst c' then c else c')
-                                        ) Nothing (_eNodes ecl)
+                        minCost     = Set.foldl' (\acc en -> let c = nodeCost cm en
+                                                  in case acc of
+                                                    Nothing  -> Just c
+                                                    Just c'  -> Just (if fst c <= fst c' then c else c')
+                                                ) Nothing (_eNodes ecl)
                         (changed, cm') = case (currentCost, minCost) of
                           (_, Nothing)            -> (False, cm)
                           (Nothing, Just new)     -> (True, Map.insert eid new cm)

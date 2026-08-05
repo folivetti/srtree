@@ -82,10 +82,12 @@ joinData (EData c1 b1 cn1 fit1 dl1 p1 sz1) (EData c2 b2 cn2 fit2 dl2 p2 sz2) =
 
 -- | Fetch consts, cost, and size for all children in a single state traversal
 getChildrenData :: Monad m => [EClassId] -> EGraphST m [(Consts, Cost, Int)]
-getChildrenData ids = gets $ \eg ->
-  map (\cid -> let ec = _eClass eg IntMap.! cid
-                   d  = _info ec
-               in (_consts d, _cost d, _size d)) ids
+getChildrenData ids = do
+  ids' <- mapM canonical ids
+  gets $ \eg ->
+    map (\cid -> let ec = _eClass eg IntMap.! cid
+                     d  = _info ec
+                 in (_consts d, _cost d, _size d)) ids'
 {-# INLINE getChildrenData #-}
 
 -- | Calculate e-node data (constant values and cost)
@@ -103,8 +105,9 @@ makeAnalysis costFun enode =
 getChildrenMinHeight :: Monad m => ENode -> EGraphST m Int
 getChildrenMinHeight enode = do
   let children = childrenOf enode
-  if null children then pure 0 else
-    gets (\eg -> minimum $ map (\ec -> _height $ _eClass eg IntMap.! ec) children)
+  if null children then pure 0 else do
+    children' <- mapM canonical children
+    gets (\eg -> minimum $ map (\ec -> _height $ _eClass eg IntMap.! ec) children')
 
 -- | update the heights of each e-class
 -- won't work if there's no root

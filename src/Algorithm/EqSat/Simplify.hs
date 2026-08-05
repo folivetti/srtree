@@ -33,7 +33,9 @@ type ConstrFun = Pattern -> Map ClassOrVar ClassOrVar -> EGraph -> Bool
 
 constrainOnVal :: (Consts -> Bool) -> Pattern -> Map ClassOrVar ClassOrVar -> EGraph -> Bool 
 constrainOnVal f (VarPat c) subst eg =
-    let cid = getInt $ subst Map.! Right (fromEnum c)
+    let cid = getInt $ case Map.lookup (Right (fromEnum c)) subst of
+                        Nothing -> error $ "CONSTRAINVAL_MISSING var=" <> show (fromEnum c) <> " substSize=" <> show (Map.size subst)
+                        Just v  -> v
      in f (_consts . _info $ _eClass eg IM.! cid)
 constrainOnVal _ _ _ _ = False 
 

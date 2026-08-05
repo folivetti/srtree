@@ -19,6 +19,7 @@ import Algorithm.EqSat.Egraph
 import Control.Lens ( over )
 import Control.Monad (when, foldM, forM)
 import Control.Monad.State
+import GHC.Stack (HasCallStack)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
 import Data.List (intercalate, sortBy)
@@ -183,7 +184,10 @@ match src = matchCached (compileToQuery src)
 matchCached :: Monad m => (Query, [ClassOrVar], ClassOrVar) -> EGraphST m [(Map ClassOrVar ClassOrVar, ClassOrVar)]
 matchCached (q, vars, root) = do
   substs <- genericJoin q vars root               -- find the substituion rules for this pattern
-  pure [(s, s Map.! root) | s <- substs, Map.size s > 0]
+  pure [ (s, case Map.lookup root s of
+               Nothing -> error $ "MATCHCACHED_MISSING root=" <> show (getInt root) <> " substSize=" <> show (Map.size s)
+               Just v  -> v)
+       | s <- substs, Map.size s > 0 ]
 {-# INLINE matchCached #-}
 
 -- | Returns a Query (list of atoms) of a pattern with pre-computed ordered vars
@@ -228,7 +232,7 @@ getElems _           = []
 -- | Creates the substituion map for
 -- the pattern variables for each one of the
 -- matched subgraph
-genericJoin :: Monad m => Query -> [ClassOrVar] -> ClassOrVar -> EGraphST m [Map ClassOrVar ClassOrVar]
+genericJoin :: (Monad m, HasCallStack) => Query -> [ClassOrVar] -> ClassOrVar -> EGraphST m [Map ClassOrVar ClassOrVar]
 genericJoin atoms vars root = go atoms vars
   where
     -- for each variable
@@ -247,14 +251,14 @@ genericJoin atoms vars root = go atoms vars
 
 -- | returns the e-class id for a certain variable that
 -- matches the pattern described by the atoms
-domainX :: Monad m => ClassOrVar -> Query -> ClassOrVar -> EGraphST m [ClassOrVar]
+domainX :: (Monad m, HasCallStack) => ClassOrVar -> Query -> ClassOrVar -> EGraphST m [ClassOrVar]
 domainX var atoms root = do
   let atoms' = filter (elemOfAtom var) atoms -- :: [ClassOrVar]  -- look only in the atoms with this var
   map Left <$> intersectAtoms var atoms' root -- find the intersection of possible keys by each atom
 {-# INLINE domainX #-}
 
 -- | returns all e-class id that can matches this sequence of atoms
-intersectAtoms :: Monad m => ClassOrVar -> Query -> ClassOrVar -> EGraphST m [EClassId]
+intersectAtoms :: (Monad m, HasCallStack) => ClassOrVar -> Query -> ClassOrVar -> EGraphST m [EClassId]
 intersectAtoms _ [] root = pure []
 intersectAtoms var (a:atoms) root = do
   a0 <- toCanon =<< go a

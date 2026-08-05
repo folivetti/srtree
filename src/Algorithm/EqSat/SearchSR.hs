@@ -53,6 +53,10 @@ rnd :: StateT StdGen IO a -> RndEGraph a
 rnd = lift
 {-# INLINE rnd #-}
 
+-- TEMP instrumentation (EGGP_STATS=1), removed after measurement
+-- (evals counter, dedup counter)
+-- end TEMP instrumentation
+
 -- | Run an 'RndEGraph' action against a read-only egraph snapshot with the given
 -- generator (for concurrent workers that do not mutate the shared egraph).
 runRndEGraph :: EGraph -> StdGen -> RndEGraph a -> IO a
@@ -76,7 +80,8 @@ fitBatch force fitFun ecs0 = do
   jobs <- fmap catMaybes $ forM ecs $ \ec -> do
             mf <- getFitness ec
             if force || mf == Nothing
-               then Just . (,) ec <$> getBestExpr ec
+               then do tree <- getBestExpr ec
+                       pure (Just (ec, tree))
                else pure Nothing
   case jobs of
     [] -> pure ()
@@ -134,8 +139,7 @@ fitnessFunRep :: ADBackEnd -> Bool -> Int -> Int -> Distribution -> DataSet -> D
 fitnessFunRep backend skipVal nRep nIter distribution dataTrain dataVal tree = do
     let nParams = countParamsUniq tree + if distribution == ROXY then 3 else if distribution == Gaussian then 1 else 0
     thetaOrigs <- replicateM nRep (rnd $ randomVec nParams)
-    let fits = maximumBy (compare `on` fst) $ Prelude.map (fitnessFun backend skipVal nIter distribution dataTrain dataVal tree) thetaOrigs
-    pure fits
+    pure $ maximumBy (\(x, _) (y, _) -> compare x y) $ Prelude.map (fitnessFun backend skipVal nIter distribution dataTrain dataVal tree) thetaOrigs
 --{-# INLINE fitnessFunRep #-}
 
 

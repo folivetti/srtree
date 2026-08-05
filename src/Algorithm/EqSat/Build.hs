@@ -31,14 +31,20 @@ import qualified Data.HashMap.Strict as HashMap
 import qualified Data.HashSet as Set
 import Control.Monad.State.Strict
 import Control.Monad.Identity
+import GHC.Stack (HasCallStack)
 import Data.SRTree.Recursion (cataM)
 import Algorithm.EqSat.Info
 import qualified Data.IntSet as IntSet
 
 import qualified Data.Set as RangeSet
 
+ -- TEMP instrumentation (EGGP_STATS=1), removed after measurement
+ -- (refit-cause counter)
+ -- end TEMP instrumentation
+
+
 -- | adds a new or existing e-node (merging if necessary)
-add :: Monad m => CostFun -> ENode -> EGraphST m EClassId
+add :: (Monad m, HasCallStack) => CostFun -> ENode -> EGraphST m EClassId
 add costFun enode = do
   enode''   <- canonize enode
   constEnode <- calculateConsts enode''
@@ -90,7 +96,7 @@ add costFun enode = do
 
 -- | rebuilds the e-graph after inserting or merging
 -- e-classes
-rebuild :: Monad m => CostFun -> EGraphST m ()
+rebuild :: (Monad m, HasCallStack) => CostFun -> EGraphST m ()
 rebuild costFun =
   do wl <- gets (_worklist . _eDB)
      al <- gets (_analysis . _eDB)
@@ -103,7 +109,7 @@ rebuild costFun =
 -- | repairs e-node by canonizing its children
 -- if the canonized e-node already exists in
 -- e-graph, merge the e-classes
-repair :: Monad m => CostFun -> EClassId -> ENode -> EGraphST m ()
+repair :: (Monad m, HasCallStack) => CostFun -> EClassId -> ENode -> EGraphST m ()
 repair costFun ecId enode =
   do modify' $ over eNodeToEClass (HashMap.delete enode)
      enode'  <- canonize enode
@@ -119,7 +125,7 @@ repair costFun ecId enode =
 
 -- | repair the analysis of the e-class
 -- considering the new added e-node
-repairAnalysis :: Monad m => CostFun -> EClassId -> ENode -> EGraphST m ()
+repairAnalysis :: (Monad m, HasCallStack) => CostFun -> EClassId -> ENode -> EGraphST m ()
 repairAnalysis costFun ecId enode =
   do ecId'  <- canonical ecId
      enode' <- canonize enode
@@ -128,15 +134,16 @@ repairAnalysis costFun ecId enode =
      let newData = joinData (_info eclass) info
          eclass' = eclass { _info = newData }
      when (_info eclass /= newData) $
-       do modify' $ over (eDB . analysis) (_parents eclass <>)
+       do let bestChanged = _best (_info eclass) /= _best newData
+          modify' $ over (eDB . analysis) (_parents eclass <>)
                   . over eClass (IntMap.insert ecId' eclass')
-                   . over (eDB . refits) (IntSet.insert ecId')
+                   . (if bestChanged && isJust (_fitness (_info eclass)) then over (eDB . refits) (IntSet.insert ecId') else id)
           _ <- modifyEClass costFun ecId'
           pure ()
 {-# INLINE repairAnalysis #-}
 
 -- | merge to equivalent e-classes
-merge :: Monad m => CostFun -> EClassId -> EClassId -> EGraphST m EClassId
+merge :: (Monad m, HasCallStack) => CostFun -> EClassId -> EClassId -> EGraphST m EClassId
 merge costFun c1 c2 =
   do c1' <- canonical c1
      c2' <- canonical c2
@@ -145,7 +152,7 @@ merge costFun c1 c2 =
        else do (led, ledC, ledOrig, sub, subC, subOrig) <- getLeaderSub c1' c1 c2' c2  -- the leader will be the e-class with more parents
                mergeClasses led ledC ledOrig sub subC subOrig         -- merge sub into leader
   where
-    mergeClasses :: Monad m => EClassId -> EClass -> EClassId -> EClassId -> EClass -> EClassId -> EGraphST m EClassId
+    mergeClasses :: (Monad m, HasCallStack) => EClassId -> EClass -> EClassId -> EClassId -> EClass -> EClassId -> EGraphST m EClassId
     mergeClasses led ledC ledO sub subC subO =
       do modify' $ over canonicalMap (IntMap.insert sub led . IntMap.insert subO led)
          let newC = EClass led
@@ -157,8 +164,9 @@ merge costFun c1 c2 =
          modify' $ over eClass (IntMap.insert led newC . IntMap.delete sub)
                  . over (eDB . worklist) (_parents subC <>)
          when (_info newC /= _info ledC)
-           $ modify' $ over (eDB . analysis) (_parents ledC <>)
-                      . over (eDB . refits) (IntSet.insert led)
+           $ do let bestChanged = _best (_info newC) /= _best (_info ledC)
+                modify' $ over (eDB . analysis) (_parents ledC <>)
+                           . (if bestChanged && isJust (_fitness (_info ledC)) then over (eDB . refits) (IntSet.insert led) else id)
          when (_info newC /= _info subC)
            $ modify' $ over (eDB . analysis) (_parents subC <>)
          updateDBs newC led ledC ledO sub subC subO
@@ -175,7 +183,7 @@ merge costFun c1 c2 =
                   then (c1, ec1, c1O, c2, ec2, c2O)
                   else (c2, ec2, c2O, c1, ec1, c1O)
 
-    updateDBs :: Monad m => EClass -> EClassId -> EClass -> EClassId -> EClassId -> EClass -> EClassId -> EGraphST m ()
+    updateDBs :: (Monad m, HasCallStack) => EClass -> EClassId -> EClass -> EClassId -> EClassId -> EClass -> EClassId -> EGraphST m ()
     updateDBs newC led ledC ledO sub subC subO = do
       updateFitnessDB newC led ledC ledO sub subC subO
       updateSizeDB newC led ledC ledO sub subC subO
@@ -213,7 +221,7 @@ merge costFun c1 c2 =
         szSub  = (_size . _info) subC
 
 -- | modify an e-class, e.g., add constant e-node and prune non-leaves
-modifyEClass :: Monad m => CostFun -> EClassId -> EGraphST m EClassId
+modifyEClass :: (Monad m, HasCallStack) => CostFun -> EClassId -> EGraphST m EClassId
 modifyEClass costFun ecId =
   do ec <- getEClass ecId
      case (_consts . _info) ec of
@@ -254,7 +262,7 @@ modifyEClass costFun ecId =
 -- * DB
 
 -- | `addToDB` adds an e-node and e-class id to the database
-addToDB :: Monad m => ENode -> EClassId -> EGraphST m () -- State DB ()
+addToDB :: (Monad m, HasCallStack) => ENode -> EClassId -> EGraphST m () -- State DB ()
 addToDB enode' eid = do
   eid' <- canonical eid
   ec <- gets ((IntMap.! eid') . _eClass)
@@ -284,7 +292,7 @@ populate (Just tId) (eid:eids) = let nextTrie = IntMap.lookup eid (_trie tId)
                                   in Just $ IntTrie (IntMap.insert eid val (_trie tId))
 {-# INLINE populate #-}
 
-canonizeMap :: Monad m => (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m (Map ClassOrVar ClassOrVar, ClassOrVar)
+canonizeMap :: (Monad m, HasCallStack) => (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m (Map ClassOrVar ClassOrVar, ClassOrVar)
 canonizeMap (subst, cv) = (,cv) <$> traverse g subst
   where
     g :: Monad m => ClassOrVar -> EGraphST m ClassOrVar
@@ -292,7 +300,7 @@ canonizeMap (subst, cv) = (,cv) <$> traverse g subst
     g e2        = pure e2
 {-# INLINE canonizeMap #-}
 
-applyMatch :: Monad m => CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m ()
+applyMatch :: (Monad m, HasCallStack) => CostFun -> Rule -> (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m ()
 applyMatch costFun rule match' =
   do let conds = getConditions rule
      match       <- canonizeMap match'
@@ -306,7 +314,7 @@ applyMatch costFun rule match' =
 
 -- | gets the e-node of the target of the rule
 -- TODO: add consts and modify
-classOfENode :: Monad m => CostFun -> Map ClassOrVar ClassOrVar -> Pattern -> EGraphST m (Maybe EClassId)
+classOfENode :: (Monad m, HasCallStack) => CostFun -> Map ClassOrVar ClassOrVar -> Pattern -> EGraphST m (Maybe EClassId)
 classOfENode costFun subst (VarPat c)     = do let maybeEid = getInt <$> Map.lookup (Right (fromEnum c)) subst
                                                case maybeEid of
                                                  Nothing  -> pure Nothing
@@ -326,13 +334,18 @@ classOfENode costFun subst (Fixed target) = do newChildren <- mapM (classOfENode
 {-# INLINE classOfENode #-}
 
 -- | adds the target of the rule into the e-graph
-reprPrat :: Monad m => CostFun -> Map ClassOrVar ClassOrVar -> Pattern -> EGraphST m EClassId
-reprPrat costFun subst (VarPat c)     = canonical $ getInt $ subst Map.! Right (fromEnum c)
+reprPrat :: (Monad m, HasCallStack) => CostFun -> Map ClassOrVar ClassOrVar -> Pattern -> EGraphST m EClassId
+reprPrat costFun subst (VarPat c)     = do
+    let k = Right (fromEnum c)
+    v <- case Map.lookup k subst of
+           Nothing -> error $ "REPRPRAT_MISSING var=" <> show (fromEnum c) <> " substSize=" <> show (Map.size subst)
+           Just x  -> pure x
+    canonical $ getInt v
 reprPrat costFun subst (Fixed target) = do newChildren <- mapM (reprPrat costFun subst) (getElems target)
                                            add costFun (replaceChildren newChildren target)
 {-# INLINE reprPrat #-}
 
-isValidHeight :: Monad m => (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m Bool
+isValidHeight :: (Monad m, HasCallStack) => (Map ClassOrVar ClassOrVar, ClassOrVar) -> EGraphST m Bool
 isValidHeight match = do
       h <- case snd match of
              Left ec -> _height <$> getEClass ec
@@ -348,7 +361,7 @@ isValidConditions cond match = gets $ cond (fst match)
 -- * Tree to e-graph conversion and utility functions
 
 -- | Creates an e-graph from an expression tree
-fromTree :: Monad m => CostFun -> Fix SRTree -> EGraphST m EClassId
+fromTree :: (Monad m, HasCallStack) => CostFun -> Fix SRTree -> EGraphST m EClassId
 fromTree costFun = cataM sequence (add costFun)
 {-# INLINE fromTree #-}
 
@@ -550,7 +563,11 @@ cleanMaps = do
     k' <- canonical k
     pure $ if k==k' then (Just (k,v)) else Nothing
   let eclassMap' = IntMap.fromList (catMaybes entries')
-  canon' <- gets (IntMap.filterWithKey (\k v -> k == v) . _canonicalMap)
+  -- keep the canonical map COMPLETE (not just identity entries): _nextId keeps
+  -- counting and stale ids can still be referenced (patDB trie, worklist,
+  -- analysis, _unevaluated/_refits), so `canonical` must resolve them to a live
+  -- representative that remains in the pruned _eClass.
+  canon' <- gets _canonicalMap
   eDB' <- gets _eDB
   put $ EGraph canon' enode2eclass' eclassMap' eDB'
 {-# INLINE cleanMaps #-}
