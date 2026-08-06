@@ -22,7 +22,7 @@ import Control.Monad.State
 import GHC.Stack (HasCallStack)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
-import Data.List (intercalate, sortBy)
+import Data.List (delete, intercalate, sort, sortBy)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
@@ -35,9 +35,18 @@ import Data.String (IsString (..))
 import Data.SRTree.Recursion (cata)
 
 
--- A Pattern is either a fixed-point of a tree or an
--- index to a pattern variable. The pattern variable matches anything. 
-data Pattern = Fixed (SRTree Pattern) | VarPat Char deriving (Show, Eq, Ord) -- Fixed structure of a pattern or a variable that matches anything
+-- A Pattern is either a fixed-point of a tree, an index to a pattern variable
+-- (which matches anything), a hole (only used inside a 'MapP' target function),
+-- or an n-ary Add/Mul pattern whose children are matched as a multiset.
+data Pattern = Fixed (SRTree Pattern) | VarPat Char | Hole | NAry NOp [NChild]
+  deriving (Show, Eq, Ord)
+
+-- | A child of an n-ary pattern: a single child pattern ('Ch'), a rest
+-- variable binding every remaining child of the node ('Rest'), or a
+-- target-side map that splices one instantiation of a pattern (with its 'Hole'
+-- filled) per child bound to a rest variable ('MapP').
+data NChild = Ch Pattern | Rest Char | MapP Pattern Char
+  deriving (Show, Eq, Ord)
 
 -- The instance for `IsString` for a `Pattern` is 
 -- valid only for a single letter char from a-zA-Z. 
@@ -54,6 +63,8 @@ tree2pat = cata alg
     alg (Param ix) = if ix >= 100 then VarPat (toEnum $ ix - 100 + 65) else Fixed $ Param ix
     alg (Var ix) = Fixed $ Var ix
     alg (Const x) = Fixed $ Const x
+    alg (Bin Add l r) = NAry EAdd [Ch l, Ch r]
+    alg (Bin Mul l r) = NAry EMul [Ch l, Ch r]
     alg (Bin op l r) = Fixed $ Bin op l r
     alg (Uni f t) = Fixed $ Uni f t
 -- A rule is either a directional rule where pat1 can be replaced by pat2, a bidirectional rule 
@@ -73,32 +84,42 @@ instance Show Rule where
 -- A Query is a list of Atoms 
 type Query = [Atom]
 
--- A `Condition` is a function that takes a substution map,
+-- A `Condition` is a function that takes a substitution map,
 -- an e-graph and returns whether the pattern attends the condition.
-type Condition = Map ClassOrVar ClassOrVar -> EGraph -> Bool
+type Condition = Subst -> EGraph -> Bool
 
 -- An Atom is composed of either an e-class id or pattern variable id
 -- and the tree that generated that pattern. Left is e-class id and Right is a VarPat.
 type ClassOrVar = Either EClassId Int
 data Atom = Atom ClassOrVar (SRTree ClassOrVar) deriving Show
 
+-- | A substitution value: a single e-class (a matched pattern variable) or a
+-- list of e-classes (a matched rest variable).
+data SubVal = SVOne ClassOrVar | SVList [ClassOrVar] deriving Show
+
+-- | Substitution map produced by matching a pattern.
+type Subst = Map ClassOrVar SubVal
+
 unFixPat :: Pattern -> SRTree Pattern
 unFixPat (Fixed p) = p
+unFixPat (VarPat _) = error "unFixPat: VarPat is not a fixed pattern"
+unFixPat Hole       = error "unFixPat: Hole is not a fixed pattern"
+unFixPat (NAry _ _) = error "unFixPat: NAry is not a fixed pattern"
 {-# INLINE unFixPat #-}
 
 
 instance Num Pattern where
-  l + r = Fixed $ Bin Add l r
+  l + r = NAry EAdd [Ch l, Ch r]
   {-# INLINE (+) #-}
-  l - r = Fixed $ Bin Sub l r
+  l - r = NAry EAdd [Ch l, Ch (negate r)]
   {-# INLINE (-) #-}
-  l * r = Fixed $ Bin Mul l r
+  l * r = NAry EMul [Ch l, Ch r]
   {-# INLINE (*) #-}
 
   abs = Fixed . Uni Abs
   {-# INLINE abs #-}
 
-  negate t = Fixed (Const (-1)) * t
+  negate t = NAry EMul [Ch (Fixed (Const (-1))), Ch t]
   {-# INLINE negate #-}
 
   signum t = case t of
@@ -108,7 +129,7 @@ instance Num Pattern where
   {-# INLINE fromInteger #-}
 
 instance Fractional Pattern where
-  l / r = Fixed $ Bin Div l r
+  l / r = NAry EMul [Ch l, Ch (Fixed (Uni Recip r))]
   {-# INLINE (/) #-}
 
   fromRational = Fixed . Const . fromRational
@@ -177,18 +198,140 @@ cleanDB = modify' $ over (eDB. patDB) (const Map.empty)
 
 -- | Returns the substitution rules
 -- for every match of the pattern `source` inside the e-graph.
-match :: Monad m => Pattern -> EGraphST m [(Map ClassOrVar ClassOrVar, ClassOrVar)]
-match src = matchCached (compileToQuery src)
+match :: Monad m => Pattern -> EGraphST m [(Subst, ClassOrVar)]
+match src = if hasNAry src
+              then matchNAry src
+              else matchCached (compileToQuery src)
 {-# INLINE match #-}
 
-matchCached :: Monad m => (Query, [ClassOrVar], ClassOrVar) -> EGraphST m [(Map ClassOrVar ClassOrVar, ClassOrVar)]
+matchCached :: Monad m => (Query, [ClassOrVar], ClassOrVar) -> EGraphST m [(Subst, ClassOrVar)]
 matchCached (q, vars, root) = do
   substs <- genericJoin q vars root               -- find the substituion rules for this pattern
   pure [ (s, case Map.lookup root s of
                Nothing -> error $ "MATCHCACHED_MISSING root=" <> show (getInt root) <> " substSize=" <> show (Map.size s)
-               Just v  -> v)
+               Just v  -> fromSVOne v)
        | s <- substs, Map.size s > 0 ]
 {-# INLINE matchCached #-}
+
+-- | True if the pattern (or a nested child) is an n-ary Add/Mul pattern.
+hasNAry :: Pattern -> Bool
+hasNAry (NAry _ _) = True
+hasNAry (Fixed t)  = any hasNAry (getElems t)
+hasNAry _          = False
+{-# INLINE hasNAry #-}
+
+-- | The operator trie key of the top-level pattern.
+opOf :: Pattern -> SRTree ()
+opOf (NAry EAdd _) = Bin Add () ()
+opOf (NAry EMul _) = Bin Mul () ()
+opOf (Fixed t)     = getOperator t
+opOf _             = error "opOf: pattern has no operator"
+{-# INLINE opOf #-}
+
+-- | Matches an n-ary pattern against every root e-node of the operator trie.
+matchNAry :: Monad m => Pattern -> EGraphST m [(Subst, ClassOrVar)]
+matchNAry src = do
+  db <- gets (_patDB . _eDB)
+  case Map.lookup (opOf src) db of
+    Nothing -> pure []
+    Just trie -> do
+      results <- forM (IntMap.keys (_trie trie)) $ \eid -> do
+        substs <- recursiveMatch src eid Map.empty
+        pure [ (s, Left eid) | s <- substs ]
+      pure (concat results)
+{-# INLINE matchNAry #-}
+
+-- | Recursively match a pattern against the e-class `eid`, threading a
+-- substitution map, returning every substitution that completes the match.
+recursiveMatch :: Monad m => Pattern -> EClassId -> Subst -> EGraphST m [Subst]
+recursiveMatch (VarPat c) eid subst =
+  pure (bindVar subst (Right (fromEnum c)) eid)
+recursiveMatch Hole _ subst = pure [subst]
+recursiveMatch (Fixed t) eid subst = matchFixed t eid subst
+recursiveMatch (NAry op ncs) eid subst = matchNAryNode op ncs eid subst
+{-# INLINE recursiveMatch #-}
+
+-- | Bind `v` to the e-class `eid`, enforcing that re-occurrences of `v` are
+-- consistent.
+bindVar :: Subst -> ClassOrVar -> EClassId -> [Subst]
+bindVar subst v eid =
+  case Map.lookup v subst of
+    Just (SVOne e) | e == Left eid -> [subst]
+    Just _                         -> []
+    Nothing                        -> [Map.insert v (SVOne (Left eid)) subst]
+{-# INLINE bindVar #-}
+
+-- | Match a fixed tree pattern against the e-nodes of the e-class `eid`,
+-- returning every substitution that completes the match across all candidate
+-- e-nodes.
+matchFixed :: Monad m => SRTree Pattern -> EClassId -> Subst -> EGraphST m [Subst]
+matchFixed t eid subst = do
+  ec <- getEClass eid
+  let cands = [n | n <- Set.toList (_eNodes ec), eOpKey n == getOperator t]
+  fmap concat $ forM cands $ \n -> matchChildren t subst n
+  where
+    matchChildren t s n = go (zip (getElems t) (enodeChildren n)) [s]
+    go [] ss = pure ss
+    go ((p, c) : ps) ss = do
+      ms <- concat <$> mapM (\s -> recursiveMatch p c s) ss
+      go ps ms
+{-# INLINE matchFixed #-}
+
+-- | The child e-class ids of an e-node, in canonical (sorted for ENAry) order.
+enodeChildren :: ENode -> [EClassId]
+enodeChildren (EUni _ t)   = [t]
+enodeChildren (EBin _ l r) = [l, r]
+enodeChildren (ENAry _ xs) = xs
+enodeChildren _            = []
+{-# INLINE enodeChildren #-}
+
+-- | Match an n-ary pattern node against the e-class `eid`: it must contain an
+-- ENAry node of the given op, whose children are matched as a multiset. Every
+-- ENAry node in the class is tried.
+matchNAryNode :: Monad m => NOp -> [NChild] -> EClassId -> Subst -> EGraphST m [Subst]
+matchNAryNode op ncs eid subst = do
+  ec <- getEClass eid
+  let nodes = [xs | ENAry op' xs <- Set.toList (_eNodes ec), op' == op]
+  fmap concat $ forM nodes $ \xs ->
+    matchNChildren ncs (sort xs) subst
+{-# INLINE matchNAryNode #-}
+
+-- | Match a sequence of n-ary children against a multiset of e-class ids.
+-- Each 'Ch' consumes one matched child; a 'Rest' child consumes all remaining
+-- children. Every multiset assignment is returned.
+matchNChildren :: Monad m => [NChild] -> [EClassId] -> Subst -> EGraphST m [Subst]
+matchNChildren ncs children subst = go ncs children subst
+  where
+    go :: Monad m => [NChild] -> [EClassId] -> Subst -> EGraphST m [Subst]
+    go [] children s
+      | null children = pure [s]
+      | otherwise     = pure []
+    go (Rest c : ps) children s = do
+      let v = Right (fromEnum c)
+      case Map.lookup v s of
+        Just _  -> pure []  -- rest variable already bound
+        Nothing -> go ps [] (Map.insert v (SVList (map Left children)) s)
+    go (Ch p : ps) children s = do
+      results <- forM children $ \c -> do
+        ms <- recursiveMatch p c s
+        fmap concat $ forM ms $ \s' ->
+          go ps (deleteFirst c children) s'
+      pure (concat results)
+    go (MapP _ _ : _) _ _ = error "matchNChildren: MapP is only valid in targets"
+{-# INLINE matchNChildren #-}
+
+-- | Remove the first occurrence of a value from a list.
+deleteFirst :: Eq a => a -> [a] -> [a]
+deleteFirst _ [] = []
+deleteFirst x (y : ys) | x == y    = ys
+                       | otherwise = y : deleteFirst x ys
+{-# INLINE deleteFirst #-}
+
+-- | Unwrap a single-e-class substitution value.
+fromSVOne :: SubVal -> ClassOrVar
+fromSVOne (SVOne v)    = v
+fromSVOne (SVList _)   = error "fromSVOne: expected a single e-class"
+{-# INLINE fromSVOne #-}
 
 -- | Returns a Query (list of atoms) of a pattern with pre-computed ordered vars
 compileToQuery :: Pattern -> (Query, [ClassOrVar], ClassOrVar)
@@ -197,6 +340,8 @@ compileToQuery pat = (atoms, orderedVars atoms, root)
       -- creates the atoms of a pattern
         processPat :: Pattern -> State Int (Query, ClassOrVar)
         processPat (VarPat x)  = pure ([], Right $ fromEnum x)
+        processPat (NAry _ _)  = error "compileToQuery: n-ary pattern (use matchNAry instead)"
+        processPat Hole        = error "compileToQuery: Hole is only valid in MapP targets"
         processPat (Fixed pat) = do
             -- get the next available var id and add as root
             v <- get
@@ -232,18 +377,18 @@ getElems _           = []
 -- | Creates the substituion map for
 -- the pattern variables for each one of the
 -- matched subgraph
-genericJoin :: (Monad m, HasCallStack) => Query -> [ClassOrVar] -> ClassOrVar -> EGraphST m [Map ClassOrVar ClassOrVar]
+genericJoin :: (Monad m, HasCallStack) => Query -> [ClassOrVar] -> ClassOrVar -> EGraphST m [Subst]
 genericJoin atoms vars root = go atoms vars
   where
     -- for each variable
     --   for each possible e-class id for that variable
     --      replace the var id with this e-class id, and
     --      recurse to find the possible matches for the next atom
-    go :: Monad m => Query -> [ClassOrVar] -> EGraphST m [Map ClassOrVar ClassOrVar]
+    go :: Monad m => Query -> [ClassOrVar] -> EGraphST m [Subst]
     go atoms [] = pure [Map.empty] -- | _ <- atoms]
     go atoms (x:vars) = do cIds1 <- domainX x atoms root
                            maps <- forM cIds1 $ \classId -> do
-                             map (Map.insert x classId) <$> go (updateVar x classId atoms) vars
+                             map (Map.insert x (SVOne classId)) <$> go (updateVar x classId atoms) vars
                            pure (concat maps)
 {-# INLINE genericJoin #-}
 

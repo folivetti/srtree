@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE StrictData #-}
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 -----------------------------------------------------------------------------
@@ -22,7 +22,7 @@ module Algorithm.EqSat.Egraph where
 
 import Control.Lens (element, makeLenses, view, over, (&), (+~), (-~), (.~), (^.))
 --import Control.Monad (forM, forM_, when, foldM, void)
-import Data.List ( intercalate, foldl' )
+import Data.List ( intercalate, foldl', sort )
 import Control.Monad.State.Strict hiding ( get, put )
 import GHC.Stack (HasCallStack)
 import Data.IntMap.Strict (IntMap)
@@ -38,28 +38,55 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Set as RangeSet
 import Data.SRTree
 import Data.SRTree.Eval
+import Data.SRTree.Recursion (cata)
 import Data.Hashable
 import Data.Binary
 import qualified Data.Binary as Bin
 import qualified Data.Vector.Unboxed as VU
+import Control.DeepSeq (NFData)
 
 import GHC.Generics
 
 
 type EClassId     = Int -- NOTE: DO NOT CHANGE THIS, this will break the use of IntMap and IntSet
 type ClassIdMap   = IntMap
-type ENode        = SRTree EClassId
+
+-- | N-ary operators represented as flattened multisets inside the e-graph.
+-- Only Add and Mul are associative-commutative in this library; the remaining
+-- ops (Sub, Div, Power, PowerAbs, AQ) stay binary and live in 'EBin'.
+data NOp = EAdd | EMul deriving (Show, Eq, Ord, Enum, Generic, NFData)
+
+-- | The e-graph's node language.
+--
+-- 'ENAry' stores Add/Mul as a canonical multiset of e-class ids: children are
+-- path-compressed, sorted by canonical 'EClassId' (commutativity), and nested
+-- same-op ENAry children are absorbed at insertion time (associativity), so
+-- no commutativity/associativity rewrite rules are needed for Add/Mul.
+data ENode
+  = EVar   {-# UNPACK #-} !Int
+  | EParam {-# UNPACK #-} !Int
+  | EConst {-# UNPACK #-} !Double
+  | EUni   Function EClassId
+  | EBin   Op EClassId EClassId          -- Sub | Div | Power | PowerAbs | AQ
+  | ENAry  NOp [EClassId]                -- canonical sorted multiset
+  deriving (Show, Eq, Ord, Generic, NFData)
+
 type EGraphST m a = StateT EGraph m a
 type Cost         = Int
 type CostFun      = SRTree Cost -> Cost
 type ECache = IntMap.IntMap Target
 
+instance Hashable NOp where
+  hashWithSalt n EAdd = n `hashWithSalt` (0 :: Int)
+  hashWithSalt n EMul = n `hashWithSalt` (1 :: Int)
+
 instance Hashable ENode where
-  hashWithSalt n (Var ix)       = n `hashWithSalt` (0 :: Int) `hashWithSalt` ix
-  hashWithSalt n (Param ix)     = n `hashWithSalt` (1 :: Int) `hashWithSalt` ix
-  hashWithSalt n (Const x)      = n `hashWithSalt` (2 :: Int) `hashWithSalt` x
-  hashWithSalt n (Uni f e)      = n `hashWithSalt` (3 :: Int) `hashWithSalt` (fromEnum f) `hashWithSalt` e
-  hashWithSalt n (Bin op l r)   = n `hashWithSalt` (4 :: Int) `hashWithSalt` (fromEnum op) `hashWithSalt` l `hashWithSalt` r
+  hashWithSalt n (EVar ix)      = n `hashWithSalt` (0 :: Int) `hashWithSalt` ix
+  hashWithSalt n (EParam ix)    = n `hashWithSalt` (1 :: Int) `hashWithSalt` ix
+  hashWithSalt n (EConst x)     = n `hashWithSalt` (2 :: Int) `hashWithSalt` x
+  hashWithSalt n (EUni f t)     = n `hashWithSalt` (3 :: Int) `hashWithSalt` (fromEnum f) `hashWithSalt` t
+  hashWithSalt n (EBin op l r)  = n `hashWithSalt` (4 :: Int) `hashWithSalt` (fromEnum op) `hashWithSalt` l `hashWithSalt` r
+  hashWithSalt n (ENAry op xs)  = n `hashWithSalt` (5 :: Int) `hashWithSalt` op `hashWithSalt` xs
 
 type RangeTree a = RangeSet.Set (a, EClassId)
 
@@ -136,20 +163,31 @@ data EClassData = EData { _cost    :: {-# UNPACK #-} !Cost
 -- * Serialization
 instance Generic (EClassId, ENode)
 
-instance Binary (SRTree EClassId) where
-  put (Var ix)     = put (0 :: Word8) >> put ix
-  put (Param ix)   = put (1 :: Word8) >> put ix
-  put (Const x)    = put (2 :: Word8) >> put x
-  put (Uni f t)    = put (3 :: Word8) >> put (fromEnum f) >> put t
-  put (Bin op l r) = put (4 :: Word8) >> put (fromEnum op) >> put l >> put r
+instance Binary NOp where
+  put EAdd = put (0 :: Word8)
+  put EMul = put (1 :: Word8)
 
   get = do t <- get :: Get Word8
            case t of
-                0 -> Var   <$> get
-                1 -> Param <$> get
-                2 -> Const <$> get
-                3 -> Uni   <$> (toEnum <$> get) <*> get
-                4 -> Bin   <$> (toEnum <$> get) <*> get <*> get
+             0 -> pure EAdd
+             1 -> pure EMul
+
+instance Binary ENode where
+  put (EVar ix)      = put (0 :: Word8) >> put ix
+  put (EParam ix)    = put (1 :: Word8) >> put ix
+  put (EConst x)     = put (2 :: Word8) >> put x
+  put (EUni f t)     = put (3 :: Word8) >> put (fromEnum f) >> put t
+  put (EBin op l r)  = put (4 :: Word8) >> put (fromEnum op) >> put l >> put r
+  put (ENAry op xs)  = put (5 :: Word8) >> put op >> put xs
+
+  get = do t <- get :: Get Word8
+           case t of
+                0 -> EVar   <$> get
+                1 -> EParam <$> get
+                2 -> EConst <$> get
+                3 -> EUni   <$> (toEnum <$> get) <*> get
+                4 -> EBin   <$> (toEnum <$> get) <*> get <*> get
+                5 -> ENAry  <$> get <*> get
 
 instance Binary (SRTree ()) where
   put (Var ix)     = put (0 :: Word8) >> put ix
@@ -256,9 +294,143 @@ canonical eclassId =
 {-# INLINE canonical #-}
 
 -- | canonize the e-node children
-canonize :: Monad m => ENode -> EGraphST m ENode
-canonize = mapM canonical  -- applies canonical to the children
+canonize :: (Monad m, HasCallStack) => ENode -> EGraphST m ENode
+canonize (EVar ix)     = pure (EVar ix)
+canonize (EParam ix)   = pure (EParam ix)
+canonize (EConst x)    = pure (EConst x)
+canonize (EUni f t)    = EUni f <$> canonical t
+canonize (EBin op l r) = EBin op <$> canonical l <*> canonical r
+-- re-sort: commutativity is structural, no rewrite rule required
+canonize (ENAry op xs) = ENAry op . sort <$> mapM canonical xs
 {-# INLINE canonize #-}
+
+-- | The children e-class ids of an e-node.
+eChildren :: ENode -> [EClassId]
+eChildren (EVar _)     = []
+eChildren (EParam _)   = []
+eChildren (EConst _)   = []
+eChildren (EUni _ t)   = [t]
+eChildren (EBin _ l r) = [l, r]
+eChildren (ENAry _ xs) = xs
+{-# INLINE eChildren #-}
+
+toOp :: NOp -> Op
+toOp EAdd = Add
+toOp EMul = Mul
+{-# INLINE toOp #-}
+
+-- | Operator shape key used to index the pattern database. ENAry maps back to
+-- the corresponding binary operator shape so existing (binary) Add/Mul
+-- patterns address the same trie.
+eOpKey :: ENode -> SRTree ()
+eOpKey (EVar ix)     = Var ix
+eOpKey (EParam ix)   = Param ix
+eOpKey (EConst x)    = Const x
+eOpKey (EUni f _)    = Uni f ()
+eOpKey (EBin op _ _) = Bin op () ()
+eOpKey (ENAry EAdd _) = Bin Add () ()
+eOpKey (ENAry EMul _) = Bin Mul () ()
+{-# INLINE eOpKey #-}
+
+-- | Convert an e-node (children still as e-class ids) into the equivalent
+-- binary SRTree shape. NOTE: only called on non-ENary nodes; flattened
+-- ENAry nodes have no binary skeleton (see 'naryTree' / the explicit ENAry
+-- cases in the analyses).
+fromENode :: ENode -> SRTree EClassId
+fromENode (EVar ix)     = Var ix
+fromENode (EParam ix)   = Param ix
+fromENode (EConst x)    = Const x
+fromENode (EUni f t)    = Uni f t
+fromENode (EBin op l r) = Bin op l r
+fromENode (ENAry _ _)   = error "fromENode: ENAry has no binary skeleton"
+{-# INLINE fromENode #-}
+
+-- | Right-fold a list of e-class child expressions into a binary Fix SRTree
+-- for a flattened ENAry multiset (extraction).
+naryTree :: NOp -> [Fix SRTree] -> Fix SRTree
+naryTree op ts = normalizeSubDiv (foldr1 (\a b -> Fix (Bin (toOp op) a b)) ts)
+{-# INLINE naryTree #-}
+
+-- | Re-render the internal negate/recip canonical forms back as Sub/Div so
+-- extraction output keeps the familiar shape: `x + (-1)*y` -> `x - y`,
+-- `x + (-3)` -> `x - 3` and `x * recip y` -> `x / y`. Sub and Div never
+-- appear as e-nodes; they only reappear here during reconstruction.
+normalizeSubDiv :: Fix SRTree -> Fix SRTree
+normalizeSubDiv = cata alg
+  where
+    alg :: SRTree (Fix SRTree) -> Fix SRTree
+    alg (Bin Add l r) = case pick l r of
+        Just (pos, neg) -> Fix (Bin Sub pos neg)
+        Nothing         -> Fix (Bin Add l r)
+      where
+        pick a b = case negated a of
+                     Just t -> Just (b, t)
+                     Nothing -> case negated b of
+                                  Just t -> Just (a, t)
+                                  Nothing -> Nothing
+        negated (Fix (Bin Mul (Fix (Const c)) t)) | c == -1 = Just t
+        negated (Fix (Bin Mul t (Fix (Const c)))) | c == -1 = Just t
+        negated (Fix (Const c)) | c < 0 = Just (Fix (Const (-c)))
+        negated _ = Nothing
+    alg (Bin Mul l r) = case pick l r of
+        Just (num, den) -> Fix (Bin Div num den)
+        Nothing         -> Fix (Bin Mul l r)
+      where
+        pick a b = case a of
+                     Fix (Uni Recip t) -> Just (b, t)
+                     _ -> case b of
+                            Fix (Uni Recip t) -> Just (a, t)
+                            _ -> Nothing
+    alg t = Fix t
+
+-- | Convert a binary SRTree (children as e-class ids) into an e-node,
+-- flattening Add/Mul into canonical ENAry multisets.
+toENode :: (Monad m, HasCallStack) => SRTree EClassId -> EGraphST m ENode
+toENode (Var ix)     = pure (EVar ix)
+toENode (Param ix)   = pure (EParam ix)
+toENode (Const x)    = pure (EConst x)
+toENode (Uni f t)    = EUni f <$> canonical t
+toENode (Bin Add l r) = mkENary EAdd [l, r]
+toENode (Bin Mul l r) = mkENary EMul [l, r]
+toENode (Bin op l r)  = EBin op <$> canonical l <*> canonical r
+toENode n             = error $ "toENode: unsupported node " <> show n
+{-# INLINE toENode #-}
+
+-- | Build a canonical ENAry from child ids: canonicalize children, absorb
+-- nested same-op ENAry children (associativity), sort (commutativity).
+mkENary :: (Monad m, HasCallStack) => NOp -> [EClassId] -> EGraphST m ENode
+mkENary op cids = do
+  cids' <- mapM canonical cids
+  flat  <- concat <$> mapM (expand op) cids'
+  pure (ENAry op (sort flat))
+
+-- | If the e-class of `cid` holds exactly one e-node and that node is an ENAry
+-- of the same op, return its children directly (flattening); otherwise return
+-- `[cid]`. Flattening is only sound through a class with a single node: if the
+-- class were merged with other nodes (e.g. `{Add[a,b], Mul[x,c]}`) flattening
+-- would silently pick one representative and change the meaning of the term.
+expand :: (Monad m, HasCallStack) => NOp -> EClassId -> EGraphST m [EClassId]
+expand op cid = do
+  ec <- getEClass cid
+  case Set.toList (_eNodes ec) of
+    [ENAry op' xs] | op' == op -> pure xs
+    _                          -> pure [cid]
+
+-- | Reconstruct a binary Fix SRTree from an e-node, right-folding ENAry
+-- into nested Bin Add/Mul.
+enodeToTree :: (Monad m, HasCallStack) => ENode -> EGraphST m (Fix SRTree)
+enodeToTree (EVar ix)   = pure (Fix (Var ix))
+enodeToTree (EParam ix) = pure (Fix (Param ix))
+enodeToTree (EConst x)  = pure (Fix (Const x))
+enodeToTree (EUni f t)  = Fix . Uni f <$> getBestExpr t
+enodeToTree (EBin op l r) = do
+  tl <- getBestExpr l
+  tr <- getBestExpr r
+  pure (Fix (Bin op tl tr))
+enodeToTree (ENAry op xs) = do
+  ts <- mapM getBestExpr xs
+  pure (naryTree op ts)
+{-# INLINE enodeToTree #-}
 
 -- | gets an e-class with id `c` (auto-canonizes)
 getEClass :: (Monad m, HasCallStack) => EClassId -> EGraphST m EClass
@@ -269,11 +441,10 @@ getEClass c = do c' <- canonical c; gets $ \eg -> case IntMap.lookup c' (_eClass
 {-# INLINE getEClass #-}
 
 -- | gets the best expression given the default cost function
-getBestExpr :: Monad m => EClassId -> EGraphST m (Fix SRTree)
+getBestExpr :: (Monad m, HasCallStack) => EClassId -> EGraphST m (Fix SRTree)
 getBestExpr eid = do
   best <- (_best . _info) <$> getEClass eid
-  childs <- mapM getBestExpr $ childrenOf best
-  pure . Fix $ replaceChildren childs best
+  enodeToTree best
 
 -- | Creates a singleton trie from an e-class id
 trie :: EClassId -> IntMap IntTrie -> IntTrie

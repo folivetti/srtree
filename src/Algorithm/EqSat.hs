@@ -64,10 +64,20 @@ recalculateBest costFun eid =
     where
         nodeCost :: CostMap -> ENode -> (Int, Fix SRTree)
         nodeCost costMap enode =
-          let (cc, nc) = unzip [ maybe (0, Fix (Const 0)) id (costMap Map.!? cid) | cid <- childrenOf enode ]
-              n  = replaceChildren cc enode
-              c  = costFun n
-          in (c + sum cc, Fix $ replaceChildren nc enode) -- | missing children (cyclic classes) get cost 0 so every class is costed
+          -- A child that has not been costed yet (a cycle, or a class whose
+          -- cost is computed later in this iteration) contributes a large
+          -- sentinel instead of 0: a 0 placeholder is cheaper than the real
+          -- cost, so the fixpoint below would keep the stale placeholder tree
+          -- (e.g. `x * 0.0` for `x * (y + z)`). Real costs always beat it.
+          let (cc, nc) = unzip [ maybe (costSentinel, Fix (Const 0)) id (costMap Map.!? cid) | cid <- eChildren enode ]
+              c  = case enode of
+                     ENAry op _ -> costFun (Bin (toOp op) 0 0)
+                     _          -> costFun (replaceChildren cc (fromENode enode))
+          in (c + sum cc, Fix $ case enode of
+                 ENAry op _ -> unfix (naryTree op nc)
+                 _          -> replaceChildren nc (fromENode enode)) -- | missing children (cyclic classes) get cost 0 so every class is costed
+        costSentinel :: Int
+        costSentinel = 1000000
 
         fillUpCosts :: IntMap EClass -> CostMap -> CostMap
         fillUpCosts classes = go (IntMap.keysSet classes)
@@ -103,12 +113,19 @@ replaceEqRules (p1 :=> p2)  = [p1 :=> p2]
 replaceEqRules (p1 :==: p2) = [p1 :=> p2, p2 :=> p1]
 replaceEqRules (r :| cond)  = map (:| cond) $ replaceEqRules r
 
+-- | Compile a rule source into a query, or `Nothing` for n-ary patterns that
+-- use the direct multiset matcher instead.
+compileSource :: Rule -> Maybe (Query, [ClassOrVar], ClassOrVar)
+compileSource r = if hasNAry (source r)
+                    then Nothing
+                    else Just (compileToQuery (source r))
+
 -- | run equality saturation for a number of iterations
 runEqSat :: Monad m => CostFun -> [Rule] -> Int -> EGraphST m (Bool, Int)
 runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
     where
         rules' = concatMap replaceEqRules rules
-        compiledRules = map (\r -> (r, compileToQuery (source r))) rules'
+        compiledRules = map (\r -> (r, compileSource r)) rules'
 
         go it sch compiled =
           do -- reset dirty flag before processing this iteration
@@ -121,7 +138,9 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
                  (filtered, sch') = runState (matchAll compiled) sch
 
              -- step 2: apply matches and rebuild
-             matches <- mapM (\(rule, (q, vars, root)) -> map (rule,) <$> matchCached (q, vars, root)) $ concat filtered
+             matches <- mapM (\(rule, cq) -> map (rule,) <$> case cq of
+                                Just q  -> matchCached q
+                                Nothing -> match (source rule)) $ concat filtered
              mapM_ (uncurry (applyMatch costFun)) $ concat matches
              rebuild costFun
 

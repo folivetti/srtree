@@ -93,18 +93,26 @@ getChildrenData ids = do
 -- | Calculate e-node data (constant values and cost)
 makeAnalysis :: Monad m => CostFun -> ENode -> EGraphST m EClassData
 makeAnalysis costFun enode =
-  do let cs = childrenOf enode
+  do let cs = eChildren enode
      childData <- getChildrenData cs
      let (consts', costs', sizes) = unzip3 childData
-         consts = combineConsts $ replaceChildren consts' enode
-         cost   = costFun $ replaceChildren costs' enode
+         consts = combineNode enode consts'
+         cost   = costNode enode costs'
          sz     = sum sizes
      enode' <- canonize enode
      pure $ EData cost enode' consts Nothing Nothing [] (sz + 1)
+  where
+    -- ENAry folds children pairwise (constant folding over a multiset); the
+    -- binary skeleton cannot represent n children.
+    combineNode (ENAry op _) cs = foldr1 (\a b -> combineConsts (Bin (toOp op) a b)) cs
+    combineNode _             cs = combineConsts (replaceChildren cs (fromENode enode))
+    -- ENAry is a single flattened op node: op cost + sum of child costs.
+    costNode (ENAry op _) cs = costFun (Bin (toOp op) 0 0) + sum cs
+    costNode _             cs = costFun (replaceChildren cs (fromENode enode))
 
 getChildrenMinHeight :: Monad m => ENode -> EGraphST m Int
 getChildrenMinHeight enode = do
-  let children = childrenOf enode
+  let children = eChildren enode
   if null children then pure 0 else do
     children' <- mapM canonical children
     gets (\eg -> minimum $ map (\ec -> _height $ _eClass eg IntMap.! ec) children')
@@ -133,7 +141,7 @@ calculateHeights =
 
     getChildrenEC :: Monad m => EClassId -> EGraphST m [EClassId]
     getChildrenEC ec' = do ec <- getEClass ec'
-                           pure $ concatMap childrenOf (_eNodes ec)
+                           pure $ concatMap eChildren (_eNodes ec)
 
     go [] _    _ = pure ()
     go qs tabu h =
@@ -143,18 +151,23 @@ calculateHeights =
          go childrenL (TrueSet.union tabu childrenOf) (h+1) -- move one breadth search style
 
 -- | calculates the cost of a node
-calculateCost :: Monad m => CostFun -> SRTree EClassId -> EGraphST m Cost
-calculateCost f t =
-  do let cs = childrenOf t
+calculateCost :: Monad m => CostFun -> ENode -> EGraphST m Cost
+calculateCost f enode =
+  do let cs = eChildren enode
      costs <- traverse (fmap (_cost . _info) . getEClass) cs
-     pure . f $ replaceChildren costs t
+     pure $ case enode of
+              ENAry op _ -> f (Bin (toOp op) 0 0) + sum costs
+              _          -> f (replaceChildren costs (fromENode enode))
 
 -- | check whether an e-node evaluates to a const
-calculateConsts :: Monad m => SRTree EClassId -> EGraphST m Consts
-calculateConsts t =
-  do let cs = childrenOf t
+calculateConsts :: Monad m => ENode -> EGraphST m Consts
+calculateConsts enode =
+  do let cs = eChildren enode
      consts <- traverse (fmap (_consts . _info) . getEClass) cs
-     case combineConsts $ replaceChildren consts t of
+     let c = case enode of
+               ENAry op _ -> foldr1 (\a b -> combineConsts (Bin (toOp op) a b)) consts
+               _          -> combineConsts (replaceChildren consts (fromENode enode))
+     case c of
           ConstVal x | isNaN x -> pure (ConstVal x)
           a -> pure a
 

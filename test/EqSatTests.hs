@@ -17,9 +17,11 @@ import Algorithm.EqSat.Build
 import Algorithm.EqSat.DB
 import Algorithm.EqSat.Info
 import Algorithm.EqSat.Queries
+import Algorithm.EqSat.Simplify (simplifyEqSatDefault, rewrites, rewritesParams)
 import Control.Monad.State.Strict
 import Control.Monad (forM_)
 import Control.Monad.Identity
+import Data.List (nub, sort)
 
 eps :: Double
 eps = 1e-9
@@ -47,7 +49,7 @@ test_fromTree_var = TestCase $ do
   let ec = _eClass eg IntMap.! eid
   assertBool "fromTree var: eclass has nodes" (not $ null (_eNodes ec))
   let bestNode = head $ Set.toList (_eNodes ec)
-  assertEqual "fromTree var: best is Var 0" (Var 0) bestNode
+  assertEqual "fromTree var: best is Var 0" (EVar 0) bestNode
 
 -- | Test 2: fromTree with a binary expression
 test_fromTree_bin :: Test
@@ -74,7 +76,7 @@ test_canonize = TestCase $ do
         let someNode = head $ Set.toList (_eNodes ec)
         canonize someNode) eg
   -- All children should be canonical now
-  let children = childrenOf canNode
+  let children = eChildren canNode
   forM_ children $ \c -> do
     let (canC, _) = runIdentity $ runStateT (canonical c) eg
     assertEqual "canonize: child is canonical" c canC
@@ -84,7 +86,7 @@ test_add_duplicate :: Test
 test_add_duplicate = TestCase $ do
   let tree = constv 2.0
       (eid1, eg1) = runEG $ fromTree myCost tree
-      (eid2, eg2) = runEG' eg1 $ add myCost (Const 2.0)
+      (eid2, eg2) = runEG' eg1 $ add myCost (EConst 2.0)
   assertEqual "add duplicate returns same eclass" eid1 eid2
   where
     runEG' eg m = runIdentity $ runStateT m eg
@@ -281,6 +283,10 @@ test_trie_no_stale_keys = TestCase $ do
 addZero :: Fix SRTree -> Fix SRTree -> Fix SRTree
 addZero l r = Fix (Bin Add l r)
 
+-- | Helper: construct a binary tree bypassing Num instance simplifications
+mkBin :: Op -> Fix SRTree -> Fix SRTree -> Fix SRTree
+mkBin op l r = Fix (Bin op l r)
+
 -- | Test 22: multi-atom match works after merge (requires toCanon in intersectAtoms)
 test_match_after_merge_multi_atom :: Test
 test_match_after_merge_multi_atom = TestCase $ do
@@ -297,6 +303,264 @@ test_match_after_merge_multi_atom = TestCase $ do
         substs <- match pat
         pure (substs, (), (), (), ())
   assertBool "match: multi-atom should work after merge" (not $ null substs)
+
+-- | Test 23: flattened ENAry multiset for a right-nested Add
+test_enary_flatten :: Test
+test_enary_flatten = TestCase $ do
+  let tree = mkBin Add (var 0) (mkBin Add (var 1) (var 2))
+      (eid, eg) = runEG $ fromTree myCost tree
+      ec = _eClass eg IntMap.! eid
+  case _best . _info $ ec of
+    ENAry EAdd xs -> do
+      assertEqual "enary: 3 children" 3 (length xs)
+      assertBool "enary: distinct children" (length (nub xs) == length xs)
+      assertBool "enary: sorted children" (xs == sort xs)
+    _ -> assertFailure "enary: best should be a 3-ary ENAry EAdd"
+
+-- | Test 24: commutativity is structural (a+b ≡ b+a, no rules needed)
+test_enary_comm :: Test
+test_enary_comm = TestCase $ do
+  let ((c1, c2), _) = runEG $ do
+        eid1 <- fromTree myCost (mkBin Add (var 0) (var 1))
+        eid2 <- fromTree myCost (mkBin Add (var 1) (var 0))
+        a <- canonical eid1
+        b <- canonical eid2
+        pure (a, b)
+  assertEqual "comm: a+b == b+a" c1 c2
+
+-- | Test 25: associativity flattens (a+b)+c ≡ a+(b+c) ≡ a+(c+b)
+test_enary_assoc :: Test
+test_enary_assoc = TestCase $ do
+  let ((c1, c2, c3), _) = runEG $ do
+        eid1 <- fromTree myCost (mkBin Add (mkBin Add (var 0) (var 1)) (var 2))
+        eid2 <- fromTree myCost (mkBin Add (var 0) (mkBin Add (var 1) (var 2)))
+        eid3 <- fromTree myCost (mkBin Add (var 0) (mkBin Add (var 2) (var 1)))
+        a <- canonical eid1
+        b <- canonical eid2
+        c <- canonical eid3
+        pure (a, b, c)
+  assertEqual "assoc: (a+b)+c == a+(b+c)" c1 c2
+  assertEqual "assoc: (a+b)+c == a+(c+b)" c1 c3
+
+-- | Test 26: multiset semantics (x+x is distinct from x)
+test_enary_multiset :: Test
+test_enary_multiset = TestCase $ do
+  let ((cX, cXX), _) = runEG $ do
+        eidX <- fromTree myCost (var 0)
+        eidXX <- fromTree myCost (mkBin Add (var 0) (var 0))
+        a <- canonical eidX
+        b <- canonical eidXX
+        pure (a, b)
+  assertBool "multiset: x+x /= x" (cX /= cXX)
+
+-- | Test 27: constants fold inside flattened nodes (2+3+x ≡ 5+x)
+test_enary_fold_const :: Test
+test_enary_fold_const = TestCase $ do
+  let ((c1, c2), _) = runEG $ do
+        eid1 <- fromTree myCost (mkBin Add (mkBin Add (constv 2.0) (constv 3.0)) (var 0))
+        eid2 <- fromTree myCost (mkBin Add (constv 5.0) (var 0))
+        a <- canonical eid1
+        b <- canonical eid2
+        pure (a, b)
+  assertEqual "fold-const: 2+3+x == 5+x" c1 c2
+
+-- | Test 28: direct add of an unsorted ENAry canonicalizes and folds consts
+test_enary_direct_add :: Test
+test_enary_direct_add = TestCase $ do
+  let ((c1, c2), _) = runEG $ do
+        e2 <- fromTree myCost (constv 2.0)
+        e3 <- fromTree myCost (constv 3.0)
+        ex <- fromTree myCost (var 0)
+        eid <- add myCost (ENAry EAdd [e3, ex, e2])
+        eid5x <- fromTree myCost (mkBin Add (constv 5.0) (var 0))
+        a <- canonical eid
+        b <- canonical eid5x
+        pure (a, b)
+  assertEqual "direct add: ENAry [3,x,2] sorts and folds to 5+x" c1 c2
+
+-- | Test 29: extraction of a flattened class right-folds to a binary tree
+test_enary_extract :: Test
+test_enary_extract = TestCase $ do
+  let t1 = mkBin Add (var 0) (mkBin Add (var 1) (var 2))
+      (extracted, _) = runEG $ do
+        eid <- fromTree myCost t1
+        getBestExpr eid
+  assertEqual "extract: flattened a+b+c == a+(b+c)" (showExpr t1) (showExpr extracted)
+
+-- | Test 30: merge cascade propagates through ENAry parents (a≡b -> a+c ≡ b+c)
+test_enary_merge_cascade :: Test
+test_enary_merge_cascade = TestCase $ do
+  let ((c1, c2), _) = runEG $ do
+        ea <- fromTree myCost (var 0)
+        eb <- fromTree myCost (var 1)
+        _  <- fromTree myCost (var 2)
+        eac <- fromTree myCost (mkBin Add (var 0) (var 2))
+        ebc <- fromTree myCost (mkBin Add (var 1) (var 2))
+        merge myCost ea eb
+        rebuild myCost
+        a <- canonical eac
+        b <- canonical ebc
+        pure (a, b)
+  assertEqual "cascade: after a==b, a+c == b+c" c1 c2
+
+-- | Soundness: a closed 2-ary pattern (a+b) does NOT match a 3-ary multiset.
+test_match_closed2_not_3ary :: Test
+test_match_closed2_not_3ary = TestCase $ do
+  let pat = "a" + "b"
+      (substs, _) = runEG $ do
+        x <- fromTree myCost (var 0)
+        y <- fromTree myCost (var 1)
+        z <- fromTree myCost (var 2)
+        _ <- add myCost (ENAry EAdd [x, y, z])
+        match pat
+  assertBool "closed2: a+b does not match x+y+z" (null substs)
+
+-- | Soundness: a+a does NOT match x+x+y (only exact multisets match).
+test_match_aa_not_3ary :: Test
+test_match_aa_not_3ary = TestCase $ do
+  let pat = "a" + "a"
+      (substs, _) = runEG $ do
+        _ <- fromTree myCost (mkBin Add (var 0) (mkBin Add (var 0) (var 1)))
+        match pat
+  assertBool "aa: a+a does not match x+x+y" (null substs)
+
+-- | B3: 0 + x + y = x + y (n-ary open-rest rule).
+test_eqsat_zero_plus_rest :: Test
+test_eqsat_zero_plus_rest = TestCase $ do
+  let tree = addZero (constv 0.0) (addZero (var 0) (var 1))
+  assertEqual "0+x+y = x+y"
+              (showExpr (var 0 + var 1))
+              (showExpr (simplifyEqSatDefault tree))
+
+-- | B7: xy + xz + w = x(y+z) + w (n-ary factoring with a rest variable).
+test_eqsat_factoring :: Test
+test_eqsat_factoring = TestCase $ do
+  let tree = ((var 0 * var 1) + (var 0 * var 2)) + var 3
+  assertEqual "xy+xz+w = x(y+z)+w"
+              (showExpr ((var 0 * (var 1 + var 2)) + var 3))
+              (showExpr (simplifyEqSatDefault tree))
+
+-- | C9 is a closed 2-ary rule: (x+y+z)^2 is NOT expanded to a binomial.
+test_eqsat_binomial_closed2 :: Test
+test_eqsat_binomial_closed2 = TestCase $ do
+  let tree = ((var 0 + var 1) + var 2) ** constv 2.0
+  assertEqual "(x+y+z)^2 not expanded"
+              (showExpr ((var 0 + (var 1 + var 2)) ** constv 2.0))
+              (showExpr (simplifyEqSatDefault tree))
+
+-- | C14: sqrt(x*x) = abs x (closed 2-ary multiset).
+test_eqsat_sqrt_square :: Test
+test_eqsat_sqrt_square = TestCase $ do
+  let rule = sqrt (NAry EMul [Ch "x", Ch "x"]) :=> abs "x"
+      (best, _) = runEG $ eqSat (sqrt (var 0 * var 0)) [rule] myCost 5
+  assertEqual "sqrt(x*x) = abs x" (showExpr (abs (var 0))) (showExpr best)
+
+-- | x/x = 1 and x-x = 0 (constant identities).
+test_eqsat_identities :: Test
+test_eqsat_identities = TestCase $ do
+  assertEqual "x/x = 1" (showExpr (constv 1.0)) (showExpr (simplifyEqSatDefault (var 0 / var 0)))
+  assertEqual "x-x = 0" (showExpr (constv 0.0)) (showExpr (simplifyEqSatDefault (var 0 - var 0)))
+
+-- | helper: run eqSat with the full rule set and collect every expression
+-- in the root eclass (used to assert that a rule "fires" even if a cheaper
+-- representative is extracted).
+allExprsOf :: Fix SRTree -> [Fix SRTree]
+allExprsOf t = fst $ runEG $ do
+  root <- fromTree myCost t
+  _ <- runEqSat myCost rewrites 20
+  getAllExpressionsFrom root
+
+-- | C11 fires: log(x*y) expands to log x + log y inside the root eclass.
+test_eqsat_log_distributes :: Test
+test_eqsat_log_distributes = TestCase $ do
+  let exprs  = allExprsOf (log (var 0 * var 1))
+      target = showExpr (log (var 0) + log (var 1))
+  assertBool "log(x*y) contains log x + log y"
+             (any (\e -> showExpr e == target) exprs)
+
+-- | C12 fires: abs(x*y) expands to abs x * abs y inside the root eclass.
+test_eqsat_abs_distributes :: Test
+test_eqsat_abs_distributes = TestCase $ do
+  let exprs  = allExprsOf (abs (var 0 * var 1))
+      target = showExpr (abs (var 0) * abs (var 1))
+  assertBool "abs(x*y) contains abs x * abs y"
+             (any (\e -> showExpr e == target) exprs)
+
+-- | C13 fires: (x*y)^z expands to x^z * y^z inside the root eclass.
+test_eqsat_pow_distributes :: Test
+test_eqsat_pow_distributes = TestCase $ do
+  let exprs  = allExprsOf ((var 0 * var 1) ** constv 2.0)
+      target = showExpr ((var 0 ** constv 2.0) * (var 1 ** constv 2.0))
+  assertBool "(x*y)^2 contains x^2 * y^2"
+             (any (\e -> showExpr e == target) exprs)
+
+-- | B9 (a :==: rule): x^2 * x^3 = x^5.
+test_eqsat_pow_mul :: Test
+test_eqsat_pow_mul = TestCase $ do
+  let tree = (var 0 ** constv 2.0) * (var 0 ** constv 3.0)
+  assertEqual "x^2*x^3 = x^5" (showExpr (var 0 ** constv 5.0))
+              (showExpr (simplifyEqSatDefault tree))
+
+-- | B11 (a :==: rule): (x^2)^3 = x^6.
+test_eqsat_pow_pow :: Test
+test_eqsat_pow_pow = TestCase $ do
+  let tree = (var 0 ** constv 2.0) ** constv 3.0
+  assertEqual "(x^2)^3 = x^6" (showExpr (var 0 ** constv 6.0))
+              (showExpr (simplifyEqSatDefault tree))
+
+-- | x^y * x = x^(y+1): x^2 * x = x^3.
+test_eqsat_pow_mul_x :: Test
+test_eqsat_pow_mul_x = TestCase $ do
+  let tree = (var 0 ** constv 2.0) * var 0
+  assertEqual "x^2*x = x^3" (showExpr (var 0 ** constv 3.0))
+              (showExpr (simplifyEqSatDefault tree))
+
+-- | B4: (0*x)*y = 0.
+test_eqsat_zero_mul :: Test
+test_eqsat_zero_mul = TestCase $ do
+  let tree = mkBin Mul (mkBin Mul (constv 0.0) (var 0)) (var 1)
+  assertEqual "(0*x)*y = 0" (showExpr (constv 0.0))
+              (showExpr (simplifyEqSatDefault tree))
+
+-- | B4 guard: (0*NaN)*x is NOT folded to 0 (NaN invalidates the rest).
+test_eqsat_zero_mul_nan :: Test
+test_eqsat_zero_mul_nan = TestCase $ do
+  let tree = mkBin Mul (mkBin Mul (constv 0.0) (constv (0/0))) (var 0)
+      best = simplifyEqSatDefault tree
+  assertBool "(0*NaN)*x /= 0" (showExpr best /= showExpr (constv 0.0))
+
+-- | rewritesParams: x-x and x/x become Param 0.
+test_eqsat_params :: Test
+test_eqsat_params = TestCase $ do
+  let (b1, _) = runEG $ eqSat (var 0 - var 0) rewritesParams myCost 10
+      (b2, _) = runEG $ eqSat (var 0 / var 0) rewritesParams myCost 10
+  assertEqual "x-x = Param 0 (param mode)" (showExpr (param 0)) (showExpr b1)
+  assertEqual "x/x = Param 0 (param mode)" (showExpr (param 0)) (showExpr b2)
+
+-- | Soundness: x*x*y stays as a right-folded Mul, NOT x^2 (B1 is 2-ary only).
+test_eqsat_xxy_sound :: Test
+test_eqsat_xxy_sound = TestCase $ do
+  let tree = mkBin Mul (mkBin Mul (var 0) (var 0)) (var 1)
+  assertEqual "x*x*y stays right-folded"
+              (showExpr (var 0 * (var 0 * var 1)))
+              (showExpr (simplifyEqSatDefault tree))
+
+-- | Completeness: a*b matches every Mul node inside a merged class.
+test_match_complete_multinode :: Test
+test_match_complete_multinode = TestCase $ do
+  let pat = "a" * "b"
+      (n, _) = runEG $ do
+        _ <- fromTree myCost (var 0)
+        _ <- fromTree myCost (var 1)
+        _ <- fromTree myCost (var 2)
+        _ <- fromTree myCost (var 3)
+        m1 <- fromTree myCost (var 0 * var 1)
+        m2 <- fromTree myCost (var 2 * var 3)
+        _ <- merge myCost m1 m2
+        rebuild myCost
+        s <- match pat
+        pure (length s)
+  assertBool "complete: a*b yields all substs in a merged class" (n >= 2)
 
 -- | helper: find all non-canonical eclass ids in the trie
 getAllStaleTrieKeys :: IntMap.IntMap Int -> DB -> [EClassId]
@@ -336,4 +600,30 @@ tests = TestList
   , prependLabel "sizeFitDB-no-stale" test_sizeFitDB_no_stale
   , prependLabel "trie-no-stale-keys" test_trie_no_stale_keys
   , prependLabel "match-after-merge"  test_match_after_merge_multi_atom
+  , prependLabel "enary-flatten"      test_enary_flatten
+  , prependLabel "enary-comm"         test_enary_comm
+  , prependLabel "enary-assoc"        test_enary_assoc
+  , prependLabel "enary-multiset"     test_enary_multiset
+  , prependLabel "enary-fold-const"   test_enary_fold_const
+  , prependLabel "enary-direct-add"   test_enary_direct_add
+  , prependLabel "enary-extract"      test_enary_extract
+  , prependLabel "enary-merge-cascade" test_enary_merge_cascade
+  , prependLabel "match-closed2-3ary"  test_match_closed2_not_3ary
+  , prependLabel "match-aa-not-3ary"   test_match_aa_not_3ary
+  , prependLabel "eqsat-0+rest"        test_eqsat_zero_plus_rest
+  , prependLabel "eqsat-factoring"     test_eqsat_factoring
+  , prependLabel "eqsat-binomial-2ary" test_eqsat_binomial_closed2
+  , prependLabel "eqsat-sqrt-square"   test_eqsat_sqrt_square
+  , prependLabel "eqsat-identities"    test_eqsat_identities
+  , prependLabel "eqsat-log-dist"      test_eqsat_log_distributes
+  , prependLabel "eqsat-abs-dist"      test_eqsat_abs_distributes
+  , prependLabel "eqsat-pow-dist"      test_eqsat_pow_distributes
+  , prependLabel "eqsat-pow-mul"       test_eqsat_pow_mul
+  , prependLabel "eqsat-pow-pow"       test_eqsat_pow_pow
+  , prependLabel "eqsat-pow-mul-x"     test_eqsat_pow_mul_x
+  , prependLabel "eqsat-0*mul"         test_eqsat_zero_mul
+  , prependLabel "eqsat-0*mul-NaN"     test_eqsat_zero_mul_nan
+  , prependLabel "eqsat-params"        test_eqsat_params
+  , prependLabel "eqsat-x*x*y-sound"   test_eqsat_xxy_sound
+  , prependLabel "match-complete"      test_match_complete_multinode
   ]

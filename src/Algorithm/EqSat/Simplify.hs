@@ -18,8 +18,11 @@ import Algorithm.EqSat (eqSat, applySingleMergeOnlyEqSat)
 import Algorithm.EqSat.Egraph
 import Algorithm.EqSat.DB
   ( ClassOrVar,
-    Pattern (Fixed, VarPat),
+    NChild (Ch, MapP, Rest),
+    Pattern (Fixed, Hole, NAry, VarPat),
     Rule (..),
+    Subst,
+    SubVal (SVList, SVOne),
     getInt,
   )
 import Control.Monad.State.Strict (evalState)
@@ -29,13 +32,14 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.SRTree
 
-type ConstrFun = Pattern -> Map ClassOrVar ClassOrVar -> EGraph -> Bool 
+type ConstrFun = Pattern -> Subst -> EGraph -> Bool 
 
-constrainOnVal :: (Consts -> Bool) -> Pattern -> Map ClassOrVar ClassOrVar -> EGraph -> Bool 
+constrainOnVal :: (Consts -> Bool) -> Pattern -> Subst -> EGraph -> Bool 
 constrainOnVal f (VarPat c) subst eg =
     let cid = getInt $ case Map.lookup (Right (fromEnum c)) subst of
                         Nothing -> error $ "CONSTRAINVAL_MISSING var=" <> show (fromEnum c) <> " substSize=" <> show (Map.size subst)
-                        Just v  -> v
+                        Just (SVOne v) -> v
+                        Just (SVList _) -> error $ "CONSTRAINVAL_REST_AS_SINGLE var=" <> show (fromEnum c)
      in f (_consts . _info $ _eClass eg IM.! cid)
 constrainOnVal _ _ _ _ = False 
 
@@ -96,70 +100,115 @@ isValid = constrainOnVal $
        ConstVal x -> not (isNaN x || isInfinite x)
        _          -> True
 
--- basic algebraic rules 
+-- | e-class ids bound to a rest variable
+restEidsOf :: Char -> Subst -> [EClassId]
+restEidsOf c subst = case Map.lookup (Right (fromEnum c)) subst of
+                       Just (SVList es) -> map getInt es
+                       _                -> []
+
+-- | every e-class bound to a rest variable holds a valid value
+allValidRest :: Char -> Subst -> EGraph -> Bool
+allValidRest c subst eg = all validEid (restEidsOf c subst)
+  where
+    validEid eid = case _consts . _info $ _eClass eg IM.! eid of
+                     ConstVal x -> not (isNaN x || isInfinite x)
+                     _          -> True
+
+-- basic algebraic rules
 rewriteBasic :: [Rule]
 rewriteBasic =
     [
-      "x" * "y" :=> "y" * "x"
-    , "x" + "y" :=> "y" + "x"
-    , ("x" + "y") + "z" :=> "x" + ("y" + "z")
-    , ("x" + "y") - "z" :=> "x" + ("y" - "z")
-    , ("x" * "y") * "z" :=> "x" * ("y" * "z")
-    , ("x" * "y") + ("x" * "z") :=> "x" * ("y" + "z")
-    , "x" - ("y" + "z") :=> ("x" - "y") - "z"
-    , "x" - ("y" - "z") :=> ("x" - "y") + "z"
-    , ("x" * "y") / "z" :=> ("x" / "z") * "y" :| isNotZero "z"
-    , "x" * ("y" / "z") :=> ("x" / "z") * "y" :| isNotZero "z"
-    , "x" / ("y" * "z") :=> ("x" / "z") / "y" :| isNotZero "z"
-    , ("w" * "x") + ("z" * "x") :=> ("w" + "z") * "x"
-    , ("w" * "x") - ("z" * "x") :=> ("w" - "z") * "x"
-    , ("w" * "x") / ("z" * "y") :=> ("w" / "z") * ("x" / "y")
-    , (("x" * "y") + ("z" * "w")) :=> "x" * ("y" + ("z" / "x") * "w") :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
-    , (("x" * "y") - ("z" * "w")) :=> "x" * ("y" - ("z" / "x") * "w") :| isConstPt "x" :| isConstPt "z" :| isNotZero "x"
-    , (("x" * "y") * ("z" * "w")) :=> ("x" * "z") * ("y" * "w") :| isConstPt "x" :| isConstPt "z"
-    , "x" * "x" :=> "x" ** 2 
-    , ("x" + "y") ** 2 :=> "x" ** 2 + 2 * "x" * "y" + "y" ** 2 
-    , "x" ** 2 + "x" * "y" :=> "x" * ("x" + "y")
+      -- B7/B8/C5: factor a common term out of a sum of products, and the
+      -- reverse (distribute), which make x*(y+z) and x*y+x*z equivalent.
+      NAry EAdd [ Ch (NAry EMul [Ch "x", Rest '1'])
+                , Ch (NAry EMul [Ch "x", Rest '2'])
+                , Rest '3' ]
+        :=>
+      NAry EAdd [ Ch (NAry EMul [ Ch "x"
+                                , Ch (NAry EAdd [Rest '1', Rest '2'])
+                                ])
+                , Rest '3' ]
+    , NAry EAdd [ Ch (NAry EMul [ Ch "x"
+                                , Ch (NAry EAdd [Rest '1'])
+                                ])
+                , Rest '2' ]
+        :=>
+      NAry EAdd [ MapP (NAry EMul [Ch "x", Ch Hole]) '1'
+                , Rest '2' ]
+    -- C5: x*y - z*x = x*(y - z)
+    , NAry EAdd [ Ch (NAry EMul [Ch "x", Rest '1'])
+                , Ch (NAry EMul [Ch (Fixed (Const (-1))), Ch "x", Ch "z"])
+                , Rest '3' ]
+        :=>
+      NAry EAdd [ Ch (NAry EMul [ Ch "x"
+                                , Ch (NAry EAdd [Rest '1', Ch (negate (VarPat 'z'))])
+                                ])
+                , Rest '3' ]
+    -- B1: group duplicate factors into a power (x*x = x^2)
+    , NAry EMul [Ch "x", Ch "x"] :=> "x" ** 2
+    -- C9: binomial expansion of a closed 2-ary square
+    , ("x" + "y") ** 2 :=> "x" ** 2 + 2 * "x" * "y" + "y" ** 2
+    -- C10: x^2 + x*y + ... = x*(x + y) + ...
+    , NAry EAdd [ Ch (Fixed (Bin Power (VarPat 'x') (Fixed (Const 2))))
+                , Ch (NAry EMul [Ch "x", Rest '1'])
+                , Rest '2' ]
+        :=>
+      NAry EAdd [ Ch (NAry EMul [ Ch "x"
+                                , Ch (NAry EAdd [Ch "x", Rest '1'])
+                                ])
+                , Rest '2' ]
     ]
 
 -- rules for nonlinear functions 
 rewritesFun :: [Rule]
 rewritesFun =
     [
-      log (exp "x") :==: exp (log "x")
-    , log (exp "x")  :=> "x"
-    , log ("x" * "y") :=> log "x" + log "y" :| isConstPos "x" :| isConstPos "y"
+      log (exp "x")  :=> "x"
+    -- C11: log(x*y*z*...) = log x + log y + ...
+    , log (NAry EMul [Rest '1']) :=> NAry EAdd [MapP (Fixed (Uni Log Hole)) '1']
     , log ("x" ** "y") :=> "y" * log "x"
     , log (powabs "x" "y") :=> "y" * log (abs "x")
-    , abs ("x" * "y") :=> abs "x" * abs "y"
+    -- C12: abs(x*y*z*...) = abs x * abs y * ...
+    , abs (NAry EMul [Rest '1']) :=> NAry EMul [MapP (Fixed (Uni Abs Hole)) '1']
     , abs ("x" ** "y") :=> abs "x" ** "y"
-    , abs ("x" - "y") :=> abs ("y" - "x")
     , recip (recip "x") :=> "x" :| isNotZero "x"
-    , ("x" * "y") ** "z" :==: ("x" ** "z") * ("y" ** "z")
+    -- C13: (x*y*z*...)^w = x^w * y^w * ...
+    , (NAry EMul [Rest '1']) ** "z" :=> NAry EMul [MapP (Hole ** VarPat 'z') '1']
     , abs "x" ** "y" :=> "x" ** "y" :| isEven "y"
-    , sqrt ("x" * "x") :=> abs "x"
+    -- C14: sqrt(x*x) = abs x
+    , sqrt (NAry EMul [Ch "x", Ch "x"]) :=> abs "x"
     ]
 
 -- Rules that reduces redundant parameters
 constReduction :: [Rule]
 constReduction =
     [
-      0 + "x" :=> "x"
+      -- B3: 0 + rest = rest
+      NAry EAdd [Ch (Fixed (Const 0)), Rest '1'] :=> NAry EAdd [Rest '1']
     , "x" ** 1 :=> "x"
     , powabs "x" 1 :=> abs "x"
 
-    , "x" ** "y" * "x" ** "z" :==: "x" ** ("y" + "z") :| isPositive "x"
-    , (powabs "x" "y") * (powabs "x" "z") :=> powabs "x" ("y" + "x")
-    , ("x" ** "y") ** "z" :==: "x" ** ("y" * "z") :| isPositive "x"
+    -- B9: x^y * x^z = x^(y+z)
+    , NAry EMul [Ch (Fixed (Bin Power (VarPat 'x') (VarPat 'y'))), Ch (Fixed (Bin Power (VarPat 'x') (VarPat 'z')))]
+        :==:
+      Fixed (Bin Power (VarPat 'x') (NAry EAdd [Ch (VarPat 'y'), Ch (VarPat 'z')]))
+        :| isPositive "x"
+    -- B10: |x|^y * |x|^z = |x|^(y+z)  (fixed: target used "y+x" instead of "y+z")
+    , NAry EMul [Ch (Fixed (Bin PowerAbs (VarPat 'x') (VarPat 'y'))), Ch (Fixed (Bin PowerAbs (VarPat 'x') (VarPat 'z')))]
+        :=>
+      Fixed (Bin PowerAbs (VarPat 'x') (NAry EAdd [Ch (VarPat 'y'), Ch (VarPat 'z')]))
+    -- B11: (x^y)^z = x^(y*z)
+    , Fixed (Bin Power (Fixed (Bin Power (VarPat 'x') (VarPat 'y'))) (VarPat 'z'))
+        :==:
+      Fixed (Bin Power (VarPat 'x') (NAry EMul [Ch (VarPat 'y'), Ch (VarPat 'z')]))
+        :| isPositive "x"
     , powabs (powabs "x" "y") "z" :=> powabs "x" ("y" * "z")
-    , ("x" * "y") ** "z" :==: "x" ** "z" * "y" ** "z" :| isPositive "x" :| isPositive "y"
     ]
 
 rewritesWithConstant :: [Rule]
 rewritesWithConstant =
     [
-      "x" * "x" :=> "x" ** 2
-    , "x" - "x" :=> 0
+      "x" - "x" :=> 0
     , "x" / "x" :=> 1 :| isNotZero "x"
     , "x" ** "y" * "x" :=> "x" ** ("y" + 1) :| isPositive "x"
     , 1 ** "x" :=> 1
@@ -168,11 +217,18 @@ rewritesWithConstant =
     , "x" ** (1/2)   :==: sqrt "x"
     , powabs "x" (1/2) :=> sqrt (abs "x")
     , "x" ** (1/3) :==: Fixed (Uni Cbrt "x")
-    , 0 * "x" :=> 0 :| isValid "x"
+    -- B4: 0 * rest = 0 (provided every factor is valid)
+    , NAry EMul [Ch (Fixed (Const 0)), Rest '1'] :=> 0 :| allValidRest '1'
     , 0 ** "x" :=> 0 :| isPositive "x"
     , powabs 0 "x" :=> 0
-    , 0 - "x" :=> negate "x"
-    , "x" + negate "y" :==: "x" - "y"
+    -- n-ary cancellation: x + y - x = y
+    , NAry EAdd [ Ch "a"
+                , Ch (NAry EMul [ Ch (Fixed (Const (-1.0))), Ch "a" ])
+                , Rest 'r' ]
+        :=> NAry EAdd [Rest 'r']
+    -- combining like terms: x + x = 2*x
+    , NAry EAdd [ Ch "a", Ch "a", Rest 'r' ]
+        :=> NAry EAdd [ Ch (2 * "a"), Rest 'r' ]
     ]
 rewritesWithParam :: [Rule]
 rewritesWithParam =
@@ -184,36 +240,7 @@ rewritesWithParam =
     ]
 
 rewritesSimple :: [Rule]
-rewritesSimple =
-    [
-      "x" * "y" :=> "y" * "x"
-    , "x" + "y" :=> "y" + "x"
-    , ("x" ** "y") * ("x" ** "z") :=> "x" ** ("y" + "z") -- :| isPositive "x"
-    , ("x" + "y") + "z" :=> "x" + ("y" + "z")
-    , ("x" * "y") * "z" :=> "x" * ("y" * "z")
-    , ("x" * "y") + ("x" * "z") :=> "x" * ("y" + "z")
-    , "x" - ("y" + "z") :=> ("x" - "y") - "z" -- TODO: check that I don't this
-    , "x" - ("y" - "z") :=> ("x" - "y") + "z" -- TODO
-    , ("x" * "y") / "z" :=> ("x" / "z") * "y" :| isNotZero "z" -- TODO: inv(x) <=> x^-1 , x/y <=> x*y^-1
-    , "x" * ("y" / "z") :=> ("x" / "z") * "y" :| isNotZero "z" -- ^
-    , "x" / ("y" * "z") :=> ("x" / "z") / "y" :| isNotZero "z" -- ^ TODO: 0 ^-1 check
-    , ("w" * "x") + ("z" * "x") :=> ("w" + "z") * "x" -- :| isConstPt "w" :| isConstPt "z"
-    , ("w" * "x") - ("z" * "x") :=> ("w" - "z") * "x" -- TODO: handle sub :| isConstPt "w" :| isConstPt "z"
-    , ("w" * "x") / ("z" * "y") :=> ("w" / "z") * ("x" / "y")
-    , log (exp "x")  :=> "x"
-    , exp (log "x")  :=> "x"
-    , log ("x" * "y") :=> log "x" + log "y"
-    , log ("x" ** "y") :=> "y" * log "x"
-    , abs ("x" * "y") :=> abs "x" * abs "y"
-    , abs ("x" ** "y") :=> abs "x" ** "y"
-    , abs ("x" - "y") :=> abs ("y" - "x")
-    , recip (recip "x") :=> "x" :| isNotZero "x"
-    , "x" * "x" :=> "x" ** Fixed (Param 0)
-    , "x" - "x" :=> Fixed (Param 0)
-    , "x" / "x" :=> Fixed (Param 0) :| isNotZero "x"
-    , 1 ** "x" :=> Fixed (Param 0)
-    , log (sqrt "x") :=> Fixed (Param 0) * log "x" :| isNotParam "x"
-    ]
+rewritesSimple = rewriteBasic <> constReduction <> rewritesFun
 powabs l r = Fixed (Bin PowerAbs l r)
 
 -- | default cost function for simplification

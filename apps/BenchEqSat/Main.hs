@@ -95,11 +95,11 @@ main = do
 
     bgroup "E-graph Add" [
       bench "add single e-node (Var)" $
-        whnf (\eg -> runInEG eg $ add myCost (Var 999)) (snd $ evalEG $ fromTree myCost smallExpr),
+        whnf (\eg -> runInEG eg $ add myCost (EVar 999)) (snd $ evalEG $ fromTree myCost smallExpr),
       bench "add single e-node (Const)" $
-        whnf (\eg -> runInEG eg $ add myCost (Const 42.0)) (snd $ evalEG $ fromTree myCost smallExpr),
+        whnf (\eg -> runInEG eg $ add myCost (EConst 42.0)) (snd $ evalEG $ fromTree myCost smallExpr),
       bench "add single e-node (Bin Add)" $
-        whnf (\eg -> runInEG eg $ add myCost (Bin Add 0 1)) (snd $ evalEG $ fromTree myCost mediumExpr)
+        whnf (\eg -> runInEG eg $ add myCost (ENAry EAdd [0, 1])) (snd $ evalEG $ fromTree myCost mediumExpr)
     ],
 
     bgroup "Merge" [
@@ -244,16 +244,16 @@ main = do
 
     makeDBEntry :: (ENode, EClassId, EGraph)
     makeDBEntry =
-      let (_, eg) = evalEG $ do
-            eid <- fromTree myCost (var 0)
+      let (eid, eg) = evalEG $ do
+            eid <- fromTree myCost (var 999)
             rebuild myCost
             pure eid
-      in (Var 999, 999, eg)
+      in (EVar 777, eid, eg)
 
     makeDBEntries :: Int -> ([(ENode, EClassId)], EGraph)
     makeDBEntries n =
-      let (_, eg) = evalEG $ do
-            eid <- fromTree myCost (var 0)
+      let (eids, eg) = evalEG $ do
+            eids <- mapM (fromTree myCost . var) [999..(999 + n - 1)]
             rebuild myCost
-            pure eid
-      in (zip (take n [Var i | i <- [999..]]) [999..], eg)
+            pure eids
+      in (zip (map EVar [1000..]) eids, eg)
