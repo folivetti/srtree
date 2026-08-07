@@ -197,7 +197,7 @@ getBestExprWithSize n =
 
 insertRndExpr maxSize rndTerm rndNonTerm =
       do grow <- rnd toss
-         n <- rnd (randomFrom [if maxSize > 4 then 4 else 1 .. maxSize])
+         n <- rnd (randomFrom [if maxSize > 4 then 4 else 1 .. max 1 maxSize])
          t <- rnd $ Random.randomTree 3 8 n rndTerm rndNonTerm grow
          fromTree myCost t >>= canonical
 

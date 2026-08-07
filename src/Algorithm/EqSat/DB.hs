@@ -22,7 +22,7 @@ import Control.Monad.State
 import GHC.Stack (HasCallStack)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
-import Data.List (delete, intercalate, sort, sortBy)
+import Data.List (delete, intercalate, nub, sortBy)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
@@ -293,12 +293,14 @@ matchNAryNode op ncs eid subst = do
   ec <- getEClass eid
   let nodes = [xs | ENAry op' xs <- Set.toList (_eNodes ec), op' == op]
   fmap concat $ forM nodes $ \xs ->
-    matchNChildren ncs (sort xs) subst
+    matchNChildren ncs xs subst
 {-# INLINE matchNAryNode #-}
 
 -- | Match a sequence of n-ary children against a multiset of e-class ids.
 -- Each 'Ch' consumes one matched child; a 'Rest' child consumes all remaining
--- children. Every multiset assignment is returned.
+-- children. Every multiset assignment is returned. Iterating over the distinct
+-- child ids is sound (duplicate copies only differ by position, which
+-- 'deleteFirst' already resolves) and avoids duplicate result sets.
 matchNChildren :: Monad m => [NChild] -> [EClassId] -> Subst -> EGraphST m [Subst]
 matchNChildren ncs children subst = go ncs children subst
   where
@@ -311,14 +313,25 @@ matchNChildren ncs children subst = go ncs children subst
       case Map.lookup v s of
         Just _  -> pure []  -- rest variable already bound
         Nothing -> go ps [] (Map.insert v (SVList (map Left children)) s)
-    go (Ch p : ps) children s = do
-      results <- forM children $ \c -> do
-        ms <- recursiveMatch p c s
-        fmap concat $ forM ms $ \s' ->
-          go ps (deleteFirst c children) s'
-      pure (concat results)
+    go (Ch p : ps) children s
+      | length children <= nCh ps = pure []  -- not enough children left
+      | otherwise = do
+          results <- forM (nub children) $ \c -> do
+            ms <- recursiveMatch p c s
+            fmap concat $ forM ms $ \s' ->
+              go ps (deleteFirst c children) s'
+          pure (concat results)
     go (MapP _ _ : _) _ _ = error "matchNChildren: MapP is only valid in targets"
 {-# INLINE matchNChildren #-}
+
+-- | Number of 'Ch' patterns in a child pattern sequence (each consumes one
+-- child, so at least this many children must remain).
+nCh :: [NChild] -> Int
+nCh = length . filter isCh
+  where
+    isCh (Ch _)   = True
+    isCh _        = False
+{-# INLINE nCh #-}
 
 -- | Remove the first occurrence of a value from a list.
 deleteFirst :: Eq a => a -> [a] -> [a]

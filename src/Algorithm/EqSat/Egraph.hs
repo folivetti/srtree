@@ -300,9 +300,18 @@ canonize (EParam ix)   = pure (EParam ix)
 canonize (EConst x)    = pure (EConst x)
 canonize (EUni f t)    = EUni f <$> canonical t
 canonize (EBin op l r) = EBin op <$> canonical l <*> canonical r
--- re-sort: commutativity is structural, no rewrite rule required
-canonize (ENAry op xs) = ENAry op . sort <$> mapM canonical xs
+-- re-sort: commutativity is structural, no rewrite rule required.
+-- Fast path: skip the sort when the canonicalized children are already
+-- ascending (the common case when re-canonizing a stored ENAry).
+canonize (ENAry op xs) = do
+  xs' <- mapM canonical xs
+  pure $ if sortedAsc xs' then ENAry op xs' else ENAry op (sort xs')
 {-# INLINE canonize #-}
+
+sortedAsc :: Ord a => [a] -> Bool
+sortedAsc (x : y : rest) = x <= y && sortedAsc (y : rest)
+sortedAsc _              = True
+{-# INLINE sortedAsc #-}
 
 -- | The children e-class ids of an e-node.
 eChildren :: ENode -> [EClassId]
@@ -400,9 +409,8 @@ toENode n             = error $ "toENode: unsupported node " <> show n
 -- nested same-op ENAry children (associativity), sort (commutativity).
 mkENary :: (Monad m, HasCallStack) => NOp -> [EClassId] -> EGraphST m ENode
 mkENary op cids = do
-  cids' <- mapM canonical cids
-  flat  <- concat <$> mapM (expand op) cids'
-  pure (ENAry op (sort flat))
+  flat <- concat <$> mapM (expand op) cids
+  pure (ENAry op flat)
 
 -- | If the e-class of `cid` holds exactly one e-node and that node is an ENAry
 -- of the same op, return its children directly (flattening); otherwise return

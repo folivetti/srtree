@@ -47,13 +47,8 @@ import qualified Data.Set as RangeSet
 -- | adds a new or existing e-node (merging if necessary)
 add :: (Monad m, HasCallStack) => CostFun -> ENode -> EGraphST m EClassId
 add costFun enode = do
-  enode''   <- canonize enode
-  constEnode <- calculateConsts enode''
-  enode' <- case constEnode of
-              ConstVal x -> pure $ EConst x
-              ParamIx  x -> pure $ EParam x
-              _          -> pure enode''
-  enode''' <- foldConstants costFun enode'
+  enode''  <- canonize enode
+  enode''' <- foldConsts costFun enode''
 
   maybeEid <- gets (HashMap.lookup enode''' . _eNodeToEClass)
   case maybeEid of
@@ -94,10 +89,8 @@ addTree costFun (Bin Sub l r) = do
   neg <- addNegate costFun r
   add costFun =<< mkENary EAdd [l, neg]
 addTree costFun (Bin Div l r) = do
-  l' <- canonical l
-  r' <- canonical r
-  rec <- add costFun (EUni Recip r')
-  add costFun =<< mkENary EMul [l', rec]
+  rec <- add costFun (EUni Recip r)
+  add costFun =<< mkENary EMul [l, rec]
 addTree costFun t = toENode t >>= add costFun
 {-# INLINE addTree #-}
 
@@ -106,14 +99,54 @@ addTree costFun t = toENode t >>= add costFun
 addNegate :: (Monad m, HasCallStack) => CostFun -> EClassId -> EGraphST m EClassId
 addNegate costFun t = do
   negOne <- add costFun (EConst (-1))
-  t' <- canonical t
-  add costFun =<< mkENary EMul [negOne, t']
+  add costFun =<< mkENary EMul [negOne, t]
+
+-- | Fused 'calculateConsts' + 'foldConstants': fetches each child's constant
+-- info a single time, detects fully-constant nodes (replaced by EConst/EParam)
+-- and folds together all-but-one constant children of an ENAry
+-- (e.g. 2+3+x becomes 5+x). Constants that are already folded single subtrees
+-- are handled by the same child-constant walk.
+foldConsts :: (Monad m, HasCallStack) => CostFun -> ENode -> EGraphST m ENode
+foldConsts _ en@(ENAry _ []) = pure en
+foldConsts costFun en@(ENAry op xs) = do
+  infos <- mapM (fmap (_consts . _info) . getEClass) xs
+  case foldr1 (\a b -> combineConsts (Bin (toOp op) a b)) infos of
+    ConstVal x -> pure (EConst x)
+    ParamIx x  -> pure (EParam x)
+    _          -> foldENary costFun op xs infos
+foldConsts _ en = do
+  infos <- mapM (fmap (_consts . _info) . getEClass) (eChildren en)
+  case combineConsts (replaceChildren infos (fromENode en)) of
+    ConstVal x -> pure (EConst x)
+    ParamIx x  -> pure (EParam x)
+    _          -> pure en
+{-# INLINE foldConsts #-}
+
+-- | Fold together all-but-one constant children of an ENAry multiset.
+foldENary :: (Monad m, HasCallStack) => CostFun -> NOp -> [EClassId] -> [Consts] -> EGraphST m ENode
+foldENary costFun op xs infos = do
+  let (consts, rest) = foldr step ([], []) (zip xs infos)
+      step (_, ConstVal v) (cs, rs) | not (isNaN v) && not (isInfinite v) = (v:cs, rs)
+      step (x, _)          (cs, rs)              = (cs, x:rs)
+  if length consts >= 2
+    then do
+      let folded = case op of
+                     EAdd -> sum consts
+                     EMul -> product consts
+      if isNaN folded || isInfinite folded
+        then pure (ENAry op xs)
+        else do
+          cid <- add costFun (EConst folded)
+          pure (ENAry op (sort (cid : rest)))
+    else pure (ENAry op xs)
+{-# INLINE foldENary #-}
 
 -- | Fold together all-but-one constant children of an ENAry at insertion
 -- time (e.g. 2+3+x becomes 5+x). Constants that are already folded
 -- single subtrees are handled by 'calculateConsts' above; this handles the
 -- flattened case where several constant terms land in one multiset.
 foldConstants :: (Monad m, HasCallStack) => CostFun -> ENode -> EGraphST m ENode
+foldConstants _ en@(ENAry _ xs) | length xs < 2 = pure en
 foldConstants costFun en@(ENAry op xs) = do
   infos <- mapM (fmap (_consts . _info) . getEClass) xs
   let (consts, rest) = foldr step ([], []) (zip xs infos)
