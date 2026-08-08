@@ -229,16 +229,29 @@ opOf _             = error "opOf: pattern has no operator"
 {-# INLINE opOf #-}
 
 -- | Matches an n-ary pattern against every root e-node of the operator trie.
+-- A per-rule result budget ('ruleBudget') bounds the total number of matches
+-- returned for one rule against one individual's nodes, and only the first
+-- match per root e-class is kept, taming the O(k^2*m^2) backtracking of
+-- Rest/Ch rules (e.g. factoring a common term out of a sum of products).
+-- Keeping one match per root is sound: every returned match is genuine, and
+-- the egraph merges the equivalent rewrites that further matches would apply,
+-- so the rest of the root's matches are redundant work.
+ruleBudget :: Int
+ruleBudget = 64
+
 matchNAry :: Monad m => Pattern -> EGraphST m [(Subst, ClassOrVar)]
 matchNAry src = do
   db <- gets (_patDB . _eDB)
   case Map.lookup (opOf src) db of
     Nothing -> pure []
-    Just trie -> do
-      results <- forM (IntMap.keys (_trie trie)) $ \eid -> do
-        substs <- recursiveMatch src eid Map.empty
-        pure [ (s, Left eid) | s <- substs ]
-      pure (concat results)
+    Just trie -> go (IntMap.keys (_trie trie)) 0 []
+  where
+    go [] _ acc = pure acc
+    go _ n acc | n >= ruleBudget = pure acc
+    go (eid : eids) n acc = do
+      substs <- recursiveMatch src eid Map.empty
+      let newMs = take 1 [ (s, Left eid) | s <- substs ]
+      go eids (n + length newMs) (acc <> newMs)
 {-# INLINE matchNAry #-}
 
 -- | Recursively match a pattern against the e-class `eid`, threading a
@@ -301,27 +314,44 @@ matchNAryNode op ncs eid subst = do
 -- children. Every multiset assignment is returned. Iterating over the distinct
 -- child ids is sound (duplicate copies only differ by position, which
 -- 'deleteFirst' already resolves) and avoids duplicate result sets.
+--
+-- A per-call result budget ('matchCap') caps the number of substitutions
+-- returned, bounding the O(k^2*m^2) backtracking of Rest/Ch rules such as
+-- factoring a common term out of a sum of products. Sound: each result is a
+-- genuine match; we merely stop enumerating once the budget is exhausted.
+matchCap :: Int
+matchCap = 64
+
 matchNChildren :: Monad m => [NChild] -> [EClassId] -> Subst -> EGraphST m [Subst]
-matchNChildren ncs children subst = go ncs children subst
+matchNChildren ncs children subst = goB ncs children subst matchCap
   where
-    go :: Monad m => [NChild] -> [EClassId] -> Subst -> EGraphST m [Subst]
-    go [] children s
+    goB :: Monad m => [NChild] -> [EClassId] -> Subst -> Int -> EGraphST m [Subst]
+    goB [] children s _ 
       | null children = pure [s]
       | otherwise     = pure []
-    go (Rest c : ps) children s = do
+    goB (Rest c : ps) children s b = do
       let v = Right (fromEnum c)
       case Map.lookup v s of
         Just _  -> pure []  -- rest variable already bound
-        Nothing -> go ps [] (Map.insert v (SVList (map Left children)) s)
-    go (Ch p : ps) children s
+        Nothing -> goB ps [] (Map.insert v (SVList (map Left children)) s) b
+    goB (Ch p : ps) children s b
       | length children <= nCh ps = pure []  -- not enough children left
-      | otherwise = do
-          results <- forM (nub children) $ \c -> do
-            ms <- recursiveMatch p c s
-            fmap concat $ forM ms $ \s' ->
-              go ps (deleteFirst c children) s'
-          pure (concat results)
-    go (MapP _ _ : _) _ _ = error "matchNChildren: MapP is only valid in targets"
+      | otherwise = goC (nub children) 0 []
+      where
+        goC [] _ acc = pure acc
+        goC _ n acc | n >= b    = pure acc
+        goC (c : cs) n acc = do
+          ms <- recursiveMatch p c s
+          goMs c ms cs n acc
+        goMs c [] cs n acc = goC cs n acc
+        goMs c (s' : ms) cs n acc
+          | n >= b     = pure acc
+          | otherwise = do
+              r <- goB ps (deleteFirst c children) s' (b - n)
+              let r' = take (b - n) r
+                  n' = n + length r'
+              goMs c ms cs n' (acc <> r')
+    goB (MapP _ _ : _) _ _ _ = error "matchNChildren: MapP is only valid in targets"
 {-# INLINE matchNChildren #-}
 
 -- | Number of 'Ch' patterns in a child pattern sequence (each consumes one
