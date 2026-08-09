@@ -27,6 +27,7 @@ import Data.ByteString.Char8 qualified as B
 import Data.ByteString.Lazy qualified as BS
 import Data.List (delete, find, intercalate, transpose)
 import Data.Maybe (fromJust)
+import Data.Ratio ((%))
 import Data.Vector.Unboxed (Vector)
 import qualified Data.Vector.Unboxed as V
 import System.FilePath (takeExtension)
@@ -44,8 +45,63 @@ type DataSet = ([Vector Double], Vector Double, Maybe (Vector Double))
 
 -- | Loads a list of list of bytestrings to a matrix of double
 loadMtx :: [[B.ByteString]] -> [Vector Double]
-loadMtx = map V.fromList . transpose . map (map (read . B.unpack))
+loadMtx = map V.fromList . transpose . map (map parseDouble)
 {-# INLINE loadMtx #-}
+
+-- | Fast decimal double parser over a 'B.ByteString'. Handles an optional
+-- sign, a fractional part and an optional 'e'/'E' exponent. The mantissa is
+-- accumulated exactly as an 'Integer' and converted to 'Double' through a
+-- single 'fromRational', which matches the correctly-rounded result of 'read'.
+-- Falls back to 'read' (the slow Show-derived parser) for anything it can't
+-- parse (NaN, Infinity, hex floats, etc.), so behavior is unchanged for odd
+-- input.
+parseDouble :: B.ByteString -> Double
+parseDouble bs = case go 0 1 0 False 0 of
+  Just (m, s, nd, e)
+    | e >= 0    -> fromRational (s * (m * 10 ^ e) % (10 ^ nd))
+    | otherwise -> fromRational (s * m % (10 ^ (nd - e)))
+  Nothing -> read (B.unpack bs)
+  where
+    n = B.length bs
+    -- i: index, sgn: +/-1, acc: accumulated mantissa digits (exact Integer),
+    -- dot: whether a '.' has been seen, nd: number of digits following the
+    -- decimal point, expo: signed integer exponent from the 'e' tail
+    go :: Int -> Integer -> Integer -> Bool -> Int -> Maybe (Integer, Integer, Int, Int)
+    go i sgn acc dot nd
+      | i >= n    = Just (acc, sgn, nd, 0)
+      | otherwise =
+          let c = fromEnum (B.index bs i)
+          in case c of
+               45 -> if i == 0 then go (i+1) (-sgn) acc dot nd else Nothing -- '-'
+               43 -> if i == 0 then go (i+1) sgn acc dot nd else Nothing -- '+'
+               46 -> if dot then Nothing else go (i+1) sgn acc True nd -- '.'
+               _  | c >= 48 && c <= 57 ->
+                      let d = fromIntegral (c - 48) :: Integer
+                          nd' = if dot then nd + 1 else nd
+                      in go (i+1) sgn (acc * 10 + d) dot nd'
+                  | (c == 101 || c == 69) && i > 0 -> -- 'e' / 'E'
+                      parseExp (i+1) sgn acc dot nd
+                  | otherwise -> Nothing
+    -- parse the (optional) exponent tail: an optional sign then digits
+    parseExp :: Int -> Integer -> Integer -> Bool -> Int -> Maybe (Integer, Integer, Int, Int)
+    parseExp i sgn acc dot nd
+      | i >= n    = Just (acc, sgn, nd, 0)
+      | otherwise =
+          let c = fromEnum (B.index bs i)
+          in case c of
+               45 -> expDig (i+1) sgn acc dot nd (-1) 0 -- '-'
+               43 -> expDig (i+1) sgn acc dot nd 1 0 -- '+'
+               _   -> expDig i sgn acc dot nd 1 0
+      where
+        -- es: exponent sign (+/-1); e: accumulated exponent magnitude
+        expDig :: Int -> Integer -> Integer -> Bool -> Int -> Int -> Int -> Maybe (Integer, Integer, Int, Int)
+        expDig i sgn acc dot nd es e
+          | i >= n    = Just (acc, sgn, nd, es * e)
+          | otherwise =
+              let c = fromEnum (B.index bs i)
+              in if c >= 48 && c <= 57
+                   then expDig (i+1) sgn acc dot nd es (e * 10 + fromIntegral (c - 48))
+                   else Nothing
 
 -- | Returns true if the extension is .gz
 isGZip :: FilePath -> Bool
