@@ -21,8 +21,9 @@
 module Algorithm.EqSat.Egraph where
 
 import Control.Lens (element, makeLenses, view, over, (&), (+~), (-~), (.~), (^.))
---import Control.Monad (forM, forM_, when, foldM, void)
-import Data.List ( intercalate, foldl', sort )
+--import Control.Monad (forM_, when, foldM, void)
+import Data.List ( intercalate, foldl' )
+import Control.Monad (forM)
 import Control.Monad.State.Strict hiding ( get, put )
 import GHC.Stack (HasCallStack)
 import Data.IntMap.Strict (IntMap)
@@ -59,17 +60,18 @@ data NOp = EAdd | EMul deriving (Show, Eq, Ord, Enum, Generic, NFData)
 -- | The e-graph's node language.
 --
 -- 'ENAry' stores Add/Mul as a canonical multiset of e-class ids: children are
--- path-compressed, sorted by canonical 'EClassId' (commutativity), and nested
--- same-op ENAry children are absorbed at insertion time (associativity), so
--- no commutativity/associativity rewrite rules are needed for Add/Mul.
+-- path-compressed, keys sorted by canonical 'EClassId' (commutativity), and
+-- nested same-op ENAry children are absorbed at insertion time
+-- (associativity), so no commutativity/associativity rewrite rules are needed
+-- for Add/Mul. The children are an 'IntMap' of e-class id to multiplicity.
 data ENode
   = EVar   {-# UNPACK #-} !Int
   | EParam {-# UNPACK #-} !Int
   | EConst {-# UNPACK #-} !Double
   | EUni   Function EClassId
   | EBin   Op EClassId EClassId          -- Sub | Div | Power | PowerAbs | AQ
-  | ENAry  NOp [EClassId]                -- canonical sorted multiset
-  deriving (Show, Eq, Ord, Generic, NFData)
+  | ENAry  NOp (IntMap Int)              -- canonical multiset: eclass -> multiplicity
+  deriving (Show, Eq, Generic, NFData)
 
 type EGraphST m a = StateT EGraph m a
 type Cost         = Int
@@ -86,9 +88,20 @@ instance Hashable ENode where
   hashWithSalt n (EConst x)     = n `hashWithSalt` (2 :: Int) `hashWithSalt` x
   hashWithSalt n (EUni f t)     = n `hashWithSalt` (3 :: Int) `hashWithSalt` (fromEnum f) `hashWithSalt` t
   hashWithSalt n (EBin op l r)  = n `hashWithSalt` (4 :: Int) `hashWithSalt` (fromEnum op) `hashWithSalt` l `hashWithSalt` r
-  hashWithSalt n (ENAry op xs)  = n `hashWithSalt` (5 :: Int) `hashWithSalt` op `hashWithSalt` xs
+  hashWithSalt n (ENAry op m)   = n `hashWithSalt` (5 :: Int) `hashWithSalt` op `hashWithSalt` m
 
 type RangeTree a = RangeSet.Set (a, EClassId)
+
+-- | Expand a canonical multiset back to the equivalent (multi-)set of child
+-- e-class ids, one entry per occurrence.
+expandedList :: IntMap Int -> [EClassId]
+expandedList = concatMap (\(k, n) -> replicate n k) . IntMap.toAscList
+{-# INLINE expandedList #-}
+
+-- | Build a canonical multiset from a list of child ids (duplicates allowed).
+imFromList :: [EClassId] -> IntMap Int
+imFromList = IntMap.fromListWith (+) . map (, 1)
+{-# INLINE imFromList #-}
 
 
 
@@ -137,6 +150,7 @@ data EGraphDB = EDB { _worklist      :: HashSet (EClassId, ENode)      -- e-node
                     , _unevaluated   :: IntSet                     -- set of not-evaluated e-classes
                      , _nextId        :: Int                        -- next available id
                      , _changed       :: !Bool                      -- dirty flag: true if modified since last check
+                     , _trackDBs      :: !Bool                      -- maintain range DBs (False during pure simplify)
                      } deriving (Show, Generic)
 
 data EClass = EClass { _eClassId :: {-# UNPACK #-} !Int                   -- e-class id (maybe we don't need that here)
@@ -178,7 +192,7 @@ instance Binary ENode where
   put (EConst x)     = put (2 :: Word8) >> put x
   put (EUni f t)     = put (3 :: Word8) >> put (fromEnum f) >> put t
   put (EBin op l r)  = put (4 :: Word8) >> put (fromEnum op) >> put l >> put r
-  put (ENAry op xs)  = put (5 :: Word8) >> put op >> put xs
+  put (ENAry op m)   = put (5 :: Word8) >> put op >> put (expandedList m)
 
   get = do t <- get :: Get Word8
            case t of
@@ -187,7 +201,7 @@ instance Binary ENode where
                 2 -> EConst <$> get
                 3 -> EUni   <$> (toEnum <$> get) <*> get
                 4 -> EBin   <$> (toEnum <$> get) <*> get <*> get
-                5 -> ENAry  <$> get <*> get
+                5 -> ENAry  <$> get <*> (imFromList <$> get)
 
 instance Binary (SRTree ()) where
   put (Var ix)     = put (0 :: Word8) >> put ix
@@ -221,7 +235,12 @@ instance Binary EClass
 instance Binary Consts
 instance Binary Property
 instance Binary EClassData
-instance Binary EGraphDB
+-- Custom: keep `_trackDBs` out of the wire format so on-disk EGraphDB data
+-- (written before the flag existed) decodes unchanged; it defaults to True.
+instance Binary EGraphDB where
+  put (EDB w a r p f d s sf sdl u n c _) =
+    put w >> put a >> put r >> put p >> put f >> put d >> put s >> put sf >> put sdl >> put u >> put n >> put c
+  get = EDB <$> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> pure True
 instance Binary EGraph
 
 instance Eq EClassData where
@@ -266,7 +285,18 @@ emptyDB = EDB
   IntSet.empty
   0
   False
+  True
 {-# INLINE emptyDB #-}
+
+-- | like 'emptyDB' but skips range-DB maintenance (pure simplify mode)
+emptyDBNoTrack :: EGraphDB
+emptyDBNoTrack = emptyDB{ _trackDBs = False }
+{-# INLINE emptyDBNoTrack #-}
+
+-- | an empty e-graph that skips range-DB maintenance (pure simplify mode)
+emptyGraphNoTrack :: EGraph
+emptyGraphNoTrack = EGraph IntMap.empty HashMap.empty IntMap.empty emptyDBNoTrack
+{-# INLINE emptyGraphNoTrack #-}
 
 -- | Creates a new e-class from an e-class id, a new e-node,
 -- and the info of this e-class 
@@ -300,18 +330,14 @@ canonize (EParam ix)   = pure (EParam ix)
 canonize (EConst x)    = pure (EConst x)
 canonize (EUni f t)    = EUni f <$> canonical t
 canonize (EBin op l r) = EBin op <$> canonical l <*> canonical r
--- re-sort: commutativity is structural, no rewrite rule required.
--- Fast path: skip the sort when the canonicalized children are already
--- ascending (the common case when re-canonizing a stored ENAry).
-canonize (ENAry op xs) = do
-  xs' <- mapM canonical xs
-  pure $ if sortedAsc xs' then ENAry op xs' else ENAry op (sort xs')
+-- re-map children to their canonical ids; IntMap keeps keys sorted, so
+-- commutativity is structural, no rewrite rule required.
+canonize (ENAry op m) = do
+  m' <- IntMap.fromListWith (+) <$> forM (IntMap.toList m) (\(c, n) -> do
+            c' <- canonical c
+            pure (c', n))
+  pure (ENAry op m')
 {-# INLINE canonize #-}
-
-sortedAsc :: Ord a => [a] -> Bool
-sortedAsc (x : y : rest) = x <= y && sortedAsc (y : rest)
-sortedAsc _              = True
-{-# INLINE sortedAsc #-}
 
 -- | The children e-class ids of an e-node.
 eChildren :: ENode -> [EClassId]
@@ -320,7 +346,7 @@ eChildren (EParam _)   = []
 eChildren (EConst _)   = []
 eChildren (EUni _ t)   = [t]
 eChildren (EBin _ l r) = [l, r]
-eChildren (ENAry _ xs) = xs
+eChildren (ENAry _ m)  = expandedList m
 {-# INLINE eChildren #-}
 
 toOp :: NOp -> Op
@@ -406,23 +432,28 @@ toENode n             = error $ "toENode: unsupported node " <> show n
 {-# INLINE toENode #-}
 
 -- | Build a canonical ENAry from child ids: canonicalize children, absorb
--- nested same-op ENAry children (associativity), sort (commutativity).
+-- nested same-op ENAry children (associativity), sort by key (commutativity).
 mkENary :: (Monad m, HasCallStack) => NOp -> [EClassId] -> EGraphST m ENode
-mkENary op cids = do
-  flat <- concat <$> mapM (expand op) cids
+mkENary op cids = mkENaryM op (imFromList cids)
+
+-- | Build a canonical ENAry from a canonical multiset of child ids.
+mkENaryM :: (Monad m, HasCallStack) => NOp -> IntMap Int -> EGraphST m ENode
+mkENaryM op m = do
+  flat <- IntMap.unionsWith (+) <$> mapM (expandM op) (IntMap.toList m)
   pure (ENAry op flat)
 
 -- | If the e-class of `cid` holds exactly one e-node and that node is an ENAry
--- of the same op, return its children directly (flattening); otherwise return
--- `[cid]`. Flattening is only sound through a class with a single node: if the
--- class were merged with other nodes (e.g. `{Add[a,b], Mul[x,c]}`) flattening
--- would silently pick one representative and change the meaning of the term.
-expand :: (Monad m, HasCallStack) => NOp -> EClassId -> EGraphST m [EClassId]
-expand op cid = do
+-- of the same op, return its children scaled by `n` (flattening `n`
+-- occurrences); otherwise return `n` copies of `cid`. Flattening is only sound
+-- through a class with a single node: if the class were merged with other
+-- nodes (e.g. `{Add[a,b], Mul[x,c]}`) flattening would silently pick one
+-- representative and change the meaning of the term.
+expandM :: (Monad m, HasCallStack) => NOp -> (EClassId, Int) -> EGraphST m (IntMap Int)
+expandM op (cid, n) = do
   ec <- getEClass cid
   case Set.toList (_eNodes ec) of
-    [ENAry op' xs] | op' == op -> pure xs
-    _                          -> pure [cid]
+    [ENAry op' m'] | op' == op -> pure (IntMap.map (* n) m')
+    _                          -> pure (IntMap.singleton cid n)
 
 -- | Reconstruct a binary Fix SRTree from an e-node, right-folding ENAry
 -- into nested Bin Add/Mul.
@@ -435,8 +466,8 @@ enodeToTree (EBin op l r) = do
   tl <- getBestExpr l
   tr <- getBestExpr r
   pure (Fix (Bin op tl tr))
-enodeToTree (ENAry op xs) = do
-  ts <- mapM getBestExpr xs
+enodeToTree (ENAry op m) = do
+  ts <- mapM getBestExpr (expandedList m)
   pure (naryTree op ts)
 {-# INLINE enodeToTree #-}
 

@@ -22,12 +22,12 @@ import Algorithm.EqSat.DB
     Pattern (Fixed, Hole, NAry, VarPat),
     Rule (..),
     Subst,
-    SubVal (SVList, SVOne),
+    SubVal (SVMap, SVOne),
     getInt,
   )
 import Control.Monad.State.Strict (evalState)
-import Data.IntMap (IntMap)
-import qualified Data.IntMap as IM
+import Data.IntMap.Strict (IntMap)
+import qualified Data.IntMap.Strict as IM
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.SRTree
@@ -39,7 +39,7 @@ constrainOnVal f (VarPat c) subst eg =
     let cid = getInt $ case Map.lookup (Right (fromEnum c)) subst of
                         Nothing -> error $ "CONSTRAINVAL_MISSING var=" <> show (fromEnum c) <> " substSize=" <> show (Map.size subst)
                         Just (SVOne v) -> v
-                        Just (SVList _) -> error $ "CONSTRAINVAL_REST_AS_SINGLE var=" <> show (fromEnum c)
+                        Just (SVMap _) -> error $ "CONSTRAINVAL_REST_AS_SINGLE var=" <> show (fromEnum c)
      in f (_consts . _info $ _eClass eg IM.! cid)
 constrainOnVal _ _ _ _ = False 
 
@@ -103,8 +103,8 @@ isValid = constrainOnVal $
 -- | e-class ids bound to a rest variable
 restEidsOf :: Char -> Subst -> [EClassId]
 restEidsOf c subst = case Map.lookup (Right (fromEnum c)) subst of
-                       Just (SVList es) -> map getInt es
-                       _                -> []
+                       Just (SVMap m) -> expandedList m
+                       _              -> []
 
 -- | every e-class bound to a rest variable holds a valid value
 allValidRest :: Char -> Subst -> EGraph -> Bool
@@ -264,9 +264,9 @@ rewrites = rewriteBasic <> constReduction <> rewritesFun <> rewritesWithConstant
 rewritesParams :: [Rule]
 rewritesParams = rewriteBasic <> constReduction <> rewritesFun <> rewritesWithParam
 
--- | simplify using the default parameters 
+-- | simplify using the default parameters
 simplifyEqSatDefault :: Fix SRTree -> Fix SRTree
-simplifyEqSatDefault t = eqSat t rewrites myCost 30 `evalState` emptyGraph
+simplifyEqSatDefault t = eqSat t rewrites myCost 30 `evalState` emptyGraphNoTrack
 
 -- | simplifies with custom parameters
 simplifyEqSat :: [Rule] -> CostFun -> Int -> Fix SRTree -> Fix SRTree

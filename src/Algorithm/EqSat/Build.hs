@@ -25,6 +25,7 @@ import Data.SRTree
 import Algorithm.EqSat.Egraph
 import Algorithm.EqSat.DB
 import qualified Data.IntMap.Strict as IntMap
+import Data.IntMap.Strict (IntMap)
 import Data.Map.Strict ( Map )
 import qualified Data.Map.Strict as Map
 import qualified Data.HashMap.Strict as HashMap
@@ -32,6 +33,7 @@ import qualified Data.HashSet as Set
 import Control.Monad.State.Strict
 import Control.Monad.Identity
 import GHC.Stack (HasCallStack)
+
 import Data.SRTree.Recursion (cataM)
 import Data.List (sort)
 import Algorithm.EqSat.Info
@@ -68,8 +70,10 @@ add costFun enode = do
 
          -- update database
          addToDB enode''' curId                                       -- add new node to db
-         modify' $ over (eDB . sizeDB)
-                 $ IntMap.insertWith (IntSet.union) (_size info) (IntSet.singleton curId)
+         tracking <- gets (_trackDBs . _eDB)
+         when tracking $
+           modify' $ over (eDB . sizeDB)
+                   $ IntMap.insertWith (IntSet.union) (_size info) (IntSet.singleton curId)
          modify' $ over (eDB . unevaluated) (IntSet.insert curId)
                  . over (eDB . changed) (const True)
          pure curId
@@ -107,13 +111,14 @@ addNegate costFun t = do
 -- (e.g. 2+3+x becomes 5+x). Constants that are already folded single subtrees
 -- are handled by the same child-constant walk.
 foldConsts :: (Monad m, HasCallStack) => CostFun -> ENode -> EGraphST m ENode
-foldConsts _ en@(ENAry _ []) = pure en
-foldConsts costFun en@(ENAry op xs) = do
+foldConsts _ en@(ENAry _ m) | IntMap.null m = pure en
+foldConsts costFun en@(ENAry op m) = do
+  let xs = expandedList m
   infos <- mapM (fmap (_consts . _info) . getEClass) xs
   case foldr1 (\a b -> combineConsts (Bin (toOp op) a b)) infos of
     ConstVal x -> pure (EConst x)
     ParamIx x  -> pure (EParam x)
-    _          -> foldENary costFun op xs infos
+    _          -> foldENary costFun op m infos
 foldConsts _ en = do
   infos <- mapM (fmap (_consts . _info) . getEClass) (eChildren en)
   case combineConsts (replaceChildren infos (fromENode en)) of
@@ -123,9 +128,10 @@ foldConsts _ en = do
 {-# INLINE foldConsts #-}
 
 -- | Fold together all-but-one constant children of an ENAry multiset.
-foldENary :: (Monad m, HasCallStack) => CostFun -> NOp -> [EClassId] -> [Consts] -> EGraphST m ENode
-foldENary costFun op xs infos = do
-  let (consts, rest) = foldr step ([], []) (zip xs infos)
+foldENary :: (Monad m, HasCallStack) => CostFun -> NOp -> IntMap Int -> [Consts] -> EGraphST m ENode
+foldENary costFun op m infos = do
+  let xs = expandedList m
+      (consts, rest) = foldr step ([], []) (zip xs infos)
       step (_, ConstVal v) (cs, rs) | not (isNaN v) && not (isInfinite v) = (v:cs, rs)
       step (x, _)          (cs, rs)              = (cs, x:rs)
   if length consts >= 2
@@ -134,11 +140,11 @@ foldENary costFun op xs infos = do
                      EAdd -> sum consts
                      EMul -> product consts
       if isNaN folded || isInfinite folded
-        then pure (ENAry op xs)
+        then pure (ENAry op m)
         else do
           cid <- add costFun (EConst folded)
-          pure (ENAry op (sort (cid : rest)))
-    else pure (ENAry op xs)
+          pure (ENAry op (imFromList (cid : rest)))
+    else pure (ENAry op m)
 {-# INLINE foldENary #-}
 
 -- | Fold together all-but-one constant children of an ENAry at insertion
@@ -146,8 +152,9 @@ foldENary costFun op xs infos = do
 -- single subtrees are handled by 'calculateConsts' above; this handles the
 -- flattened case where several constant terms land in one multiset.
 foldConstants :: (Monad m, HasCallStack) => CostFun -> ENode -> EGraphST m ENode
-foldConstants _ en@(ENAry _ xs) | length xs < 2 = pure en
-foldConstants costFun en@(ENAry op xs) = do
+foldConstants _ en@(ENAry _ m) | IntMap.size m < 2 = pure en
+foldConstants costFun en@(ENAry op m) = do
+  let xs = expandedList m
   infos <- mapM (fmap (_consts . _info) . getEClass) xs
   let (consts, rest) = foldr step ([], []) (zip xs infos)
       step (_, ConstVal v) (cs, rs) | not (isNaN v) && not (isInfinite v) = (v:cs, rs)
@@ -161,7 +168,7 @@ foldConstants costFun en@(ENAry op xs) = do
         then pure en
         else do
           cid <- add costFun (EConst folded)
-          pure (ENAry op (sort (cid : rest)))
+          pure (ENAry op (imFromList (cid : rest)))
     else pure en
 foldConstants _ en = pure en
 
@@ -240,7 +247,8 @@ merge costFun c1 c2 =
                            . (if bestChanged && isJust (_fitness (_info ledC)) then over (eDB . refits) (IntSet.insert led) else id)
          when (_info newC /= _info subC)
            $ modify' $ over (eDB . analysis) (_parents subC <>)
-         updateDBs newC led ledC ledO sub subC subO
+         tracking <- gets (_trackDBs . _eDB)
+         when tracking $ updateDBs newC led ledC ledO sub subC subO
          modifyEClass costFun led
          modify' $ over (eDB . changed) (const True)
          pure led
@@ -368,7 +376,9 @@ canonizeMap (subst, cv) = (,cv) <$> traverse g subst
   where
     g :: Monad m => SubVal -> EGraphST m SubVal
     g (SVOne e2)  = SVOne <$> canonOne e2
-    g (SVList es) = SVList <$> mapM canonOne es
+    g (SVMap m)   = SVMap . IntMap.fromListWith (+) <$> mapM (\(e2, n) -> do
+                       e2' <- canonOne (Left e2)
+                       pure (getInt e2', n)) (IntMap.toList m)
     canonOne :: Monad m => ClassOrVar -> EGraphST m ClassOrVar
     canonOne (Left e2) = Left <$> canonical e2
     canonOne e2        = pure e2
@@ -420,37 +430,46 @@ reprPrat costFun subst (VarPat c)     = do
     v <- case Map.lookup k subst of
            Nothing -> error $ "REPRPRAT_MISSING var=" <> show (fromEnum c) <> " substSize=" <> show (Map.size subst)
            Just (SVOne x) -> pure x
-           Just (SVList _) -> error $ "REPRPRAT_REST_AS_SINGLE var=" <> show (fromEnum c)
+           Just (SVMap _) -> error $ "REPRPRAT_REST_AS_SINGLE var=" <> show (fromEnum c)
     canonical $ getInt v
 reprPrat costFun subst (Fixed target) = do newChildren <- mapM (reprPrat costFun subst) (getElems target)
                                            addTree costFun (replaceChildren newChildren target)
 reprPrat costFun subst Hole = error "REPRPRAT_HOLE: Hole must be filled by MapP"
 reprPrat costFun subst (NAry op ncs) = do
-    cs <- concat <$> mapM (childEid costFun subst) ncs
-    case cs of
-      []     -> reprPrat costFun subst (Fixed (Const (if op == EAdd then 0 else 1)))
-      [c]    -> canonical c
-      _      -> do en <- mkENary op cs
-                   add costFun en
+    m <- IntMap.unionsWith (+) <$> mapM (childEidM costFun subst) ncs
+    case IntMap.toList m of
+      []        -> reprPrat costFun subst (Fixed (Const (if op == EAdd then 0 else 1)))
+      [(c, 1)]  -> canonical c
+      _         -> do en <- mkENaryM op m
+                      add costFun en
 {-# INLINE reprPrat #-}
 
--- | Adds a single child of an n-ary target pattern to the e-graph.
-childEid :: (Monad m, HasCallStack) => CostFun -> Subst -> NChild -> EGraphST m [EClassId]
-childEid costFun subst (Ch p)     = (:[]) <$> reprPrat costFun subst p
-childEid costFun subst (Rest c)   = restEids costFun subst c
-childEid costFun subst (MapP p c) = do
-  es <- restEids costFun subst c
-  forM es $ \e -> reprMapP costFun subst e p
-{-# INLINE childEid #-}
+-- | Adds a single child of an n-ary target pattern to the e-graph, returning
+-- its contribution as a canonical multiset (so 'Rest' children carry their
+-- 'IntMap' straight through without expansion).
+childEidM :: (Monad m, HasCallStack) => CostFun -> Subst -> NChild -> EGraphST m (IntMap Int)
+childEidM costFun subst (Ch p)     = (`IntMap.singleton` 1) <$> reprPrat costFun subst p
+childEidM costFun subst (Rest c)   = restEidsM subst c
+childEidM costFun subst (MapP p c) = do
+  es <- restEids subst c
+  ms <- forM es $ \e -> reprMapP costFun subst e p
+  pure (imFromList ms)
+{-# INLINE childEidM #-}
 
--- | The e-class ids bound to a rest variable.
-restEids :: (Monad m, HasCallStack) => CostFun -> Subst -> Char -> EGraphST m [EClassId]
-restEids _ subst c = do
+-- | The e-class ids bound to a rest variable, as a canonical multiset.
+restEidsM :: (Monad m, HasCallStack) => Subst -> Char -> EGraphST m (IntMap Int)
+restEidsM subst c = do
   let k = Right (fromEnum c)
   case Map.lookup k subst of
-    Just (SVList es) -> pure (map getInt es)
-    Just (SVOne _)   -> error $ "REPRPRAT_SINGLE_AS_REST var=" <> show (fromEnum c)
-    Nothing          -> error $ "REPRPRAT_MISSING_REST var=" <> show (fromEnum c)
+    Just (SVMap m) -> pure m
+    Just (SVOne _) -> error $ "REPRPRAT_SINGLE_AS_REST var=" <> show (fromEnum c)
+    Nothing        -> error $ "REPRPRAT_MISSING_REST var=" <> show (fromEnum c)
+{-# INLINE restEidsM #-}
+
+-- | The e-class ids bound to a rest variable, expanded one entry per
+-- occurrence (used by 'MapP', which needs to instantiate per child).
+restEids :: (Monad m, HasCallStack) => Subst -> Char -> EGraphST m [EClassId]
+restEids subst c = expandedList <$> restEidsM subst c
 {-# INLINE restEids #-}
 
 -- | Build the target of a pattern where every `Hole` is filled with the
@@ -462,18 +481,18 @@ reprMapP costFun subst e (Fixed target) = do
   newChildren <- mapM (reprMapP costFun subst e) (getElems target)
   addTree costFun (replaceChildren newChildren target)
 reprMapP costFun subst e (NAry op ncs) = do
-  cs <- concat <$> mapM (childMapP costFun subst e) ncs
-  case cs of
+  m <- IntMap.unionsWith (+) <$> mapM (childMapP costFun subst e) ncs
+  case IntMap.toList m of
     []   -> reprPrat costFun subst (Fixed (Const (if op == EAdd then 0 else 1)))
-    [c]  -> canonical c
-    _    -> do en <- mkENary op cs
+    [(c, 1)] -> canonical c
+    _    -> do en <- mkENaryM op m
                add costFun en
 {-# INLINE reprMapP #-}
 
 -- | A single child of an n-ary pattern inside a 'MapP' function.
-childMapP :: (Monad m, HasCallStack) => CostFun -> Subst -> EClassId -> NChild -> EGraphST m [EClassId]
-childMapP costFun subst e (Ch p)     = (:[]) <$> reprMapP costFun subst e p
-childMapP costFun subst e (Rest c)   = restEids costFun subst c
+childMapP :: (Monad m, HasCallStack) => CostFun -> Subst -> EClassId -> NChild -> EGraphST m (IntMap Int)
+childMapP costFun subst e (Ch p)     = (`IntMap.singleton` 1) <$> reprMapP costFun subst e p
+childMapP costFun subst e (Rest c)   = restEidsM subst c
 childMapP costFun subst e (MapP _ _) = error "nested MapP unsupported"
 {-# INLINE childMapP #-}
 
@@ -523,7 +542,7 @@ getExpressionFrom eId' = do
         EConst x    -> pure $ Fix $ Const x
         EUni f t    -> Fix . Uni f <$> getExpressionFrom t
         EBin op l r -> Fix <$> (Bin op <$> getExpressionFrom l <*> getExpressionFrom r)
-        ENAry op xs -> naryTree op <$> mapM getExpressionFrom xs
+        ENAry op xs -> naryTree op <$> mapM getExpressionFrom (expandedList xs)
       [] -> error "getExpressionFrom: empty eclass"
 {-# INLINE getExpressionFrom #-}
 
@@ -544,7 +563,7 @@ getAllExpressionsFrom eId' = do
                 EBin op l r -> do l' <- getAllExpressionsFrom l
                                   r' <- getAllExpressionsFrom r
                                   pure $ [Fix $ Bin op li ri | li <- l', ri <- r']
-                ENAry op xs -> do ts <- mapM getAllExpressionsFrom xs
+                ENAry op xs -> do ts <- mapM getAllExpressionsFrom (expandedList xs)
                                   pure [ naryTree op comb | comb <- sequence ts ]
         ts <- go ns
         pure (t ++ ts)
@@ -579,7 +598,7 @@ getNExpressionsFrom' n d eId' = do
                 EBin op l r -> do l' <- getNExpressionsFrom' n' (d-1) l
                                   r' <- getNExpressionsFrom' n' (d-1) r
                                   pure $ Prelude.take n [Fix $ Bin op li ri | li <- l', ri <- r']
-                ENAry op xs -> do ts <- mapM (getNExpressionsFrom' n' (d-1)) xs
+                ENAry op xs -> do ts <- mapM (getNExpressionsFrom' n' (d-1)) (expandedList xs)
                                   pure $ Prelude.take n [ naryTree op comb | comb <- sequence ts ]
         let n'' = n' - length tt
         if n'' <= 0
@@ -680,7 +699,7 @@ getRndExpressionFrom eId' = do
     case n of
       EUni f t    -> Fix . Uni f <$> getRndExpressionFrom t
       EBin op l r -> Fix <$> (Bin op <$> getRndExpressionFrom l <*> getRndExpressionFrom r)
-      ENAry op xs -> naryTree op <$> mapM getRndExpressionFrom xs
+      ENAry op xs -> naryTree op <$> mapM getRndExpressionFrom (expandedList xs)
       EVar ix     -> pure $ Fix $ Var ix
       EConst x    -> pure $ Fix $ Const x
       EParam ix   -> pure $ Fix $ Param ix

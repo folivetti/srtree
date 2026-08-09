@@ -99,7 +99,7 @@ main = do
       bench "add single e-node (Const)" $
         whnf (\eg -> runInEG eg $ add myCost (EConst 42.0)) (snd $ evalEG $ fromTree myCost smallExpr),
       bench "add single e-node (Bin Add)" $
-        whnf (\eg -> runInEG eg $ add myCost (ENAry EAdd [0, 1])) (snd $ evalEG $ fromTree myCost mediumExpr)
+        whnf (\eg -> runInEG eg $ add myCost (ENAry EAdd (imFromList [0, 1]))) (snd $ evalEG $ fromTree myCost mediumExpr)
     ],
 
     bgroup "Merge" [

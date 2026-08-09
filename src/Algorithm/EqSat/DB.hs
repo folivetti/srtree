@@ -20,9 +20,9 @@ import Control.Lens ( over )
 import Control.Monad (when, foldM, forM)
 import Control.Monad.State
 import GHC.Stack (HasCallStack)
-import Data.IntMap (IntMap)
-import qualified Data.IntMap as IntMap
-import Data.List (delete, intercalate, nub, sortBy)
+import Data.IntMap.Strict (IntMap)
+import qualified Data.IntMap.Strict as IntMap
+import Data.List (delete, intercalate, sortBy)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
@@ -93,9 +93,9 @@ type Condition = Subst -> EGraph -> Bool
 type ClassOrVar = Either EClassId Int
 data Atom = Atom ClassOrVar (SRTree ClassOrVar) deriving Show
 
--- | A substitution value: a single e-class (a matched pattern variable) or a
--- list of e-classes (a matched rest variable).
-data SubVal = SVOne ClassOrVar | SVList [ClassOrVar] deriving Show
+-- | A substitution value: a single e-class (a matched pattern variable) or the
+-- canonical multiset of e-class ids (a matched rest variable).
+data SubVal = SVOne ClassOrVar | SVMap (IntMap Int) deriving Show
 
 -- | Substitution map produced by matching a pattern.
 type Subst = Map ClassOrVar SubVal
@@ -246,12 +246,12 @@ matchNAry src = do
     Nothing -> pure []
     Just trie -> go (IntMap.keys (_trie trie)) 0 []
   where
-    go [] _ acc = pure acc
-    go _ n acc | n >= ruleBudget = pure acc
+    go [] _ acc = pure (reverse acc)
+    go _ n acc | n >= ruleBudget = pure (reverse acc)
     go (eid : eids) n acc = do
       substs <- recursiveMatch src eid Map.empty
       let newMs = take 1 [ (s, Left eid) | s <- substs ]
-      go eids (n + length newMs) (acc <> newMs)
+      go eids (n + length newMs) (foldr (:) acc newMs)
 {-# INLINE matchNAry #-}
 
 -- | Recursively match a pattern against the e-class `eid`, threading a
@@ -294,7 +294,7 @@ matchFixed t eid subst = do
 enodeChildren :: ENode -> [EClassId]
 enodeChildren (EUni _ t)   = [t]
 enodeChildren (EBin _ l r) = [l, r]
-enodeChildren (ENAry _ xs) = xs
+enodeChildren (ENAry _ m)  = expandedList m
 enodeChildren _            = []
 {-# INLINE enodeChildren #-}
 
@@ -304,16 +304,17 @@ enodeChildren _            = []
 matchNAryNode :: Monad m => NOp -> [NChild] -> EClassId -> Subst -> EGraphST m [Subst]
 matchNAryNode op ncs eid subst = do
   ec <- getEClass eid
-  let nodes = [xs | ENAry op' xs <- Set.toList (_eNodes ec), op' == op]
-  fmap concat $ forM nodes $ \xs ->
-    matchNChildren ncs xs subst
+  let nodes = [m | ENAry op' m <- Set.toList (_eNodes ec), op' == op]
+  fmap concat $ forM nodes $ \m ->
+    matchNChildren ncs m subst
 {-# INLINE matchNAryNode #-}
 
 -- | Match a sequence of n-ary children against a multiset of e-class ids.
 -- Each 'Ch' consumes one matched child; a 'Rest' child consumes all remaining
 -- children. Every multiset assignment is returned. Iterating over the distinct
--- child ids is sound (duplicate copies only differ by position, which
--- 'deleteFirst' already resolves) and avoids duplicate result sets.
+-- child ids (the multiset's keys) is sound (duplicate copies only differ by
+-- position, which 'decChild' already resolves) and avoids duplicate result
+-- sets.
 --
 -- A per-call result budget ('matchCap') caps the number of substitutions
 -- returned, bounding the O(k^2*m^2) backtracking of Rest/Ch rules such as
@@ -322,21 +323,21 @@ matchNAryNode op ncs eid subst = do
 matchCap :: Int
 matchCap = 64
 
-matchNChildren :: Monad m => [NChild] -> [EClassId] -> Subst -> EGraphST m [Subst]
-matchNChildren ncs children subst = goB ncs children subst matchCap
+matchNChildren :: Monad m => [NChild] -> IntMap Int -> Subst -> EGraphST m [Subst]
+matchNChildren ncs children subst = reverse <$> goB ncs children subst matchCap
   where
-    goB :: Monad m => [NChild] -> [EClassId] -> Subst -> Int -> EGraphST m [Subst]
-    goB [] children s _ 
-      | null children = pure [s]
+    goB :: Monad m => [NChild] -> IntMap Int -> Subst -> Int -> EGraphST m [Subst]
+    goB [] m s _
+      | IntMap.null m = pure [s]
       | otherwise     = pure []
-    goB (Rest c : ps) children s b = do
+    goB (Rest c : ps) m s b = do
       let v = Right (fromEnum c)
       case Map.lookup v s of
         Just _  -> pure []  -- rest variable already bound
-        Nothing -> goB ps [] (Map.insert v (SVList (map Left children)) s) b
-    goB (Ch p : ps) children s b
-      | length children <= nCh ps = pure []  -- not enough children left
-      | otherwise = goC (nub children) 0 []
+        Nothing -> goB ps IntMap.empty (Map.insert v (SVMap m) s) b
+    goB (Ch p : ps) m s b
+      | multiplicity m <= nCh ps = pure []  -- not enough children left
+      | otherwise = goC (IntMap.keys m) 0 []
       where
         goC [] _ acc = pure acc
         goC _ n acc | n >= b    = pure acc
@@ -347,12 +348,23 @@ matchNChildren ncs children subst = goB ncs children subst matchCap
         goMs c (s' : ms) cs n acc
           | n >= b     = pure acc
           | otherwise = do
-              r <- goB ps (deleteFirst c children) s' (b - n)
+              r <- goB ps (decChild c m) s' (b - n)
               let r' = take (b - n) r
                   n' = n + length r'
-              goMs c ms cs n' (acc <> r')
+              goMs c ms cs n' (foldr (:) acc r')
     goB (MapP _ _ : _) _ _ _ = error "matchNChildren: MapP is only valid in targets"
 {-# INLINE matchNChildren #-}
+
+-- | Total number of children (counting multiplicities) in a multiset.
+multiplicity :: IntMap Int -> Int
+multiplicity = IntMap.foldr' (+) 0
+{-# INLINE multiplicity #-}
+
+-- | Remove one occurrence of `c` from the multiset (decrementing its
+-- multiplicity, or dropping the key entirely when it reaches zero).
+decChild :: Int -> IntMap Int -> IntMap Int
+decChild c = IntMap.update (\n -> if n > 1 then Just (n - 1) else Nothing) c
+{-# INLINE decChild #-}
 
 -- | Number of 'Ch' patterns in a child pattern sequence (each consumes one
 -- child, so at least this many children must remain).
@@ -363,17 +375,10 @@ nCh = length . filter isCh
     isCh _        = False
 {-# INLINE nCh #-}
 
--- | Remove the first occurrence of a value from a list.
-deleteFirst :: Eq a => a -> [a] -> [a]
-deleteFirst _ [] = []
-deleteFirst x (y : ys) | x == y    = ys
-                       | otherwise = y : deleteFirst x ys
-{-# INLINE deleteFirst #-}
-
 -- | Unwrap a single-e-class substitution value.
 fromSVOne :: SubVal -> ClassOrVar
 fromSVOne (SVOne v)    = v
-fromSVOne (SVList _)   = error "fromSVOne: expected a single e-class"
+fromSVOne (SVMap _)    = error "fromSVOne: expected a single e-class"
 {-# INLINE fromSVOne #-}
 
 -- | Returns a Query (list of atoms) of a pattern with pre-computed ordered vars

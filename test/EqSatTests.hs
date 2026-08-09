@@ -312,9 +312,10 @@ test_enary_flatten = TestCase $ do
       ec = _eClass eg IntMap.! eid
   case _best . _info $ ec of
     ENAry EAdd xs -> do
-      assertEqual "enary: 3 children" 3 (length xs)
-      assertBool "enary: distinct children" (length (nub xs) == length xs)
-      assertBool "enary: sorted children" (xs == sort xs)
+      let children = expandedList xs
+      assertEqual "enary: 3 children" 3 (length children)
+      assertBool "enary: distinct children" (length (nub children) == length children)
+      assertBool "enary: sorted children" (children == sort children)
     _ -> assertFailure "enary: best should be a 3-ary ENAry EAdd"
 
 -- | Test 24: commutativity is structural (a+b ≡ b+a, no rules needed)
@@ -371,7 +372,7 @@ test_enary_direct_add = TestCase $ do
         e2 <- fromTree myCost (constv 2.0)
         e3 <- fromTree myCost (constv 3.0)
         ex <- fromTree myCost (var 0)
-        eid <- add myCost (ENAry EAdd [e3, ex, e2])
+        eid <- add myCost (ENAry EAdd (imFromList [e3, ex, e2]))
         eid5x <- fromTree myCost (mkBin Add (constv 5.0) (var 0))
         a <- canonical eid
         b <- canonical eid5x
@@ -411,7 +412,7 @@ test_match_closed2_not_3ary = TestCase $ do
         x <- fromTree myCost (var 0)
         y <- fromTree myCost (var 1)
         z <- fromTree myCost (var 2)
-        _ <- add myCost (ENAry EAdd [x, y, z])
+        _ <- add myCost (ENAry EAdd (imFromList [x, y, z]))
         match pat
   assertBool "closed2: a+b does not match x+y+z" (null substs)
 
