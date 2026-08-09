@@ -41,10 +41,6 @@ import qualified Data.IntSet as IntSet
 
 import qualified Data.Set as RangeSet
 
- -- TEMP instrumentation (EGGP_STATS=1), removed after measurement
- -- (refit-cause counter)
- -- end TEMP instrumentation
-
 
 -- | adds a new or existing e-node (merging if necessary)
 add :: (Monad m, HasCallStack) => CostFun -> ENode -> EGraphST m EClassId

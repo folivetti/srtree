@@ -53,10 +53,6 @@ rnd :: StateT StdGen IO a -> RndEGraph a
 rnd = lift
 {-# INLINE rnd #-}
 
--- TEMP instrumentation (EGGP_STATS=1), removed after measurement
--- (evals counter, dedup counter)
--- end TEMP instrumentation
-
 -- | Run an 'RndEGraph' action against a read-only egraph snapshot with the given
 -- generator (for concurrent workers that do not mutate the shared egraph).
 runRndEGraph :: EGraph -> StdGen -> RndEGraph a -> IO a
