@@ -19,7 +19,7 @@
 -- this module exports only the `loadDataset` function.
 --
 -----------------------------------------------------------------------------
-module Data.SRTree.Datasets ( loadDataset, loadTrainingOnly, getX, splitData, DataSet(..) )
+module Data.SRTree.Datasets ( loadDataset, loadTrainingOnly, getX, splitData, DataSet(..), splitFileNameParams, getRows, getColumns )
     where
 
 import Codec.Compression.GZip (decompress)
@@ -159,7 +159,9 @@ readFileToLines filename = do
 -- input variables. These will be renamed internally as x0, x1, ... in the order
 -- of this list.
 splitFileNameParams :: FilePath -> (FilePath, [B.ByteString])
-splitFileNameParams (B.pack -> filename) = (B.unpack fname, take 6 params)
+splitFileNameParams (B.pack -> filename)
+  | B.null filename = ("", replicate 6 B.empty)
+  | otherwise       = (B.unpack fname, take 6 params)
   where
     (fname : params') = B.split ':' filename
     -- fill up the empty parameters with an empty string
