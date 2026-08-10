@@ -69,7 +69,7 @@ import Algorithm.SRTree.AD.CompiledAD
 
 compileTree :: [VU.Vector Double] -> VU.Vector Double -> Maybe (VU.Vector Double) -> Fix SRTree -> CompiledTree
 compileTree xss ys mYErr tree =
-    CompiledTree { ctNodes = nodes, ctRoot = root, ctDyn = dynArr, ctStatic = staticArr, ctM = m, ctNPred = root + 1
+    CompiledTree { ctNodes = nodes, ctRoot = root, ctDyn = dynArr, ctStatic = staticArr, ctStaticBase = staticBaseArr, ctM = m, ctNPred = root + 1
                  , ctKind = kindArr, ctArg = argArr, ctArg2 = arg2Arr, ctFcode = fcodeArr, ctOcode = ocodeArr }
   where
     yErr = fromJust mYErr
@@ -82,20 +82,65 @@ compileTree xss ys mYErr tree =
     -- matches), so no numerical semantics change.
     tree' = rewritePowSq tree
 
-    -- state: (structural CSE map, id -> node, id -> isDynamic, id -> static value, counter)
-    (_, int2key, dynMap, static, (subtract 1) -> root) =
+    -- state: (structural CSE map, id -> node, id -> isDynamic, counter)
+    (_, int2key, dynMap, (subtract 1) -> root) =
         cataM leftToRight alg tree'
-          `execState` (Map.empty, IntMap.empty, IntMap.empty, IntMap.empty, 0)
+          `execState` (Map.empty, IntMap.empty, IntMap.empty, 0)
 
     nodes     = VB.fromList (IntMap.elems int2key)
     dynArr    = VU.fromList (IntMap.elems dynMap)
-    -- flat [node * m + row]; built with one memcpy per static node instead
-    -- of stride*m individual quotRem + IntMap lookups.
     stride    = root + 1
+    -- static nodes in ascending (topological) id order, so a single bottom-up
+    -- sweep fills every column before its parent. Dynamic nodes are omitted
+    -- entirely: their static slots were zeros that evalGrad*/forwardPassRange
+    -- never read, so the flat array shrinks from stride * m to #static * m
+    -- (a handful of feature/const columns per tree instead of all nodes).
+    staticKeys = [k | k <- [0 .. root], not (VU.unsafeIndex dynArr k)]
+    nStatic    = length staticKeys
+    -- id -> static slot base (slot * m); 0 for dynamic ids (never read)
+    staticBaseArr = VU.create $ do
+        arr <- VUM.replicate (root + 1) 0
+        forM_ (zip staticKeys [0 ..]) $ \(k, slot) ->
+            VUM.write arr k (slot * m)
+        pure arr
+    -- flat [slot * m + row]; computed in a single bottom-up sweep over the
+    -- static ids (a child always gets a smaller id than its parent, since
+    -- cataM assigns the id only after both children are built), writing each
+    -- static node's column directly into the flat array. This fuses the old
+    -- per-node VU.map/VU.zipWith intermediates into the array.
     staticArr = VU.create $ do
-        arr <- VUM.replicate (stride * m) 0
-        forM_ (IntMap.toList static) $ \(key, vec) ->
-            VU.copy (VUM.slice (key * m) m arr) vec
+        arr <- VUM.replicate (nStatic * m) 0
+        let slice slot = VUM.slice (slot * m) m arr
+            slotOf k   = VU.unsafeIndex staticBaseArr k `div` m
+            mapStatic f t k = go 0
+              where
+                src = slice (slotOf t)
+                dst = slice (slotOf k)
+                go !i | i >= m    = pure ()
+                      | otherwise = do
+                          x <- VUM.unsafeRead src i
+                          VUM.unsafeWrite dst i (evalFun f x)
+                          go (i + 1)
+            zipStatic op l r k = go 0
+              where
+                srcL = slice (slotOf l)
+                srcR = slice (slotOf r)
+                dst  = slice (slotOf k)
+                go !i | i >= m    = pure ()
+                      | otherwise = do
+                          xl <- VUM.unsafeRead srcL i
+                          xr <- VUM.unsafeRead srcR i
+                          VUM.unsafeWrite dst i (evalOp op xl xr)
+                          go (i + 1)
+        forM_ (zip staticKeys [0 ..]) $ \(k, slot) ->
+            case VB.unsafeIndex nodes k of
+                Var ix     | ix == -1  -> VU.copy (slice slot) ys
+                           | ix == -2  -> VU.copy (slice slot) yErr
+                           | otherwise -> VU.copy (slice slot) (xss !! ix)
+                Const v    -> VUM.set (slice slot) v
+                Uni f t    -> mapStatic f t k
+                Bin op l r -> zipStatic op l r k
+                Param _    -> pure ()
         pure arr
 
     -- compact unboxed per-id code arrays (length root+1) so the hot row loop
@@ -131,15 +176,13 @@ compileTree xss ys mYErr tree =
 
     alg = insertKey
 
-    graph      (a, _, _, _, _) = a
-    isDynSt  k (_, _, d, _, _) = d IntMap.! k
-    getStat  k (_, _, _, s, _) = s IntMap.! k
+    graph      (a, _, _, _) = a
+    isDynSt  k (_, _, d, _) = d IntMap.! k
 
-    insEntry key isD mv (a, b, d, s, c) =
+    insEntry key isD (a, b, d, c) =
         ( Map.insert key c a
         , IntMap.insert c key b
         , IntMap.insert c isD d
-        , maybe s (\v -> IntMap.insert c v s) mv
         , c + 1 )
 
     -- a node depends on theta iff it IS a Param, or any child does
@@ -148,17 +191,6 @@ compileTree xss ys mYErr tree =
     nodeIsDynamic (Const _)   = pure False
     nodeIsDynamic (Uni _ t)   = gets (isDynSt t)
     nodeIsDynamic (Bin _ l r) = (||) <$> gets (isDynSt l) <*> gets (isDynSt r)
-
-    -- only ever called on nodes already known to be non-dynamic,
-    -- so children's static values are guaranteed present
-    evalStatic (Var ix)
-      | ix == -1  = pure ys
-      | ix == -2  = pure yErr
-      | otherwise = pure (xss !! ix)
-    evalStatic (Const v)    = pure (VU.replicate m v)
-    evalStatic (Uni f t)    = VU.map (evalFun f) <$> gets (getStat t)
-    evalStatic (Bin op l r) = VU.zipWith (evalOp op) <$> gets (getStat l) <*> gets (getStat r)
-    evalStatic (Param _)    = error "compileTree: evalStatic called on a Param node (unreachable)"
 
     -- Data.Map is unreliable with NaN-valued keys (Ord Double is not a valid
     -- total order for NaN: insert(Const NaN) then member/lookup can disagree),
@@ -173,8 +205,7 @@ compileTree xss ys mYErr tree =
           Just v  -> pure v
           Nothing -> do
             d  <- nodeIsDynamic key
-            mv <- if d then pure Nothing else Just <$> evalStatic key
-            fresh <- state $ \st@(_, _, _, _, c) -> let st' = insEntry key d mv st in (c, st')
+            fresh <- state $ \st@(_, _, _, c) -> let st' = insEntry key d st in (c, st')
             pure fresh
 
 -- Rewrite (a) Bin Power t (Const 2.0) into the unary Square kernel and
@@ -221,7 +252,7 @@ evalGrad ct theta = runST $ do
           | key > root = pure ()
           | otherwise  = do
               v <- if not (VU.unsafeIndex dyn key)
-                     then pure (VU.unsafeIndex static (key * m + row))
+                     then pure (VU.unsafeIndex static (VU.unsafeIndex staticBase key + row))
                      else case VU.unsafeIndex kind key of
                             1 -> pure (V.unsafeIndex theta (VU.unsafeIndex arg key))
                             3 -> do x <- VUM.unsafeRead fwd (VU.unsafeIndex arg key)
@@ -287,13 +318,14 @@ evalGrad ct theta = runST $ do
     ocode  = ctOcode ct
     dyn    = ctDyn ct
     static = ctStatic ct
+    staticBase = ctStaticBase ct
 
 -- ---------------------------------------------------------------------
 -- Node-outer (vectorized-over-rows) evaluation: mirrors reverseModeGraph's
 -- shape (one full length-m column per node, node-major loops) so the inner
 -- loops are fused per node over all rows, with the static/dynamic pattern
 -- decided once per node instead of once per row. Uses the same flat
--- [node * m + row] layout and compact op-code dispatch as `evalGrad`, but
+-- [staticSlot * m + row] layout and compact op-code dispatch as `evalGrad`, but
 -- trades the O(nodes + params) scratch of the row-fused version for the
 -- O(nodes * m) fwd/adj columns of the massiv-style whole-column kernel.
 evalGradVec :: CompiledTree -> V.Vector Double -> (Double, V.Vector Double)
@@ -319,7 +351,7 @@ evalGradVec ct theta = runST $ do
               -- objective contribution = sum over this chunk's rows of root
               s <- if VU.unsafeIndex dyn root
                      then {-# SCC "objSumFwd" #-} sumCol fwd (root * nb) nb
-                     else {-# SCC "objSumStatic" #-} sumStatic (root * m + s0) nb
+                     else {-# SCC "objSumStatic" #-} sumStatic (VU.unsafeIndex staticBase root + s0) nb
               -- seed the root adjoint: d(obj)/d(root value) = 1 per row
               unless (s0 == 0) $ VUM.set adj 0   -- reuse the buffer; keep it clean
               when (VU.unsafeIndex dyn root) $ {-# SCC "seedAdj" #-} VUM.set (VUM.slice (root * nb) nb adj) 1
@@ -342,8 +374,8 @@ evalGradVec ct theta = runST $ do
                               kb = key * nb
                               lb = l * nb
                               rb = r * nb
-                              ls = l * m + s0
-                              rs = r * m + s0
+                              ls = VU.unsafeIndex staticBase l + s0
+                              rs = VU.unsafeIndex staticBase r + s0
                           case (dl, dr) of
                             (True, True)   -> {-# SCC "bwdBinTT" #-} bwdBin nb static fwd adj 0 oc kb lb rb ls rs
                             (True, False)  -> {-# SCC "bwdBinTS" #-} bwdBin nb static fwd adj 1 oc kb lb rb ls rs
@@ -381,6 +413,7 @@ evalGradVec ct theta = runST $ do
     ocode  = ctOcode ct
     dyn    = ctDyn ct
     static = ctStatic ct
+    staticBase = ctStaticBase ct
 
     sumCol v vbase !n = go 0 0
       where go !i !acc | i >= n = pure acc
@@ -414,6 +447,7 @@ evalLossVec ct theta = runST $ do
     stride   = root + 1
     dyn      = ctDyn ct
     static   = ctStatic ct
+    staticBase = ctStaticBase ct
     chunk    = 4096
 
     go :: VUM.MVector s Double -> Int -> Double -> ST s Double
@@ -424,7 +458,7 @@ evalLossVec ct theta = runST $ do
           forwardPassRange ct theta buf start nb
           s <- if VU.unsafeIndex dyn root
                  then sumCol buf (root * nb) nb
-                 else sumStatic (root * m + start) nb
+                 else sumStatic (VU.unsafeIndex staticBase root + start) nb
           go buf (start + nb) (acc + s)
 
     sumCol buf vbase !n = go 0 0
@@ -443,7 +477,7 @@ evalLossVec ct theta = runST $ do
 -- `s0`/`nb` select a range of rows [start, start+nb): with nb = m, start = 0
 -- this is the full-matrix pass used by evalGradVec; evalLossVec calls it on
 -- chunks of rows with a stride*nb buffer. The fwd buffer is indexed
--- [key * nb + i], static columns are read at [key * m + s0 + i].
+-- [key * nb + i], static columns are read at [slot(key) * m + s0 + i].
 forwardPassRange :: CompiledTree -> V.Vector Double -> VUM.MVector s Double -> Int -> Int -> ST s ()
 forwardPassRange ct theta fwd s0 nb = goFwd 0
   where
@@ -456,6 +490,7 @@ forwardPassRange ct theta fwd s0 nb = goFwd 0
     ocode  = ctOcode ct
     dyn    = ctDyn ct
     static = ctStatic ct
+    staticBase = ctStaticBase ct
 
     goFwd !key
       | key > root = pure ()
@@ -480,8 +515,8 @@ forwardPassRange ct theta fwd s0 nb = goFwd 0
                     kb = key * nb
                     lb = l * nb
                     rb = r * nb
-                    ls = l * m + s0
-                    rs = r * m + s0
+                    ls = VU.unsafeIndex staticBase l + s0
+                    rs = VU.unsafeIndex staticBase r + s0
                 case (dl, dr) of
                   (True, True)   -> {-# SCC "fwdBinTT" #-} fwdBin nb static fwd 0 oc kb lb rb ls rs
                   (True, False)  -> {-# SCC "fwdBinTS" #-} fwdBin nb static fwd 1 oc kb lb rb ls rs

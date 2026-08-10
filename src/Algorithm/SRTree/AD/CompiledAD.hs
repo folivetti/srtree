@@ -26,7 +26,8 @@ data CompiledTree = CompiledTree
   { ctNodes  :: !(VB.Vector (SRTree Int))            -- id -> node, children already resolved to ids
   , ctRoot   :: !Int
   , ctDyn    :: !(VU.Vector Bool)                    -- id -> depends on theta?
-  , ctStatic :: VU.Vector Double                     -- flat [node * m + row]; 0-filled for dynamic ids
+  , ctStatic :: VU.Vector Double                     -- flat [staticSlot * m + row]; only static nodes
+  , ctStaticBase :: !(VU.Vector Int)                 -- id -> staticSlot * m (0 for dynamic ids)
   , ctM      :: !Int
   , ctNPred  :: !Int                                 -- root + 1 (stride for flat static)
   , ctKind   :: !(VU.Vector Int)                     -- id -> node kind: 0 Var, 1 Param, 2 Const, 3 Uni, 4 Bin

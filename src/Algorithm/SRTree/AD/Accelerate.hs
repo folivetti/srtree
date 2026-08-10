@@ -613,7 +613,7 @@ encodeTree ct
 -- input (not baked constants), and the row range comes in as scalar inputs, so
 -- the same compiled kernel can be run over any contiguous chunk of rows.
 buildAccGraph :: CompiledTree
-              -> Acc (Vector Double)   -- static columns, flat [key * m + row]
+              -> Acc (Vector Double)   -- static columns, compact [slot * m + row]
               -> Acc (Scalar Int)       -- first row of this chunk
               -> Acc (Scalar Int)       -- number of rows in this chunk
               -> Acc (Vector Double)    -- theta
@@ -621,7 +621,6 @@ buildAccGraph :: CompiledTree
 buildAccGraph ct staticIn baseIn csIn theta = A.lift (obj, gradPacked)
   where
     root  = ctRoot ct
-    m     = ctM ct
     nodes = ctNodes ct
     dyn   = ctDyn ct
 
@@ -635,7 +634,7 @@ buildAccGraph ct staticIn baseIn csIn theta = A.lift (obj, gradPacked)
 
     -- column for a static node key: rows [base, base + cs)
     statCol :: Int -> Acc (Vector Double)
-    statCol k = A.generate csShape (\ix -> staticIn A.!! (A.constant (k * m) + base + A.indexHead ix))
+    statCol k = A.generate csShape (\ix -> staticIn A.!! (A.constant (ctStaticBase ct VU.! k) + base + A.indexHead ix))
 
     -- 1. FORWARD PASS
     forward :: IntMap.IntMap (Acc (Array DIM1 Double))
@@ -710,8 +709,8 @@ fth4 (T4 _ _ _ d) = d
 -- and every tree runs the same native executable.
 -- ----------------------------------------------------------------------------
 buildAccInterpGraph
-  :: Acc (Vector Double)   -- staticIn: ctStatic flat [node * m + row]
-  -> Acc (Scalar Int)      -- m: total rows
+  :: Acc (Vector Double)   -- staticIn: ctStatic compact [slot * m + row]
+  -> Acc (Vector Int)      -- staticBaseF: gid -> slot * m
   -> Acc (Scalar Int)      -- base: first row of this chunk
   -> Acc (Scalar Int)      -- cs: rows in this chunk
   -> Acc (Vector Double)   -- theta
@@ -719,9 +718,8 @@ buildAccInterpGraph
   -> Acc (Vector Int)      -- widthF: per-level actual node count
   -> Acc (Vector Int)      -- parentF: per-slot parent list (pos*4+slot, -1 none)
   -> Acc (Scalar Double, Vector Double)
-buildAccInterpGraph staticIn mIn baseIn csIn theta metaF widthF parentF = A.lift (obj, gradPacked)
+buildAccInterpGraph staticIn staticBaseF baseIn csIn theta metaF widthF parentF = A.lift (obj, gradPacked)
   where
-    m    = A.the mIn
     base = A.the baseIn
     cs   = A.the csIn
 
@@ -731,7 +729,7 @@ buildAccInterpGraph staticIn mIn baseIn csIn theta metaF widthF parentF = A.lift
 
     -- static value of a node with global id gid, for chunk row
     staticVal :: Exp Int -> Exp Int -> Exp Double
-    staticVal gid row = staticIn A.!! (gid*m + base + row)
+    staticVal gid row = staticIn A.!! (staticBaseF A.!! gid + base + row)
 
     -- read a metadata field for a slot
     metaAt :: Exp Int -> Int -> Exp Int
@@ -847,7 +845,7 @@ buildAccInterpGraph staticIn mIn baseIn csIn theta metaF widthF parentF = A.lift
 -- | The interpreter kernel compiled once per process (tree-independent AST).
 {-# NOINLINE interpKernel #-}
 interpKernel
-  :: Vector Double -> Scalar Int -> Scalar Int -> Scalar Int
+  :: Vector Double -> Vector Int -> Scalar Int -> Scalar Int
   -> Vector Double -> Vector Int -> Vector Int -> Vector Int
   -> (Scalar Double, Vector Double)
 interpKernel = unsafePerformIO $ do
@@ -886,17 +884,17 @@ compileAccelerateInterp ct _xss _ys =
             bases     = Data.List.scanl (+) 0 (Data.List.init chunkSizes)
 
             staticA = mkAccVector (ctStatic ct)
+            staticBaseF = mkAccIVector (ctStaticBase ct)
             metaF   = mkAccIVector (encMeta enc)
             widthF  = mkAccIVector (encWidth enc)
             parentF = mkAccIVector (encParent enc)
-            mS      = A.fromList Z [m] :: Scalar Int
 
             runChunk :: VS.Vector Double -> Vector Double -> Int -> Int -> IO (Double, VS.Vector Double)
             runChunk _theta thetaArr base cs = do
                 let baseS = A.fromList Z [base] :: Scalar Int
                     csS   = A.fromList Z [cs]   :: Scalar Int
                 wK0 <- getCurrentTime
-                let (objArr, gradArr) = interpKernel staticA mS baseS csS thetaArr metaF widthF parentF
+                let (objArr, gradArr) = interpKernel staticA staticBaseF baseS csS thetaArr metaF widthF parentF
                     obj  = A.indexArray objArr Z
                 evaluate obj
                 wK1 <- getCurrentTime
