@@ -18,6 +18,7 @@
 module Algorithm.SRTree.Likelihoods
   ( Distribution (..)
   , Loss (..)
+  , readLoss
   , Target
   , Columns
   , buildDistLoss
@@ -39,6 +40,7 @@ import qualified Data.Vector.Storable.Mutable as VSM
 
 import GHC.IO (unsafePerformIO)
 import Data.Maybe
+import Text.Read (readMaybe)
 
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Vector.Unboxed.Mutable as VM
@@ -87,6 +89,15 @@ instance Enum Loss where
 instance Bounded Loss where
     minBound = MSE
     maxBound = NLL ROXY
+
+-- | Parse a loss from its CLI string.  Accepts both the direct 'Loss'
+-- names ('MSE', 'LOG10', 'MAE', 'MAPE', @Pinball tau@) and the bare
+-- 'Distribution' names ('Gaussian', 'HGaussian', 'Bernoulli', 'Poisson',
+-- 'ROXY', 'LeastSquares'), which are wrapped in 'NLL'.
+readLoss :: String -> Maybe Loss
+readLoss s = case readMaybe s of
+  Just l  -> Just l
+  Nothing -> NLL <$> (readMaybe s :: Maybe Distribution)
 
 -- | logistic function
 logistic :: Floating a => a -> a
