@@ -25,7 +25,7 @@ module Data.SRTree.Datasets ( loadDataset, loadTrainingOnly, getX, splitData, Da
 import Codec.Compression.GZip (decompress)
 import Data.ByteString.Char8 qualified as B
 import Data.ByteString.Lazy qualified as BS
-import Data.List (delete, find, intercalate, transpose)
+import Data.List (delete, find, intercalate)
 import Data.Maybe (fromJust)
 import Data.Ratio ((%))
 import Data.Vector.Unboxed (Vector)
@@ -45,7 +45,10 @@ type DataSet = ([Vector Double], Vector Double, Maybe (Vector Double))
 
 -- | Loads a list of list of bytestrings to a matrix of double
 loadMtx :: [[B.ByteString]] -> [Vector Double]
-loadMtx = map V.fromList . transpose . map (map parseDouble)
+loadMtx []     = []
+loadMtx rows   = map V.fromList
+               $ foldr (zipWith (:) . map parseDouble) (replicate ncols []) rows
+  where ncols = length (head rows)
 {-# INLINE loadMtx #-}
 
 -- | Fast decimal double parser over a 'B.ByteString'. Handles an optional
@@ -58,7 +61,13 @@ loadMtx = map V.fromList . transpose . map (map parseDouble)
 parseDouble :: B.ByteString -> Double
 parseDouble bs = case go 0 1 0 False 0 of
   Just (m, s, nd, e)
-    | e >= 0    -> fromRational (s * (m * 10 ^ e) % (10 ^ nd))
+    -- when e >= nd the rational m * 10^e / 10^nd is an exact integer, so a
+    -- single fromInteger is bit-identical to fromRational (which would only
+    -- gcd-reduce it) but skips the rational machinery entirely.
+    | e >= nd   -> fromInteger (s * (m * 10 ^ (e - nd)))
+    -- otherwise the value is m / 10^(nd-e); keep fromRational so the single
+    -- rounding matches `read` exactly (a Double division by a rounded power
+    -- of ten would be off by up to an ulp).
     | otherwise -> fromRational (s * m % (10 ^ (nd - e)))
   Nothing -> read (B.unpack bs)
   where
@@ -67,7 +76,7 @@ parseDouble bs = case go 0 1 0 False 0 of
     -- dot: whether a '.' has been seen, nd: number of digits following the
     -- decimal point, expo: signed integer exponent from the 'e' tail
     go :: Int -> Integer -> Integer -> Bool -> Int -> Maybe (Integer, Integer, Int, Int)
-    go i sgn acc dot nd
+    go !i !sgn !acc !dot !nd
       | i >= n    = Just (acc, sgn, nd, 0)
       | otherwise =
           let c = fromEnum (B.index bs i)
@@ -84,7 +93,7 @@ parseDouble bs = case go 0 1 0 False 0 of
                   | otherwise -> Nothing
     -- parse the (optional) exponent tail: an optional sign then digits
     parseExp :: Int -> Integer -> Integer -> Bool -> Int -> Maybe (Integer, Integer, Int, Int)
-    parseExp i sgn acc dot nd
+    parseExp !i !sgn !acc !dot !nd
       | i >= n    = Just (acc, sgn, nd, 0)
       | otherwise =
           let c = fromEnum (B.index bs i)
@@ -95,7 +104,7 @@ parseDouble bs = case go 0 1 0 False 0 of
       where
         -- es: exponent sign (+/-1); e: accumulated exponent magnitude
         expDig :: Int -> Integer -> Integer -> Bool -> Int -> Int -> Int -> Maybe (Integer, Integer, Int, Int)
-        expDig i sgn acc dot nd es e
+        expDig !i !sgn !acc !dot !nd !es !e
           | i >= n    = Just (acc, sgn, nd, es * e)
           | otherwise =
               let c = fromEnum (B.index bs i)
@@ -137,7 +146,7 @@ detectSep xss = go seps
 -- The first row can be a header. 
 readFileToLines :: FilePath -> IO [[B.ByteString]]
 readFileToLines filename = do
-  content <- removeBEmpty . toLines . toChar8 . unzip <$> BS.readFile filename
+  content <- removeBEmpty . toLines . toStrict . unzip <$> BS.readFile filename
   let sep = getSep content
   pure . removeEmpty . map (B.split sep) $ content
   where
@@ -146,7 +155,10 @@ readFileToLines filename = do
       removeEmpty  = filter (not . null)
       toLines      = B.split '\n'
       unzip        = if isGZip filename then decompress else id
-      toChar8      = B.pack . map (toEnum . fromEnum) . BS.unpack
+      -- lazy -> strict without going through a [Word8]/[Char] list (the old
+      -- B.pack . map toEnum . BS.unpack round trip allocated ~1GB on a 14MB
+      -- CSV); BS.toStrict is a single O(n) copy.
+      toStrict     = BS.toStrict
 {-# INLINE readFileToLines #-}
 
 -- | Splits the parameters from the filename
