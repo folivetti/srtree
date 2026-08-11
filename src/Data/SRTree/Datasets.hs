@@ -29,6 +29,7 @@ import Data.List (delete, find, intercalate)
 import Data.Maybe (fromJust)
 import Data.Ratio ((%))
 import Data.Vector.Unboxed (Vector)
+import qualified Data.Vector as VB
 import qualified Data.Vector.Unboxed as V
 import System.FilePath (takeExtension)
 import Text.Read (readMaybe)
@@ -51,6 +52,25 @@ loadMtx rows   = map V.fromList
   where ncols = length (head rows)
 {-# INLINE loadMtx #-}
 
+-- | Powers of ten as exact 'Integer's, precomputed once and shared by every
+-- 'parseDouble' call. The per-value @10 ^ k@ exponentiation previously ran a
+-- growing-Integer multiply loop on every parsed number, which showed up as a
+-- measurable chunk of the corpus-load allocation. The table is the exact same
+-- integer, so conversions stay bit-identical.
+maxPow10 :: Int
+maxPow10 = 400
+
+pow10 :: VB.Vector Integer
+pow10 = VB.generate (maxPow10 + 1) (\k -> 10 ^ k)
+{-# NOINLINE pow10 #-}
+
+-- | @10^k@ as an exact 'Integer'; falls back to direct exponentiation for
+-- exponents beyond the precomputed range (only reachable with absurd inputs).
+pow10E :: Int -> Integer
+pow10E k | k >= 0 && k <= maxPow10 = VB.unsafeIndex pow10 k
+         | otherwise               = 10 ^ k
+{-# INLINE pow10E #-}
+
 -- | Fast decimal double parser over a 'B.ByteString'. Handles an optional
 -- sign, a fractional part and an optional 'e'/'E' exponent. The mantissa is
 -- accumulated exactly as an 'Integer' and converted to 'Double' through a
@@ -64,11 +84,11 @@ parseDouble bs = case go 0 1 0 False 0 of
     -- when e >= nd the rational m * 10^e / 10^nd is an exact integer, so a
     -- single fromInteger is bit-identical to fromRational (which would only
     -- gcd-reduce it) but skips the rational machinery entirely.
-    | e >= nd   -> fromInteger (s * (m * 10 ^ (e - nd)))
+    | e >= nd   -> fromInteger (s * (m * pow10E (e - nd)))
     -- otherwise the value is m / 10^(nd-e); keep fromRational so the single
     -- rounding matches `read` exactly (a Double division by a rounded power
     -- of ten would be off by up to an ulp).
-    | otherwise -> fromRational (s * m % (10 ^ (nd - e)))
+    | otherwise -> fromRational (s * m % (pow10E (nd - e)))
   Nothing -> read (B.unpack bs)
   where
     n = B.length bs

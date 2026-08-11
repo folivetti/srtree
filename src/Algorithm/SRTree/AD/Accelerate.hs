@@ -298,7 +298,7 @@ compileAccelerateTree ct _xss _ys
 -- structure and 'ctM' (row stride), with the static columns arriving at runtime,
 -- so two 'CompiledTree's with the same structure and 'm' compile to the same
 -- kernel and can safely share one.
-type CompiledKernel = A.Array DIM1 Double -> A.Scalar Int -> A.Scalar Int -> A.Array DIM1 Double -> (A.Scalar Double, A.Array DIM1 Double)
+type CompiledKernel = A.Array DIM1 Double -> A.Array DIM1 Double -> A.Scalar Int -> A.Scalar Int -> A.Array DIM1 Double -> (A.Scalar Double, A.Array DIM1 Double)
 
 -- | Bounded process-wide cache from a canonical tree signature to its compiled
 -- kernel. Per-tree-structure reuse (not cross-tree sharing, which was the
@@ -350,6 +350,7 @@ compileAccelerateTreeJIT ct _xss _ys =
         bases      = Data.List.scanl (+) 0 (Data.List.init chunkSizes)
 
         staticA    = mkAccVector (ctStatic ct)
+        leafA      = mkAccVector (VU.concat (VB.toList (ctVars ct)))
 
         jittedFunc = getKernel ct
 
@@ -357,7 +358,7 @@ compileAccelerateTreeJIT ct _xss _ys =
         runChunk theta thetaArr base cs = do
             let baseS = A.fromList Z [base]   :: Scalar Int
                 csS   = A.fromList Z [cs]     :: Scalar Int
-                (objArr, gradArr) = jittedFunc staticA baseS csS thetaArr
+                (objArr, gradArr) = jittedFunc leafA staticA baseS csS thetaArr
                 obj  = A.indexArray objArr Z
                 grad = VS.fromList (A.toList gradArr)
             evaluate obj
@@ -612,13 +613,17 @@ encodeTree ct
 -- | Builds the AST in the Accelerate EDSL. The static column block is a kernel
 -- input (not baked constants), and the row range comes in as scalar inputs, so
 -- the same compiled kernel can be run over any contiguous chunk of rows.
+-- `leafVals` is the flat concatenation of the run-fixed leaf columns
+-- (ctVars = xss ++ [y, yErr]); a static Var leaf reads its value there instead
+-- of from `staticIn` (its slot is no longer materialized).
 buildAccGraph :: CompiledTree
+              -> Acc (Vector Double)   -- leaf columns, flat [colIdx * m + row]
               -> Acc (Vector Double)   -- static columns, compact [slot * m + row]
               -> Acc (Scalar Int)       -- first row of this chunk
               -> Acc (Scalar Int)       -- number of rows in this chunk
               -> Acc (Vector Double)    -- theta
               -> Acc (Scalar Double, Vector Double)
-buildAccGraph ct staticIn baseIn csIn theta = A.lift (obj, gradPacked)
+buildAccGraph ct leafVals staticIn baseIn csIn theta = A.lift (obj, gradPacked)
   where
     root  = ctRoot ct
     nodes = ctNodes ct
@@ -632,9 +637,15 @@ buildAccGraph ct staticIn baseIn csIn theta = A.lift (obj, gradPacked)
     csShape :: Exp (Z :. Int)
     csShape = A.lift (Z :. cs)
 
-    -- column for a static node key: rows [base, base + cs)
+    -- column for a static node key: rows [base, base + cs). Var leaves read
+    -- from the flat leafVals at (leaf column)*m; everything else from
+    -- staticIn at ctStaticBase.
     statCol :: Int -> Acc (Vector Double)
-    statCol k = A.generate csShape (\ix -> staticIn A.!! (A.constant (ctStaticBase ct VU.! k) + base + A.indexHead ix))
+    statCol k = if VU.unsafeIndex (ctKind ct) k Prelude.== 0
+                  then A.generate csShape (\ix -> leafVals A.!! (A.constant (leafBaseOf k) + base + A.indexHead ix))
+                  else A.generate csShape (\ix -> staticIn A.!! (A.constant (ctStaticBase ct VU.! k) + base + A.indexHead ix))
+      where
+        leafBaseOf k = leafSrcIdx (VB.length (ctVars ct) - 2) (VU.unsafeIndex (ctArg ct) k) * ctM ct
 
     -- 1. FORWARD PASS
     forward :: IntMap.IntMap (Acc (Array DIM1 Double))
@@ -711,6 +722,8 @@ fth4 (T4 _ _ _ d) = d
 buildAccInterpGraph
   :: Acc (Vector Double)   -- staticIn: ctStatic compact [slot * m + row]
   -> Acc (Vector Int)      -- staticBaseF: gid -> slot * m
+  -> Acc (Vector Double)   -- leafVals: flat leaf columns [colIdx * m + row]
+  -> Acc (Vector Int)      -- leafBaseF: gid -> leaf column * m, or -1 if not a Var leaf
   -> Acc (Scalar Int)      -- base: first row of this chunk
   -> Acc (Scalar Int)      -- cs: rows in this chunk
   -> Acc (Vector Double)   -- theta
@@ -718,7 +731,7 @@ buildAccInterpGraph
   -> Acc (Vector Int)      -- widthF: per-level actual node count
   -> Acc (Vector Int)      -- parentF: per-slot parent list (pos*4+slot, -1 none)
   -> Acc (Scalar Double, Vector Double)
-buildAccInterpGraph staticIn staticBaseF baseIn csIn theta metaF widthF parentF = A.lift (obj, gradPacked)
+buildAccInterpGraph staticIn staticBaseF leafVals leafBaseF baseIn csIn theta metaF widthF parentF = A.lift (obj, gradPacked)
   where
     base = A.the baseIn
     cs   = A.the csIn
@@ -729,7 +742,11 @@ buildAccInterpGraph staticIn staticBaseF baseIn csIn theta metaF widthF parentF 
 
     -- static value of a node with global id gid, for chunk row
     staticVal :: Exp Int -> Exp Int -> Exp Double
-    staticVal gid row = staticIn A.!! (staticBaseF A.!! gid + base + row)
+    staticVal gid row =
+        let lb = leafBaseF A.!! gid
+        in (lb A.>= A.constant 0)
+             ? (leafVals A.!! (lb + base + row)
+               , staticIn A.!! (staticBaseF A.!! gid + base + row))
 
     -- read a metadata field for a slot
     metaAt :: Exp Int -> Int -> Exp Int
@@ -845,7 +862,8 @@ buildAccInterpGraph staticIn staticBaseF baseIn csIn theta metaF widthF parentF 
 -- | The interpreter kernel compiled once per process (tree-independent AST).
 {-# NOINLINE interpKernel #-}
 interpKernel
-  :: Vector Double -> Vector Int -> Scalar Int -> Scalar Int
+  :: Vector Double -> Vector Int -> Vector Double -> Vector Int
+  -> Scalar Int -> Scalar Int
   -> Vector Double -> Vector Int -> Vector Int -> Vector Int
   -> (Scalar Double, Vector Double)
 interpKernel = unsafePerformIO $ do
@@ -868,6 +886,27 @@ interpEnabled = unsafePerformIO (do m <- lookupEnv "ACC_INTERP"; pure (m Prelude
 mkAccIVector :: VU.Vector Int -> Vector Int
 mkAccIVector v = A.fromList (Z :. VU.length v) (VU.toList v)
 
+-- | Map a Var leaf's arg (feature ix, or -1 = y, -2 = yErr) to an index into
+-- ctVars = xss ++ [y, yErr].
+leafSrcIdx :: Int -> Int -> Int
+leafSrcIdx nFeats a | a Prelude.>= 0   = a
+                    | a Prelude.== -1  = nFeats
+                    | otherwise = nFeats + 1
+{-# INLINE leafSrcIdx #-}
+
+-- | Per-gid flat base into ctVars for a Var leaf (leaf column * m), or -1 for
+-- any other node (which reads from ctStatic instead).
+leafBases :: CompiledTree -> VU.Vector Int
+leafBases ct =
+    let nFeats = VB.length (ctVars ct) - 2
+        kind   = ctKind ct
+        arg    = ctArg ct
+        m      = ctM ct
+    in VU.generate (ctRoot ct + 1) $ \k ->
+        if VU.unsafeIndex kind k Prelude.== 0
+          then leafSrcIdx nFeats (VU.unsafeIndex arg k) * m
+          else -1
+
 -- | Interpreter entry point: encodes the tree, then runs every chunk through
 -- the single compiled kernel. Falls back to the Phase-2 JIT if the tree
 -- exceeds the fixed shape (e.g. an unusually deep/wide tree).
@@ -885,6 +924,8 @@ compileAccelerateInterp ct _xss _ys =
 
             staticA = mkAccVector (ctStatic ct)
             staticBaseF = mkAccIVector (ctStaticBase ct)
+            leafA   = mkAccVector (VU.concat (VB.toList (ctVars ct)))
+            leafBaseF = mkAccIVector (leafBases ct)
             metaF   = mkAccIVector (encMeta enc)
             widthF  = mkAccIVector (encWidth enc)
             parentF = mkAccIVector (encParent enc)
@@ -894,7 +935,7 @@ compileAccelerateInterp ct _xss _ys =
                 let baseS = A.fromList Z [base] :: Scalar Int
                     csS   = A.fromList Z [cs]   :: Scalar Int
                 wK0 <- getCurrentTime
-                let (objArr, gradArr) = interpKernel staticA staticBaseF baseS csS thetaArr metaF widthF parentF
+                let (objArr, gradArr) = interpKernel staticA staticBaseF leafA leafBaseF baseS csS thetaArr metaF widthF parentF
                     obj  = A.indexArray objArr Z
                 evaluate obj
                 wK1 <- getCurrentTime

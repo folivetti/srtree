@@ -51,7 +51,7 @@ import qualified Data.Vector.Mutable as VMB
 import Debug.Trace (trace, traceShow)
 import qualified Data.IntMap.Strict as IntMap
 import Data.List ( foldl', foldl1' )
-import Data.Maybe ( fromJust, isJust, fromMaybe )
+import Data.Maybe (isJust, fromMaybe)
 
 import Control.Monad.State.Strict
 import Control.Monad.Identity
@@ -70,10 +70,25 @@ import Algorithm.SRTree.AD.CompiledAD
 compileTree :: [VU.Vector Double] -> VU.Vector Double -> Maybe (VU.Vector Double) -> Fix SRTree -> CompiledTree
 compileTree xss ys mYErr tree =
     CompiledTree { ctNodes = nodes, ctRoot = root, ctDyn = dynArr, ctStatic = staticArr, ctStaticBase = staticBaseArr, ctM = m, ctNPred = root + 1
-                 , ctKind = kindArr, ctArg = argArr, ctArg2 = arg2Arr, ctFcode = fcodeArr, ctOcode = ocodeArr }
+                 , ctKind = kindArr, ctArg = argArr, ctArg2 = arg2Arr, ctFcode = fcodeArr, ctOcode = ocodeArr, ctVars = vars }
   where
-    yErr = fromJust mYErr
+    -- yErr is only defined when mYErr is present (a tree referencing Var -2
+    -- always pairs with mYErr = Just e, see the likelihood loss wrappers). The
+    -- ctVars list must stay well-defined for every column even when mYErr is
+    -- Nothing -- the Accelerate leaf array concatenates the whole list -- so a
+    -- missing yErr is represented by a zero column rather than the bottom
+    -- `fromJust mYErr` (which the old static-array copy path could keep lazy).
+    yErr = case mYErr of
+             Just e  -> e
+             Nothing -> VU.replicate m 0
     m    = VU.length ys
+    -- Leaf source columns, referenced (never copied per tree): a static Var
+    -- leaf reads feature column ix (arg), y (arg = -1), or yErr (arg = -2)
+    -- straight from these run-fixed vectors instead of a materialized copy in
+    -- staticArr. ctVars ix = xss !! ix, ctVars nFeats = y, ctVars (nFeats+1)
+    -- = yErr.
+    vars   = VB.fromList (xss <> [ys, yErr])
+    nFeats = VB.length vars - 2
 
     -- Rewrite x ** 2.0 into the unary Square kernel (x*x, fcode 17):
     -- the loss wrap ((tree - y) ** 2) / m is the single hottest subgraph in
@@ -92,11 +107,14 @@ compileTree xss ys mYErr tree =
     stride    = root + 1
     -- static nodes in ascending (topological) id order, so a single bottom-up
     -- sweep fills every column before its parent. Dynamic nodes are omitted
-    -- entirely: their static slots were zeros that evalGrad*/forwardPassRange
-    -- never read, so the flat array shrinks from stride * m to #static * m
-    -- (a handful of feature/const columns per tree instead of all nodes).
-    staticKeys = [k | k <- [0 .. root], not (VU.unsafeIndex dynArr k)]
+    -- entirely, and so are Var leaves (their values are read directly from the
+    -- run-fixed `vars` columns, see the eval kernels): their static slots were
+    -- zeros that evalGrad*/forwardPassRange never read, so the flat array
+    -- shrinks from stride * m to #static * m (a handful of feature/const
+    -- columns per tree instead of all nodes).
+    staticKeys = [k | k <- [0 .. root], not (VU.unsafeIndex dynArr k), not (isVarLeaf k)]
     nStatic    = length staticKeys
+    isVarLeaf k = case VB.unsafeIndex nodes k of { Var _ -> True; _ -> False }
     -- id -> static slot base (slot * m); 0 for dynamic ids (never read)
     staticBaseArr = VU.create $ do
         arr <- VUM.replicate (root + 1) 0
@@ -112,35 +130,50 @@ compileTree xss ys mYErr tree =
         arr <- VUM.replicate (nStatic * m) 0
         let slice slot = VUM.slice (slot * m) m arr
             slotOf k   = VU.unsafeIndex staticBaseArr k `div` m
+            -- Resolve a static child @c@ to its source column ONCE per
+            -- column (hoisted out of the row loop): Var leaves are not
+            -- materialized in staticArr, so their column is the run-fixed
+            -- `vars` vector; every other static node is a column already
+            -- written into the (mutable) arr (children always have smaller
+            -- ids). `Left` = pure vector (Var leaf), `Right` = mutable slice.
+            staticSrc c
+              | isVarLeaf c = Left (VB.unsafeIndex vars (leafSrcIdx nFeats (VU.unsafeIndex argArr c)))
+              | otherwise   = Right (slice (slotOf c))
+            -- Read row @i from a hoisted source (see staticSrc). Called per
+            -- element, but the Left/Right tag is fixed per column, so GHC
+            -- keeps the dispatch cheap and no slice/leaf lookup is repeated.
+            readSrc s i = case s of
+                Left v  -> pure (VU.unsafeIndex v i)
+                Right m -> VUM.unsafeRead m i
             mapStatic f t k = go 0
               where
-                src = slice (slotOf t)
                 dst = slice (slotOf k)
+                src = staticSrc t
                 go !i | i >= m    = pure ()
                       | otherwise = do
-                          x <- VUM.unsafeRead src i
+                          x <- readSrc src i
                           VUM.unsafeWrite dst i (evalFun f x)
                           go (i + 1)
             zipStatic op l r k = go 0
               where
-                srcL = slice (slotOf l)
-                srcR = slice (slotOf r)
-                dst  = slice (slotOf k)
+                dst = slice (slotOf k)
+                srcL = staticSrc l
+                srcR = staticSrc r
                 go !i | i >= m    = pure ()
                       | otherwise = do
-                          xl <- VUM.unsafeRead srcL i
-                          xr <- VUM.unsafeRead srcR i
+                          xl <- readSrc srcL i
+                          xr <- readSrc srcR i
                           VUM.unsafeWrite dst i (evalOp op xl xr)
                           go (i + 1)
         forM_ (zip staticKeys [0 ..]) $ \(k, slot) ->
             case VB.unsafeIndex nodes k of
-                Var ix     | ix == -1  -> VU.copy (slice slot) ys
-                           | ix == -2  -> VU.copy (slice slot) yErr
-                           | otherwise -> VU.copy (slice slot) (xss !! ix)
+                -- Var leaves are excluded from staticKeys (their columns live
+                -- in `vars`), so they never reach this sweep.
                 Const v    -> VUM.set (slice slot) v
                 Uni f t    -> mapStatic f t k
                 Bin op l r -> zipStatic op l r k
                 Param _    -> pure ()
+                Var _      -> pure ()
         pure arr
 
     -- compact unboxed per-id code arrays (length root+1) so the hot row loop
@@ -224,6 +257,37 @@ rewritePowSq = cata alg
     alg n                                = Fix n
 
 -- ---------------------------------------------------------------------
+-- Static-child source resolution. A static Var leaf is NOT materialized
+-- into ctStatic anymore: its value column lives in ctVars (= xss ++ [y,
+-- yErr]) and is read directly at the absolute row (base 0, so the chunk
+-- start s0 positions the read). Every other static node is a computed
+-- column inside ctStatic at ctStaticBase k.
+-- ---------------------------------------------------------------------
+
+-- | Map a Var leaf's arg (feature ix, or -1 = y, -2 = yErr) to an index
+-- into ctVars = xss ++ [y, yErr].
+leafSrcIdx :: Int -> Int -> Int
+leafSrcIdx nFeats a | a >= 0   = a
+                    | a == -1  = nFeats
+                    | otherwise = nFeats + 1
+{-# INLINE leafSrcIdx #-}
+
+-- | Resolve the (source vector, base) of a static child node @k@, where the
+-- row value is read at @src (base + i)@.
+resolveStatic :: VU.Vector Double
+              -> VB.Vector (VU.Vector Double)
+              -> VU.Vector Int
+              -> VU.Vector Int
+              -> VU.Vector Int
+              -> Int -> Int -> Int
+              -> (VU.Vector Double, Int)
+resolveStatic static vars kind arg staticBase nFeats s0 k =
+    if VU.unsafeIndex kind k == 0
+      then (VB.unsafeIndex vars (leafSrcIdx nFeats (VU.unsafeIndex arg k)), s0)
+      else (static, VU.unsafeIndex staticBase k + s0)
+{-# INLINE resolveStatic #-}
+
+-- ---------------------------------------------------------------------
 -- Per-theta evaluation: the hot path, called once per NLopt objective/
 -- gradient call. Forward pass only recomputes dynamic nodes (ids are
 -- already topologically ordered, so a single left-to-right fold works).
@@ -252,7 +316,9 @@ evalGrad ct theta = runST $ do
           | key > root = pure ()
           | otherwise  = do
               v <- if not (VU.unsafeIndex dyn key)
-                     then pure (VU.unsafeIndex static (VU.unsafeIndex staticBase key + row))
+                     then if VU.unsafeIndex kind key == 0
+                            then pure (VU.unsafeIndex (VB.unsafeIndex vars (leafSrcIdx nFeats (VU.unsafeIndex arg key))) row)
+                            else pure (VU.unsafeIndex static (VU.unsafeIndex staticBase key + row))
                      else case VU.unsafeIndex kind key of
                             1 -> pure (V.unsafeIndex theta (VU.unsafeIndex arg key))
                             3 -> do x <- VUM.unsafeRead fwd (VU.unsafeIndex arg key)
@@ -319,6 +385,8 @@ evalGrad ct theta = runST $ do
     dyn    = ctDyn ct
     static = ctStatic ct
     staticBase = ctStaticBase ct
+    vars   = ctVars ct
+    nFeats = VB.length vars - 2
 
 -- ---------------------------------------------------------------------
 -- Node-outer (vectorized-over-rows) evaluation: mirrors reverseModeGraph's
@@ -374,12 +442,10 @@ evalGradVec ct theta = runST $ do
                               kb = key * nb
                               lb = l * nb
                               rb = r * nb
-                              ls = VU.unsafeIndex staticBase l + s0
-                              rs = VU.unsafeIndex staticBase r + s0
                           case (dl, dr) of
-                            (True, True)   -> {-# SCC "bwdBinTT" #-} bwdBin nb static fwd adj 0 oc kb lb rb ls rs
-                            (True, False)  -> {-# SCC "bwdBinTS" #-} bwdBin nb static fwd adj 1 oc kb lb rb ls rs
-                            (False, True)  -> {-# SCC "bwdBinST" #-} bwdBin nb static fwd adj 2 oc kb lb rb ls rs
+                            (True, True)   -> {-# SCC "bwdBinTT" #-} bwdBin nb fwd adj 0 oc kb lb rb (static, 0)
+                            (True, False)  -> {-# SCC "bwdBinTS" #-} bwdBin nb fwd adj 1 oc kb lb rb (resolveStatic static vars kind arg staticBase nFeats s0 r)
+                            (False, True)  -> {-# SCC "bwdBinST" #-} bwdBin nb fwd adj 2 oc kb lb rb (resolveStatic static vars kind arg staticBase nFeats s0 l)
                             (False, False) -> pure ()  -- no dynamic children to propagate to
                         3 -> do
                           let t  = VU.unsafeIndex arg key
@@ -414,6 +480,8 @@ evalGradVec ct theta = runST $ do
     dyn    = ctDyn ct
     static = ctStatic ct
     staticBase = ctStaticBase ct
+    vars   = ctVars ct
+    nFeats = VB.length vars - 2
 
     sumCol v vbase !n = go 0 0
       where go !i !acc | i >= n = pure acc
@@ -491,6 +559,8 @@ forwardPassRange ct theta fwd s0 nb = goFwd 0
     dyn    = ctDyn ct
     static = ctStatic ct
     staticBase = ctStaticBase ct
+    vars   = ctVars ct
+    nFeats = VB.length vars - 2
 
     goFwd !key
       | key > root = pure ()
@@ -515,12 +585,10 @@ forwardPassRange ct theta fwd s0 nb = goFwd 0
                     kb = key * nb
                     lb = l * nb
                     rb = r * nb
-                    ls = VU.unsafeIndex staticBase l + s0
-                    rs = VU.unsafeIndex staticBase r + s0
                 case (dl, dr) of
-                  (True, True)   -> {-# SCC "fwdBinTT" #-} fwdBin nb static fwd 0 oc kb lb rb ls rs
-                  (True, False)  -> {-# SCC "fwdBinTS" #-} fwdBin nb static fwd 1 oc kb lb rb ls rs
-                  (False, True)  -> {-# SCC "fwdBinST" #-} fwdBin nb static fwd 2 oc kb lb rb ls rs
+                  (True, True)   -> {-# SCC "fwdBinTT" #-} fwdBin nb fwd 0 oc kb lb rb (static, 0)
+                  (True, False)  -> {-# SCC "fwdBinTS" #-} fwdBin nb fwd 1 oc kb lb rb (resolveStatic static vars kind arg staticBase nFeats s0 r)
+                  (False, True)  -> {-# SCC "fwdBinST" #-} fwdBin nb fwd 2 oc kb lb rb (resolveStatic static vars kind arg staticBase nFeats s0 l)
                   (False, False) -> pure ()  -- unreachable: a dynamic Bin always has a dynamic child
               _ -> pure ()
             else pure ()  -- static node: column already in `static`
@@ -530,10 +598,11 @@ forwardPassRange ct theta fwd s0 nb = goFwd 0
     -- for dynamic nodes). The opcode is dispatched ONCE per node; the loop
     -- helpers are INLINE with the literal operator so each row iteration
     -- is a tight fused kernel with no per-element `case oc of` dispatch.
-    -- `ls`/`rs` are the static column bases (already offset by s0), used by
-    -- the TS/ST variants; `nb` is the number of rows in this chunk.
-fwdBin :: Int -> VU.Vector Double -> VUM.MVector s Double -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> ST s ()
-fwdBin nb static fwd combo oc kb lb rb ls rs = case (combo, oc) of
+    -- `stSrc` is the (source vector, base) of the static child (either a
+    -- run-fixed leaf column from `vars` or a computed column of `static`),
+    -- used by the TS/ST variants; `nb` is the number of rows in this chunk.
+fwdBin :: Int -> VUM.MVector s Double -> Int -> Int -> Int -> Int -> Int -> (VU.Vector Double, Int) -> ST s ()
+fwdBin nb fwd combo oc kb lb rb stSrc = case (combo, oc) of
   (0, 0) -> fwdTT nb fwd (+) kb lb rb
   (0, 1) -> fwdTT nb fwd (-) kb lb rb
   (0, 2) -> fwdTT nb fwd (*) kb lb rb
@@ -541,29 +610,30 @@ fwdBin nb static fwd combo oc kb lb rb ls rs = case (combo, oc) of
   (0, 4) -> fwdTT nb fwd (**) kb lb rb
   (0, 5) -> fwdTT nb fwd (\l r -> abs l ** r) kb lb rb
   (0, 6) -> fwdTT nb fwd (\l r -> l / sqrt (1 + r * r)) kb lb rb
-  (1, 0) -> fwdTS nb static fwd (+) kb lb rs
-  (1, 1) -> fwdTS nb static fwd (-) kb lb rs
-  (1, 2) -> fwdTS nb static fwd (*) kb lb rs
-  (1, 3) -> fwdTS nb static fwd (/) kb lb rs
-  (1, 4) -> fwdTS nb static fwd (**) kb lb rs
-  (1, 5) -> fwdTS nb static fwd (\l r -> abs l ** r) kb lb rs
-  (1, 6) -> fwdTS nb static fwd (\l r -> l / sqrt (1 + r * r)) kb lb rs
-  (2, 0) -> fwdST nb static fwd (+) kb ls rb
-  (2, 1) -> fwdST nb static fwd (-) kb ls rb
-  (2, 2) -> fwdST nb static fwd (*) kb ls rb
-  (2, 3) -> fwdST nb static fwd (/) kb ls rb
-  (2, 4) -> fwdST nb static fwd (**) kb ls rb
-  (2, 5) -> fwdST nb static fwd (\l r -> abs l ** r) kb ls rb
-  (2, 6) -> fwdST nb static fwd (\l r -> l / sqrt (1 + r * r)) kb ls rb
+  (1, 0) -> fwdTS nb stSrc fwd (+) kb lb
+  (1, 1) -> fwdTS nb stSrc fwd (-) kb lb
+  (1, 2) -> fwdTS nb stSrc fwd (*) kb lb
+  (1, 3) -> fwdTS nb stSrc fwd (/) kb lb
+  (1, 4) -> fwdTS nb stSrc fwd (**) kb lb
+  (1, 5) -> fwdTS nb stSrc fwd (\l r -> abs l ** r) kb lb
+  (1, 6) -> fwdTS nb stSrc fwd (\l r -> l / sqrt (1 + r * r)) kb lb
+  (2, 0) -> fwdST nb stSrc fwd (+) kb rb
+  (2, 1) -> fwdST nb stSrc fwd (-) kb rb
+  (2, 2) -> fwdST nb stSrc fwd (*) kb rb
+  (2, 3) -> fwdST nb stSrc fwd (/) kb rb
+  (2, 4) -> fwdST nb stSrc fwd (**) kb rb
+  (2, 5) -> fwdST nb stSrc fwd (\l r -> abs l ** r) kb rb
+  (2, 6) -> fwdST nb stSrc fwd (\l r -> l / sqrt (1 + r * r)) kb rb
   _      -> pure ()
 {-# INLINE fwdBin #-}
 
 -- Backward binary kernels: same dispatch structure, `diff` is the local
 -- (dl/dchild, dr/dchild) rule keyed on the opcode. `nb` is the number of
--- rows in this chunk, `ls`/`rs` are the static column bases already offset
--- by the chunk start (used by the TS/ST variants).
-bwdBin :: Int -> VU.Vector Double -> VUM.MVector s Double -> VUM.MVector s Double -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> ST s ()
-bwdBin nb static fwd adj combo oc kb lb rb ls rs = case (combo, oc) of
+-- rows in this chunk, `stSrc` is the (source vector, base) of the static
+-- child (either a run-fixed leaf column from `vars` or a computed column of
+-- `static`), used by the TS/ST variants.
+bwdBin :: Int -> VUM.MVector s Double -> VUM.MVector s Double -> Int -> Int -> Int -> Int -> Int -> (VU.Vector Double, Int) -> ST s ()
+bwdBin nb fwd adj combo oc kb lb rb stSrc = case (combo, oc) of
   (0, 0) -> bwdTT nb fwd adj (\dx _ _ _ -> (dx, dx)) kb lb rb
   (0, 1) -> bwdTT nb fwd adj (\dx _ _ _ -> (dx, negate dx)) kb lb rb
   (0, 2) -> bwdTT nb fwd adj (\dx fx gy _ -> (dx * gy, dx * fx)) kb lb rb
@@ -575,28 +645,28 @@ bwdBin nb static fwd adj combo oc kb lb rb ls rs = case (combo, oc) of
              let dxl = dx * (recip . sqrt . (+1) . (^(2::Int))) gy
                  dxy = fx * gy * dxl ^ (3::Int)
              in (dxl, dxy)) kb lb rb
-  (1, 0) -> bwdTS nb static fwd adj (\dx _ _ _ -> (dx, dx)) kb lb rs
-  (1, 1) -> bwdTS nb static fwd adj (\dx _ _ _ -> (dx, negate dx)) kb lb rs
-  (1, 2) -> bwdTS nb static fwd adj (\dx fx gy _ -> (dx * gy, dx * fx)) kb lb rs
-  (1, 3) -> bwdTS nb static fwd adj (\dx _ gy fg -> (dx / gy, dx * (negate fg / gy))) kb lb rs
-  (1, 4) -> bwdTS nb static fwd adj (\dx fx gy fg -> (fixNaN (dx * gy * fg / fx), fixNaN (dx * fg * log fx))) kb lb rs
-  (1, 5) -> bwdTS nb static fwd adj (\dx fx gy fg ->
-             let v2 = abs fx in (fixNaN (dx * (fx * gy) * fg / (v2 * v2)), fixNaN (dx * fg * log (abs fx)))) kb lb rs
-  (1, 6) -> bwdTS nb static fwd adj (\dx fx gy _ ->
+  (1, 0) -> bwdTS nb stSrc fwd adj (\dx _ _ _ -> (dx, dx)) kb lb
+  (1, 1) -> bwdTS nb stSrc fwd adj (\dx _ _ _ -> (dx, negate dx)) kb lb
+  (1, 2) -> bwdTS nb stSrc fwd adj (\dx fx gy _ -> (dx * gy, dx * fx)) kb lb
+  (1, 3) -> bwdTS nb stSrc fwd adj (\dx _ gy fg -> (dx / gy, dx * (negate fg / gy))) kb lb
+  (1, 4) -> bwdTS nb stSrc fwd adj (\dx fx gy fg -> (fixNaN (dx * gy * fg / fx), fixNaN (dx * fg * log fx))) kb lb
+  (1, 5) -> bwdTS nb stSrc fwd adj (\dx fx gy fg ->
+             let v2 = abs fx in (fixNaN (dx * (fx * gy) * fg / (v2 * v2)), fixNaN (dx * fg * log (abs fx)))) kb lb
+  (1, 6) -> bwdTS nb stSrc fwd adj (\dx fx gy _ ->
              let dxl = dx * (recip . sqrt . (+1) . (^(2::Int))) gy
                  dxy = fx * gy * dxl ^ (3::Int)
-             in (dxl, dxy)) kb lb rs
-  (2, 0) -> bwdST nb static fwd adj (\dx _ _ _ -> (dx, dx)) kb ls rb
-  (2, 1) -> bwdST nb static fwd adj (\dx _ _ _ -> (dx, negate dx)) kb ls rb
-  (2, 2) -> bwdST nb static fwd adj (\dx fx gy _ -> (dx * gy, dx * fx)) kb ls rb
-  (2, 3) -> bwdST nb static fwd adj (\dx _ gy fg -> (dx / gy, dx * (negate fg / gy))) kb ls rb
-  (2, 4) -> bwdST nb static fwd adj (\dx fx gy fg -> (fixNaN (dx * gy * fg / fx), fixNaN (dx * fg * log fx))) kb ls rb
-  (2, 5) -> bwdST nb static fwd adj (\dx fx gy fg ->
-             let v2 = abs fx in (fixNaN (dx * (fx * gy) * fg / (v2 * v2)), fixNaN (dx * fg * log (abs fx)))) kb ls rb
-  (2, 6) -> bwdST nb static fwd adj (\dx fx gy _ ->
+             in (dxl, dxy)) kb lb
+  (2, 0) -> bwdST nb stSrc fwd adj (\dx _ _ _ -> (dx, dx)) kb rb
+  (2, 1) -> bwdST nb stSrc fwd adj (\dx _ _ _ -> (dx, negate dx)) kb rb
+  (2, 2) -> bwdST nb stSrc fwd adj (\dx fx gy _ -> (dx * gy, dx * fx)) kb rb
+  (2, 3) -> bwdST nb stSrc fwd adj (\dx _ gy fg -> (dx / gy, dx * (negate fg / gy))) kb rb
+  (2, 4) -> bwdST nb stSrc fwd adj (\dx fx gy fg -> (fixNaN (dx * gy * fg / fx), fixNaN (dx * fg * log fx))) kb rb
+  (2, 5) -> bwdST nb stSrc fwd adj (\dx fx gy fg ->
+             let v2 = abs fx in (fixNaN (dx * (fx * gy) * fg / (v2 * v2)), fixNaN (dx * fg * log (abs fx)))) kb lb
+  (2, 6) -> bwdST nb stSrc fwd adj (\dx fx gy _ ->
              let dxl = dx * (recip . sqrt . (+1) . (^(2::Int))) gy
                  dxy = fx * gy * dxl ^ (3::Int)
-             in (dxl, dxy)) kb ls rb
+             in (dxl, dxy)) kb rb
   _      -> pure ()
 {-# INLINE bwdBin #-}
 
@@ -606,14 +676,14 @@ fwdTT nb fwd op kb lb rb = forRows nb $ \i -> do
   VUM.unsafeWrite fwd (kb + i) (op xl xr)
 {-# INLINE fwdTT #-}
 
-fwdTS nb static fwd op kb lb rb = forRows nb $ \i -> do
+fwdTS nb (src, base) fwd op kb lb = forRows nb $ \i -> do
   xl <- VUM.unsafeRead fwd (lb + i)
-  VUM.unsafeWrite fwd (kb + i) (op xl (VU.unsafeIndex static (rb + i)))
+  VUM.unsafeWrite fwd (kb + i) (op xl (VU.unsafeIndex src (base + i)))
 {-# INLINE fwdTS #-}
 
-fwdST nb static fwd op kb lb rb = forRows nb $ \i -> do
+fwdST nb (src, base) fwd op kb rb = forRows nb $ \i -> do
   xr <- VUM.unsafeRead fwd (rb + i)
-  VUM.unsafeWrite fwd (kb + i) (op (VU.unsafeIndex static (lb + i)) xr)
+  VUM.unsafeWrite fwd (kb + i) (op (VU.unsafeIndex src (base + i)) xr)
 {-# INLINE fwdST #-}
 
 bwdTT nb fwd adj diff kb lb rb = forRows nb $ \i -> do
@@ -628,20 +698,20 @@ bwdTT nb fwd adj diff kb lb rb = forRows nb $ \i -> do
   VUM.unsafeWrite adj (rb + i) (b + gr)
 {-# INLINE bwdTT #-}
 
-bwdTS nb static fwd adj diff kb lb rs = forRows nb $ \i -> do
+bwdTS nb (src, base) fwd adj diff kb lb = forRows nb $ \i -> do
   v  <- VUM.unsafeRead adj (kb + i)
   xl <- VUM.unsafeRead fwd (lb + i)
   fg <- VUM.unsafeRead fwd (kb + i)
-  let (gl, _) = diff v xl (VU.unsafeIndex static (rs + i)) fg
+  let (gl, _) = diff v xl (VU.unsafeIndex src (base + i)) fg
   a <- VUM.unsafeRead adj (lb + i)
   VUM.unsafeWrite adj (lb + i) (a + gl)
 {-# INLINE bwdTS #-}
 
-bwdST nb static fwd adj diff kb ls rb = forRows nb $ \i -> do
+bwdST nb (src, base) fwd adj diff kb rb = forRows nb $ \i -> do
   v  <- VUM.unsafeRead adj (kb + i)
   xr <- VUM.unsafeRead fwd (rb + i)
   fg <- VUM.unsafeRead fwd (kb + i)
-  let (_, gr) = diff v (VU.unsafeIndex static (ls + i)) xr fg
+  let (_, gr) = diff v (VU.unsafeIndex src (base + i)) xr fg
   b <- VUM.unsafeRead adj (rb + i)
   VUM.unsafeWrite adj (rb + i) (b + gr)
 {-# INLINE bwdST #-}
