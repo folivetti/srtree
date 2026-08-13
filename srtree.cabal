@@ -35,6 +35,7 @@ library
           Algorithm.EqSat.Queries
           Algorithm.EqSat.SearchSR
           Algorithm.EqSat.Simplify
+          Algorithm.EqSat.Store
           Algorithm.SRTree.AD
           Algorithm.SRTree.AD.Accelerate
           Algorithm.SRTree.AD.CompiledAD
@@ -209,6 +210,7 @@ test-suite srtree-test
     main-is: Spec.hs
     other-modules:
           EqSatTests
+          StoreTests
           Paths_srtree
     hs-source-dirs:
           test

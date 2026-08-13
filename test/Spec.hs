@@ -6,6 +6,7 @@ import Data.SRTree.Recursion (Fix)
 import Data.SRTree.Eval (compile)
 import Algorithm.SRTree.AD.Unboxed (CompiledTree, compileTree, compileTreeMulti, evalGrad, evalGradVec, evalGradMulti)
 import qualified EqSatTests
+import qualified StoreTests
 import Data.SRTree.Random (randomTree, tossBiased, randomFrom)
 import System.Random (mkStdGen)
 import Control.Monad.State.Strict (evalStateT)
@@ -107,6 +108,7 @@ main = do
     , t2
     , TestLabel "benchgrad" test_benchgrad
     , TestLabel "eqsat" EqSatTests.tests
+    , TestLabel "store" StoreTests.tests
     ]
   if failures counts /= 0 || errors counts /= 0
     then error "Some tests failed"
