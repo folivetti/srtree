@@ -129,6 +129,32 @@ test_merge_roundtrip = TestCase $ do
     Left err -> assertFailure ("import failed: " ++ err)
     Right gM' -> assertBool "merge round-trip: rows differ" (exportEGraph gM' == rows)
 
+-- | Test 6: stale node->class entries (a node pointing at a class whose
+-- canonical representative is another class) are canonicalized on import
+test_import_stale_canonicalizes :: Test
+test_import_stale_canonicalizes = TestCase $ do
+  let (keep, g) = buildA                      -- keep = x0+x1, a root class, has fitness
+      rows0 = exportEGraph g
+      dead  = _grNextId rows0                 -- a fresh id not yet in the graph
+      rows  = rows0 { _grCanonical = IntMap.insert dead keep (_grCanonical rows0)
+                    , _grEClasses  = IntMap.insert dead
+                                       (IntMap.findWithDefault (error "keep missing") keep (_grEClasses rows0))
+                                       (_grEClasses rows0)
+                    , _grENodeToEClass = HashMap.insert (EBin Add 2 3) dead (_grENodeToEClass rows0)
+                    , _grNextId = dead + 1 }
+  case importEGraph rows of
+    Left err -> assertFailure ("import of stale rows failed: " ++ err)
+    Right g' -> do
+      let canon    = _grCanonical (exportEGraph g')
+          posts    = exportEGraph g'
+          deadNext = IntMap.lookup dead (_grEClasses posts)
+      -- the dead class is gone and every node points at a canonical class
+      assertEqual "dead class dropped" Nothing deadNext
+      assertBool "all node->class values canonical"
+        (all (\eid -> IntMap.lookup eid canon == Just eid) (HashMap.elems (_grENodeToEClass posts)))
+      -- the kept class is still there with its fitness (via the fit range db)
+      assertEqual "kept fitness preserved" (Just 0.5) (evalIn g' (getFitness keep))
+
 prependLabel :: String -> Test -> Test
 prependLabel label t = TestLabel label t
 
@@ -139,4 +165,5 @@ tests = TestList
   , prependLabel "store-import-invalid"  test_import_invalid
   , prependLabel "store-merge"           test_merge
   , prependLabel "store-merge-roundtrip" test_merge_roundtrip
+  , prependLabel "store-stale-canon"     test_import_stale_canonicalizes
   ]

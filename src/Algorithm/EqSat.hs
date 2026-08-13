@@ -107,6 +107,57 @@ recalculateBest costFun eid =
                              else d
                     in d' `seq` cm' `seq` (d', cm')
 
+-- | Recompute every e-class's cost-minimal @_best@/_cost@ bottom-up and write
+-- it back into the graph. Needed after loading a graph whose best/cost were
+-- not persisted (e.g. via srtree-db), where @_best@ may otherwise hold an
+-- arbitrary (potentially large) e-node.
+recalculateBestAll :: Monad m => CostFun -> EGraphST m ()
+recalculateBestAll costFun = do
+  classes <- gets _eClass
+  let bests = fixpoint classes IntMap.empty
+  modify' $ over eClass (IntMap.mapWithKey $ \eid ec ->
+    case IntMap.lookup eid bests of
+      Nothing -> ec
+      Just (c, en) -> ec { _info = (_info ec) { _cost = c, _best = en } })
+  where
+    nodeCost :: IntMap (Int, ENode) -> ENode -> (Int, ENode)
+    nodeCost cm en =
+      let cc = [ maybe costSentinel fst (IntMap.lookup cid cm) | cid <- eChildren en ]
+          c  = case en of
+                 ENAry op _ -> costFun (Bin (toOp op) 0 0) + sum cc
+                 _          -> costFun (replaceChildren cc (fromENode en)) + sum cc
+      in (c, en)
+    costSentinel :: Int
+    costSentinel = 1000000
+
+    fixpoint :: IntMap EClass -> IntMap (Int, ENode) -> IntMap (Int, ENode)
+    fixpoint classes0 = go (IntMap.keysSet classes0)
+      where
+        go dirty m
+          | IntSet.null dirty = m
+          | otherwise = go dirty' m'
+          where
+            (dirty', m') = IntSet.foldl' step (IntSet.empty, m) dirty
+            step (d, cm) eid = case IntMap.lookup eid classes0 of
+              Nothing -> (d, cm)
+              Just ecl ->
+                let current = IntMap.lookup eid cm
+                    minNode = Set.foldl' (\acc en -> let c = nodeCost cm en
+                                                     in case acc of
+                                                          Nothing  -> Just c
+                                                          Just c'  -> Just (if fst c <= fst c' then c else c'))
+                                         Nothing (_eNodes ecl)
+                    (changed, cm') = case (current, minNode) of
+                      (_, Nothing)        -> (False, cm)
+                      (Nothing, Just new) -> (True, IntMap.insert eid new cm)
+                      (Just old, Just new)
+                        | fst old <= fst new -> (False, cm)
+                        | otherwise          -> (True, IntMap.insert eid new cm)
+                    d' = if changed
+                         then Set.foldl' (\acc (pid, _) -> IntSet.insert pid acc) d (_parents ecl)
+                         else d
+                in d' `seq` cm' `seq` (d', cm')
+
 -- | replaces the equality rules with two one-way rules
 replaceEqRules :: Rule -> [Rule]
 replaceEqRules (p1 :=> p2)  = [p1 :=> p2]

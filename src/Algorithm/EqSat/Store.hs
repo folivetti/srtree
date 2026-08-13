@@ -61,10 +61,35 @@ exportEGraph eg = GraphRows
     toRow ec = EClassRow (_eNodes ec) (_parents ec) (_height ec) (_info ec)
 
 -- | Reconstruct an e-graph from normalised rows, rebuilding all derived indexes.
+--
+-- Real e-graphs may carry stale @_eNodeToEClass@ entries left behind by
+-- merges (a node pointing at a class whose canonical representative is
+-- another class). Such entries are canonicalized at import: node -> class
+-- values are routed through the canonical map and any non-root class rows
+-- are dropped. Parent pointers are recomputed from the canonicalized node
+-- map so they never reference dead classes.
 importEGraph :: GraphRows -> Either String EGraph
 importEGraph rows
   | not (validate rows) = Left (validationMsg rows)
-  | otherwise           = Right (runIdentity $ execStateT rebuildDBs (buildCore rows))
+  | otherwise           = Right (runIdentity $ execStateT rebuildDBs (buildCore (canonicalize rows)))
+
+-- | Normalize stale rows: route node->class values through the canonical map
+-- and drop non-root class rows.
+canonicalize :: GraphRows -> GraphRows
+canonicalize rows =
+  let canon    = _grCanonical rows
+      rep eid  = IntMap.findWithDefault eid eid canon
+      nodeMap' = HashMap.map rep (_grENodeToEClass rows)
+      classes' = IntMap.filterWithKey
+                   (\eid _ -> IntMap.lookup eid canon == Just eid)
+                   (_grEClasses rows)
+      parents' = IntMap.fromListWith Set.union
+        [ (c, Set.singleton (eid, en))
+        | (en, eid) <- HashMap.toList nodeMap'
+        , c <- eChildren en ]
+      fixRow eid r = r { _rcParents = IntMap.findWithDefault Set.empty eid parents' }
+  in rows { _grENodeToEClass = nodeMap'
+          , _grEClasses      = IntMap.mapWithKey fixRow classes' }
 
 buildCore :: GraphRows -> EGraph
 buildCore rows = EGraph
@@ -100,6 +125,11 @@ rebuildDBs = do
                         . over (eDB . sizeDLDB) (IntMap.insertWith RangeSet.union sz (RangeSet.singleton (dn, eid)))
 
 -- | Validate that the exported rows form a consistent graph.
+--
+-- All referenced ids must be present in the canonical map. Node -> class
+-- values and class rows may reference classes that are not their own
+-- canonical representative (stale entries left behind by merges); those are
+-- repaired by 'canonicalize' during import.
 validate :: GraphRows -> Bool
 validate rows =
   let canon      = _grCanonical rows
@@ -109,18 +139,14 @@ validate rows =
                    ++ HashMap.elems (_grENodeToEClass rows)
                    ++ concatMap eChildren nodeIds
       inCanon    = all (`IntMap.member` canon) extraIds
-      rootsOk    = all (\eid -> IntMap.lookup eid canon == Just eid) (IntMap.keys classes)
-      valuesOk   = all (\eid -> IntMap.lookup eid canon == Just eid) (HashMap.elems (_grENodeToEClass rows))
       nextOk     = _grNextId rows >= 0
-  in inCanon && rootsOk && valuesOk && nextOk
+  in inCanon && nextOk
 
 validationMsg :: GraphRows -> String
 validationMsg rows
-  | not inCanon  = "some e-node/e-class id is not present in the canonical map"
-  | not rootsOk  = "some e-class is not its own canonical representative"
-  | not valuesOk = "some e-node maps to a non-canonical e-class"
-  | not nextOk   = "next id is negative"
-  | otherwise    = "invalid GraphRows"
+  | not inCanon = "some e-node/e-class id is not present in the canonical map"
+  | not nextOk  = "next id is negative"
+  | otherwise   = "invalid GraphRows"
   where
     canon      = _grCanonical rows
     classes    = _grEClasses rows
@@ -129,8 +155,6 @@ validationMsg rows
                  ++ HashMap.elems (_grENodeToEClass rows)
                  ++ concatMap eChildren nodeIds
     inCanon    = all (`IntMap.member` canon) extraIds
-    rootsOk    = all (\eid -> IntMap.lookup eid canon == Just eid) (IntMap.keys classes)
-    valuesOk   = all (\eid -> IntMap.lookup eid canon == Just eid) (HashMap.elems (_grENodeToEClass rows))
     nextOk     = _grNextId rows >= 0
 
 -- | Return canonical e-class ids ordered children-before-parents (ascending height).
