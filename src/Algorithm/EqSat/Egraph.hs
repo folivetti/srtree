@@ -4,6 +4,7 @@
 {-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Algorithm.EqSat.Egraph
@@ -25,7 +26,10 @@ import Control.Lens (element, makeLenses, view, over, (&), (+~), (-~), (.~), (^.
 import Data.List ( intercalate, foldl' )
 import Control.Monad (forM)
 import Control.Monad.State.Strict hiding ( get, put )
+import Control.Monad.IO.Class (MonadIO(..))
+import Data.Functor.Identity (Identity)
 import GHC.Stack (HasCallStack)
+import System.Random (StdGen)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import Data.Map.Strict (Map)
@@ -132,11 +136,26 @@ getGreatest :: Ord a => RangeTree a -> Maybe (a, EClassId)
 getGreatest = RangeSet.lookupMax
 {-# INLINE getGreatest #-}
 
+-- | Handle to an external, lazily paged e-class store (provided by the
+-- storage layer, e.g. srtree-db's 'PageStore'). An 'EGraph' carries one when
+-- e-classes are backed by a database; the IO actions fetch / persist /
+-- evict a single e-class page. 'Nothing' keeps the classic fully-resident
+-- behaviour.
+data EClassPageStore = EClassPageStore
+  { cpsLookup :: EClassId -> IO (Maybe EClass)
+  , cpsInsert :: EClass -> IO ()
+  , cpsDelete :: EClassId -> IO ()
+  , cpsFlush  :: IO ()                      -- ^ write back all pending dirty pages
+  , cpsAll    :: IO [EClass]                -- ^ all e-classes currently in the store
+  , cpsKeys   :: IO [EClassId]              -- ^ all e-class ids currently in the store
+  }
+
 data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId   -- maps an e-class id to its canonical form
                      , _eNodeToEClass :: HashMap ENode EClassId    -- maps an e-node to its e-class id
-                     , _eClass        :: ClassIdMap EClass     -- maps an e-class id to its e-class data
+                     , _eClass        :: ClassIdMap EClass     -- maps an e-class id to its e-class data (resident cache)
                      , _eDB           :: EGraphDB
-                     } deriving (Show, Generic)
+                     , _classStore    :: Maybe EClassPageStore -- optional lazily paged store for _eClass
+                     }
 
 data EGraphDB = EDB { _worklist      :: HashSet (EClassId, ENode)      -- e-nodes and e-class schedule for analysis
                     , _analysis      :: HashSet (EClassId, ENode)      -- e-nodes and e-class that changed data
@@ -241,7 +260,11 @@ instance Binary EGraphDB where
   put (EDB w a r p f d s sf sdl u n c _) =
     put w >> put a >> put r >> put p >> put f >> put d >> put s >> put sf >> put sdl >> put u >> put n >> put c
   get = EDB <$> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> pure True
-instance Binary EGraph
+-- Custom: the wire format omits `_classStore` (a runtime handle to the paged
+-- store, never serialized); it decodes to Nothing.
+instance Binary EGraph where
+  put (EGraph c n e d _) = put c >> put n >> put e >> put d
+  get = EGraph <$> get <*> get <*> get <*> get <*> pure Nothing
 
 instance Eq EClassData where
   EData c1 b1 cs1 ft1 dl1 _ s1 == EData c2 b2 cs2 ft2 dl2 _ s2 = c1==c2 && b1==b2 && cs1==cs2 && ft1==ft2 && dl1==dl2 && s1==s2
@@ -263,11 +286,179 @@ makeLenses ''EClass
 makeLenses ''EClassData
 makeLenses ''EGraphDB
 
+-- * Paged e-class access
+
+-- | A monad that can serve e-class data.
+--
+-- The pure instances ('Identity', 'State StdGen') serve classes from the
+-- resident @_eClass@ map; the 'MonadIO' instance consults the optional
+-- 'EClassPageStore' when the graph carries one, falling back to the resident
+-- map otherwise. All e-class read/write goes through these accessors, which
+-- are the single choke point for a paged (out-of-core) e-graph.
+class Monad m => ClassStore m where
+  lookupClass :: EClassId -> EGraphST m (Maybe EClass)
+  getClass    :: HasCallStack => EClassId -> EGraphST m EClass
+  insertClass :: EClass -> EGraphST m ()
+  deleteClass :: EClassId -> EGraphST m ()
+  adjustClass :: EClassId -> (EClass -> EClass) -> EGraphST m ()
+  -- | Enumerate every e-class (ids / values) in the graph. Paged graphs stream
+  -- from the store; resident graphs read the full @_eClass@ map.
+  allClasses  :: EGraphST m [EClass]
+  allKeys     :: EGraphST m [EClassId]
+  -- | Read/write a class directly from/to the backing store, bypassing the
+  -- resident LRU cache (and its O(n) 'trimResidentCache'). Bulk single-pass
+  -- traversals such as 'recalculateBestAllStream' must use these: routing every
+  -- one of ~n classes through 'lookupClass'/'insertClass' inserts each into the
+  -- resident map and calls 'trimResidentCache' (a full O(n) rebuild) after each
+  -- write, degenerating to O(n^2) and never terminating at scale.
+  readDirect  :: EClassId -> EGraphST m (Maybe EClass)
+  writeDirect :: EClass -> EGraphST m ()
+  allClasses  = gets (IntMap.elems . _eClass)
+  allKeys     = gets (IntMap.keys . _eClass)
+  readDirect  = lookupClass
+  writeDirect = insertClass
+
+-- Resident-map implementations (used by every pure monad) ------------------
+
+pureLookupClass :: Monad m => EClassId -> EGraphST m (Maybe EClass)
+pureLookupClass cid = gets (IntMap.lookup cid . _eClass)
+{-# INLINE pureLookupClass #-}
+
+pureGetClass :: (Monad m, HasCallStack) => EClassId -> EGraphST m EClass
+pureGetClass cid = do
+  m <- pureLookupClass cid
+  case m of
+    Just ec -> pure ec
+    Nothing -> error $ "GETECLASS_MISSING eid=" <> show cid
+{-# INLINE pureGetClass #-}
+
+pureInsertClass :: Monad m => EClass -> EGraphST m ()
+pureInsertClass ec = modify' $ over eClass (IntMap.insert (_eClassId ec) ec)
+{-# INLINE pureInsertClass #-}
+
+pureDeleteClass :: Monad m => EClassId -> EGraphST m ()
+pureDeleteClass cid = modify' $ over eClass (IntMap.delete cid)
+{-# INLINE pureDeleteClass #-}
+
+pureAdjustClass :: Monad m => EClassId -> (EClass -> EClass) -> EGraphST m ()
+pureAdjustClass cid f = modify' $ over eClass (IntMap.adjust f cid)
+{-# INLINE pureAdjustClass #-}
+
+-- | Maximum number of e-classes kept in the resident @_eClass@ cache when the
+-- graph is backed by a paged store. When exceeded, the largest-id classes are
+-- retained and the rest evicted from the resident map. The store remains
+-- authoritative (and Little-data reads fall back to it), so eviction only
+-- bounds memory, never correctness.
+residentClassCap :: Int
+residentClassCap = 50000
+
+-- | Trim the resident @_eClass@ cache to at most 'residentClassCap' entries
+-- by keeping the largest ids. No-op for graphs without a paged store (their
+-- resident map must stay complete for the pure instances).
+trimResidentCache :: Monad m => EGraphST m ()
+trimResidentCache = modify' $ \eg ->
+  case _classStore eg of
+    Nothing -> eg
+    Just _  ->
+      let m = _eClass eg
+          n = IntMap.size m
+      in if n <= residentClassCap
+            then eg
+            else over eClass (const (IntMap.fromList (Prelude.drop (n - residentClassCap) (IntMap.toAscList m)))) eg
+
+instance ClassStore Identity where
+  lookupClass = pureLookupClass
+  getClass    = pureGetClass
+  insertClass = pureInsertClass
+  deleteClass = pureDeleteClass
+  adjustClass = pureAdjustClass
+
+instance ClassStore (State StdGen) where
+  lookupClass = pureLookupClass
+  getClass    = pureGetClass
+  insertClass = pureInsertClass
+  deleteClass = pureDeleteClass
+  adjustClass = pureAdjustClass
+
+-- Any monad that can run IO is potentially paged: the graph's optional
+-- store, when present, is authoritative; otherwise classes come from the
+-- resident map.
+instance {-# OVERLAPPABLE #-} (Monad m, MonadIO m) => ClassStore m where
+  -- The resident map is kept in sync by 'insertClass'/'deleteClass', so it is
+  -- consulted first: repeated reads never touch the store, and a class that
+  -- was evicted from the store's LRU while still dirty is never served stale.
+  lookupClass cid = do
+    eg <- gets id
+    case IntMap.lookup cid (_eClass eg) of
+      Just ec -> pure (Just ec)
+      Nothing -> case _classStore eg of
+                   Nothing -> pure Nothing
+                   Just h  -> liftIO (cpsLookup h cid)
+  getClass cid = do
+    eg <- gets id
+    case IntMap.lookup cid (_eClass eg) of
+      Just ec -> pure ec
+      Nothing -> case _classStore eg of
+                   Nothing -> pureGetClass cid
+                   Just h  -> do
+                     m <- liftIO (cpsLookup h cid)
+                     case m of
+                       Just ec -> do
+                         modify' (over eClass (IntMap.insert cid ec))
+                         trimResidentCache
+                         pure ec
+                       Nothing -> error $ "GETECLASS_MISSING eid=" <> show cid
+  insertClass ec = do
+    eg <- gets id
+    case _classStore eg of
+      Nothing -> pureInsertClass ec
+      Just h  -> do liftIO (cpsInsert h ec)
+                    pureInsertClass ec
+                    trimResidentCache
+  deleteClass cid = do
+    eg <- gets id
+    case _classStore eg of
+      Nothing -> pureDeleteClass cid
+      Just h  -> do liftIO (cpsDelete h cid)
+                    pureDeleteClass cid
+  adjustClass cid f = do
+    eg <- gets id
+    case _classStore eg of
+      Nothing -> pureAdjustClass cid f
+      Just _  -> do
+        m <- lookupClass cid
+        case m of
+          Nothing -> pure ()
+          Just ec -> insertClass (f ec)
+  allClasses = do
+    eg <- gets id
+    case _classStore eg of
+      Nothing -> pure (IntMap.elems (_eClass eg))
+      Just h  -> liftIO (cpsAll h)
+  allKeys = do
+    eg <- gets id
+    case _classStore eg of
+      Nothing -> pure (IntMap.keys (_eClass eg))
+      Just h  -> liftIO (cpsKeys h)
+  -- Bypass the resident cache entirely: read the page straight from the store
+  -- and never insert into the (bounded) resident map, so a bulk traversal over
+  -- every class stays O(n) instead of O(n^2).
+  readDirect cid = do
+    eg <- gets id
+    case _classStore eg of
+      Nothing -> pureLookupClass cid
+      Just h  -> liftIO (cpsLookup h cid)
+  writeDirect ec = do
+    eg <- gets id
+    case _classStore eg of
+      Nothing -> pureInsertClass ec
+      Just h  -> liftIO (cpsInsert h ec)
+
 -- * E-Graph basic supporting functions
 
 -- | returns an empty e-graph
 emptyGraph :: EGraph
-emptyGraph = EGraph IntMap.empty HashMap.empty IntMap.empty emptyDB
+emptyGraph = EGraph IntMap.empty HashMap.empty IntMap.empty emptyDB Nothing
 {-# INLINE emptyGraph #-}
 
 -- | returns an empty e-graph DB
@@ -295,7 +486,7 @@ emptyDBNoTrack = emptyDB{ _trackDBs = False }
 
 -- | an empty e-graph that skips range-DB maintenance (pure simplify mode)
 emptyGraphNoTrack :: EGraph
-emptyGraphNoTrack = EGraph IntMap.empty HashMap.empty IntMap.empty emptyDBNoTrack
+emptyGraphNoTrack = EGraph IntMap.empty HashMap.empty IntMap.empty emptyDBNoTrack Nothing
 {-# INLINE emptyGraphNoTrack #-}
 
 -- | Creates a new e-class from an e-class id, a new e-node,
@@ -420,7 +611,7 @@ normalizeSubDiv = cata alg
 
 -- | Convert a binary SRTree (children as e-class ids) into an e-node,
 -- flattening Add/Mul into canonical ENAry multisets.
-toENode :: (Monad m, HasCallStack) => SRTree EClassId -> EGraphST m ENode
+toENode :: (ClassStore m, HasCallStack) => SRTree EClassId -> EGraphST m ENode
 toENode (Var ix)     = pure (EVar ix)
 toENode (Param ix)   = pure (EParam ix)
 toENode (Const x)    = pure (EConst x)
@@ -433,11 +624,11 @@ toENode n             = error $ "toENode: unsupported node " <> show n
 
 -- | Build a canonical ENAry from child ids: canonicalize children, absorb
 -- nested same-op ENAry children (associativity), sort by key (commutativity).
-mkENary :: (Monad m, HasCallStack) => NOp -> [EClassId] -> EGraphST m ENode
+mkENary :: (ClassStore m, HasCallStack) => NOp -> [EClassId] -> EGraphST m ENode
 mkENary op cids = mkENaryM op (imFromList cids)
 
 -- | Build a canonical ENAry from a canonical multiset of child ids.
-mkENaryM :: (Monad m, HasCallStack) => NOp -> IntMap Int -> EGraphST m ENode
+mkENaryM :: (ClassStore m, HasCallStack) => NOp -> IntMap Int -> EGraphST m ENode
 mkENaryM op m = do
   flat <- IntMap.unionsWith (+) <$> mapM (expandM op) (IntMap.toList m)
   pure (ENAry op flat)
@@ -448,7 +639,7 @@ mkENaryM op m = do
 -- through a class with a single node: if the class were merged with other
 -- nodes (e.g. `{Add[a,b], Mul[x,c]}`) flattening would silently pick one
 -- representative and change the meaning of the term.
-expandM :: (Monad m, HasCallStack) => NOp -> (EClassId, Int) -> EGraphST m (IntMap Int)
+expandM :: (ClassStore m, HasCallStack) => NOp -> (EClassId, Int) -> EGraphST m (IntMap Int)
 expandM op (cid, n) = do
   ec <- getEClass cid
   case Set.toList (_eNodes ec) of
@@ -457,7 +648,7 @@ expandM op (cid, n) = do
 
 -- | Reconstruct a binary Fix SRTree from an e-node, right-folding ENAry
 -- into nested Bin Add/Mul.
-enodeToTree :: (Monad m, HasCallStack) => ENode -> EGraphST m (Fix SRTree)
+enodeToTree :: (ClassStore m, HasCallStack) => ENode -> EGraphST m (Fix SRTree)
 enodeToTree (EVar ix)   = pure (Fix (Var ix))
 enodeToTree (EParam ix) = pure (Fix (Param ix))
 enodeToTree (EConst x)  = pure (Fix (Const x))
@@ -472,15 +663,12 @@ enodeToTree (ENAry op m) = do
 {-# INLINE enodeToTree #-}
 
 -- | gets an e-class with id `c` (auto-canonizes)
-getEClass :: (Monad m, HasCallStack) => EClassId -> EGraphST m EClass
-getEClass c = do c' <- canonical c; gets $ \eg -> case IntMap.lookup c' (_eClass eg) of
-                                   Just ec -> ec
-                                   Nothing -> error $ "GETECLASS_MISSING eid=" <> show c'
-                                             <> " nClasses=" <> show (IntMap.size (_eClass eg))
+getEClass :: (ClassStore m, HasCallStack) => EClassId -> EGraphST m EClass
+getEClass c = do c' <- canonical c; getClass c'
 {-# INLINE getEClass #-}
 
 -- | gets the best expression given the default cost function
-getBestExpr :: (Monad m, HasCallStack) => EClassId -> EGraphST m (Fix SRTree)
+getBestExpr :: (ClassStore m, HasCallStack) => EClassId -> EGraphST m (Fix SRTree)
 getBestExpr eid = do
   best <- (_best . _info) <$> getEClass eid
   enodeToTree best
@@ -491,31 +679,31 @@ trie eid = IntTrie
 {-# INLINE trie #-}
 
 -- | Check whether an e-class is a constant value
-isConst :: Monad m => EClassId -> EGraphST m Bool
+isConst :: ClassStore m => EClassId -> EGraphST m Bool
 isConst eid = do ec <- getEClass eid
                  case (_consts . _info) ec of
                    ConstVal _ -> pure True
                    _          -> pure False
 {-# INLINE isConst #-}
 
-getFitness :: Monad m => EClassId -> EGraphST m (Maybe Double)
+getFitness :: ClassStore m => EClassId -> EGraphST m (Maybe Double)
 getFitness c = (_fitness . _info) <$> getEClass c
 {-# INLINE getFitness #-}
-getTheta :: Monad m => EClassId -> EGraphST m ([Target])
+getTheta :: ClassStore m => EClassId -> EGraphST m ([Target])
 getTheta c = (_theta . _info) <$> getEClass c
 {-# INLINE getTheta #-}
-getSize :: Monad m => EClassId -> EGraphST m Int
+getSize :: ClassStore m => EClassId -> EGraphST m Int
 getSize c = (_size . _info) <$> getEClass c
 {-# INLINE getSize #-}
 isSizeOf :: (Int -> Bool) -> EClass -> Bool
 isSizeOf p = p . _size . _info
 {-# INLINE isSizeOf #-}
-getBestFitness :: Monad m => EGraphST m (Maybe Double)
+getBestFitness :: ClassStore m => EGraphST m (Maybe Double)
 getBestFitness = do
     mbec <- gets (fmap snd . getGreatest . _fitRangeDB . _eDB)
     case mbec of
       Just bec -> (_fitness . _info) <$> getEClass bec
       Nothing  -> pure Nothing
-getDL :: Monad m => EClassId -> EGraphST m (Maybe Double)
+getDL :: ClassStore m => EClassId -> EGraphST m (Maybe Double)
 getDL c = (_dl . _info) <$> getEClass c
 {-# INLINE getDL #-}

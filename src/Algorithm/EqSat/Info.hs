@@ -81,17 +81,17 @@ joinData (EData c1 b1 cn1 fit1 dl1 p1 sz1) (EData c2 b2 cn2 fit2 dl2 p2 sz2) =
     combineConsts x y = error (show x <> " " <> show y)
 
 -- | Fetch consts, cost, and size for all children in a single state traversal
-getChildrenData :: Monad m => [EClassId] -> EGraphST m [(Consts, Cost, Int)]
+getChildrenData :: ClassStore m => [EClassId] -> EGraphST m [(Consts, Cost, Int)]
 getChildrenData ids = do
   ids' <- mapM canonical ids
-  gets $ \eg ->
-    map (\cid -> let ec = _eClass eg IntMap.! cid
-                     d  = _info ec
-                 in (_consts d, _cost d, _size d)) ids'
+  mapM (\cid -> do
+            ec <- getEClass cid
+            let d = _info ec
+            pure (_consts d, _cost d, _size d)) ids'
 {-# INLINE getChildrenData #-}
 
 -- | Calculate e-node data (constant values and cost)
-makeAnalysis :: Monad m => CostFun -> ENode -> EGraphST m EClassData
+makeAnalysis :: ClassStore m => CostFun -> ENode -> EGraphST m EClassData
 makeAnalysis costFun enode =
   do let cs = eChildren enode
      childData <- getChildrenData cs
@@ -110,36 +110,39 @@ makeAnalysis costFun enode =
     costNode (ENAry op _) cs = costFun (Bin (toOp op) 0 0) + sum cs
     costNode _             cs = costFun (replaceChildren cs (fromENode enode))
 
-getChildrenMinHeight :: Monad m => ENode -> EGraphST m Int
+getChildrenMinHeight :: ClassStore m => ENode -> EGraphST m Int
 getChildrenMinHeight enode = do
   let children = eChildren enode
   if null children then pure 0 else do
     children' <- mapM canonical children
-    gets (\eg -> minimum $ map (\ec -> _height $ _eClass eg IntMap.! ec) children')
+    hs <- mapM (fmap _height . getEClass) children'
+    pure (minimum hs)
 
 -- | update the heights of each e-class
 -- won't work if there's no root
-calculateHeights :: Monad m => EGraphST m ()
+calculateHeights :: ClassStore m => EGraphST m ()
 calculateHeights =
   do queue   <- findRootClasses
-     classes <- gets (Prelude.map fst . IntMap.toList . _eClass)
+     classes <- allKeys
      let nClasses = length classes
      forM_ classes (setHeight nClasses) -- set all heights to max possible height (number of e-classes)
      forM_ queue (setHeight 0)          -- set root e-classes height to zero
      go queue (TrueSet.fromList queue) 1    -- next height is 1
   where
+    setHeight :: ClassStore m => Int -> EClassId -> EGraphST m ()
     setHeight x eId' =
       do eId <- canonical eId'
          ec <- getEClass eId
          let ec' = over height (const x) ec
-         modify' $ over eClass (IntMap.insert eId ec')
+         insertClass ec'
 
+    setMinHeight :: ClassStore m => Int -> EClassId -> EGraphST m ()
     setMinHeight x eId' = -- set height to the minimum between current and x
       do eId <- canonical eId'
          h <- _height <$> getEClass eId
          setHeight (min h x) eId
 
-    getChildrenEC :: Monad m => EClassId -> EGraphST m [EClassId]
+    getChildrenEC :: ClassStore m => EClassId -> EGraphST m [EClassId]
     getChildrenEC ec' = do ec <- getEClass ec'
                            pure $ concatMap eChildren (_eNodes ec)
 
@@ -151,7 +154,7 @@ calculateHeights =
          go childrenL (TrueSet.union tabu childrenOf) (h+1) -- move one breadth search style
 
 -- | calculates the cost of a node
-calculateCost :: Monad m => CostFun -> ENode -> EGraphST m Cost
+calculateCost :: ClassStore m => CostFun -> ENode -> EGraphST m Cost
 calculateCost f enode =
   do let cs = eChildren enode
      costs <- traverse (fmap (_cost . _info) . getEClass) cs
@@ -160,7 +163,7 @@ calculateCost f enode =
               _          -> f (replaceChildren costs (fromENode enode))
 
 -- | check whether an e-node evaluates to a const
-calculateConsts :: Monad m => ENode -> EGraphST m Consts
+calculateConsts :: ClassStore m => ENode -> EGraphST m Consts
 calculateConsts enode =
   do let cs = eChildren enode
      consts <- traverse (fmap (_consts . _info) . getEClass) cs
@@ -185,7 +188,7 @@ combineConsts (Bin op l r) = evalOp' l r
     evalOp' (ConstVal x) (ConstVal y) = ConstVal $ evalOp op x y
     evalOp' _            _            = NotConst
 
-insertFitness :: Monad m => EClassId -> Double -> [Target] -> EGraphST m ()
+insertFitness :: ClassStore m => EClassId -> Double -> [Target] -> EGraphST m ()
 insertFitness eId' fit params =
   do eId <- canonical eId'
      tree <- getBestExpr eId
@@ -196,7 +199,7 @@ insertFitness eId' fit params =
      let newInfo = (_info ec){_fitness = Just fit, _theta = params}
          newEc   = ec{_info = newInfo}
          sz = _size newInfo
-     modify' $ over eClass (IntMap.insert eId newEc)
+     insertClass newEc
      case oldFit of
        Nothing -> modify' $ over (eDB . unevaluated) (IntSet.delete eId)
                     . over (eDB . fitRangeDB) (insertRange eId fit)
@@ -205,14 +208,14 @@ insertFitness eId' fit params =
        Just oldVal -> modify' $ over (eDB . fitRangeDB) (insertRange eId fit . removeRange eId oldVal)
                                  . over (eDB . sizeFitDB) (IntMap.adjust (insertRange eId fit . removeRange eId oldVal) sz)
 
-insertDL :: Monad m => EClassId -> Double -> EGraphST m ()
+insertDL :: ClassStore m => EClassId -> Double -> EGraphST m ()
 insertDL eId fit' =
   do let fit = negate fit'
      ec <- getEClass eId
      let sz = _size . _info $ ec
          newInfo = (_info ec){_dl = Just fit'}
          newEc   = ec{_info=newInfo}
-     modify' $ over eClass (IntMap.insert eId newEc)
+     insertClass newEc
      modify' $ over (eDB . dlRangeDB) (insertRange eId fit)
              . over (eDB . sizeDLDB) (IntMap.adjust (insertRange eId fit) sz . IntMap.insertWith RangeSet.union sz RangeSet.empty)
 

@@ -18,6 +18,7 @@ import Algorithm.EqSat (eqSat, applySingleMergeOnlyEqSat)
 import Algorithm.EqSat.Egraph
 import Algorithm.EqSat.DB
   ( ClassOrVar,
+    Condition (Condition),
     NChild (Ch, MapP, Rest),
     Pattern (Fixed, Hole, NAry, VarPat),
     Rule (..),
@@ -32,16 +33,20 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.SRTree
 
-type ConstrFun = Pattern -> Subst -> EGraph -> Bool 
+-- | A constraint over a match's substitution: when applied to a substitution it
+-- runs in the e-graph monad and fetches e-class data through 'ClassStore', so it
+-- works on a paged (out-of-core) graph whose resident cache is bounded/empty.
+type ConstrFun = Pattern -> Condition
 
-constrainOnVal :: (Consts -> Bool) -> Pattern -> Subst -> EGraph -> Bool 
-constrainOnVal f (VarPat c) subst eg =
+constrainOnVal :: (Consts -> Bool) -> Pattern -> Condition
+constrainOnVal f (VarPat c) = Condition $ \subst -> do
     let cid = getInt $ case Map.lookup (Right (fromEnum c)) subst of
                         Nothing -> error $ "CONSTRAINVAL_MISSING var=" <> show (fromEnum c) <> " substSize=" <> show (Map.size subst)
                         Just (SVOne v) -> v
                         Just (SVMap _) -> error $ "CONSTRAINVAL_REST_AS_SINGLE var=" <> show (fromEnum c)
-     in f (_consts . _info $ _eClass eg IM.! cid)
-constrainOnVal _ _ _ _ = False 
+    ec <- getEClass cid
+    pure (f (_consts . _info $ ec))
+constrainOnVal _ _ = Condition $ \_ -> pure False
 
 -- TODO: aux functions to avoid repeated pattern in constraint creation 
 --
@@ -107,12 +112,14 @@ restEidsOf c subst = case Map.lookup (Right (fromEnum c)) subst of
                        _              -> []
 
 -- | every e-class bound to a rest variable holds a valid value
-allValidRest :: Char -> Subst -> EGraph -> Bool
-allValidRest c subst eg = all validEid (restEidsOf c subst)
-  where
-    validEid eid = case _consts . _info $ _eClass eg IM.! eid of
+allValidRest :: Char -> Condition
+allValidRest c = Condition $ \subst -> do
+    let eids = restEidsOf c subst
+        validEid eid = getEClass eid >>= \ec ->
+            pure $ case _consts . _info $ ec of
                      ConstVal x -> not (isNaN x || isInfinite x)
                      _          -> True
+    and <$> mapM validEid eids
 
 -- basic algebraic rules
 rewriteBasic :: [Rule]
@@ -273,5 +280,5 @@ simplifyEqSat :: [Rule] -> CostFun -> Int -> Fix SRTree -> Fix SRTree
 simplifyEqSat rwrts costFun it t = eqSat t rwrts costFun it `evalState` emptyGraph
 
 -- | apply a single step of merge-only using default rules
-applyMergeOnlyDftl :: Monad m => CostFun -> EGraphST m ()
+applyMergeOnlyDftl :: ClassStore m => CostFun -> EGraphST m ()
 applyMergeOnlyDftl costFun = applySingleMergeOnlyEqSat costFun rewrites

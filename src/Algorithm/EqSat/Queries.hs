@@ -27,31 +27,34 @@ import Control.Lens ( over )
 import Data.Maybe
 import Data.SRTree (childrenOf)
 
-getEClassesThat :: Monad m => (EClass -> Bool) -> EGraphST m [EClassId]
+getEClassesThat :: ClassStore m => (EClass -> Bool) -> EGraphST m [EClassId]
 getEClassesThat p = do
-    gets (map fst . filter (\(ecId, ec) -> p ec) . IntMap.toList . _eClass)
+    classes <- allClasses
+    pure [ _eClassId ec | ec <- classes, p ec ]
 
-updateFitness :: Monad m => Double -> EClassId -> EGraphST m ()
+updateFitness :: ClassStore m => Double -> EClassId -> EGraphST m ()
 updateFitness f ecId = do
    ec   <- getEClass ecId
    let info = _info ec
-   modify' $ over eClass (IntMap.insert ecId ec{_info=info{_fitness = Just f}})
+   insertClass ec{_info=info{_fitness = Just f}}
 
 -- | returns all the root e-classes (e-class without parents)
-findRootClasses :: Monad m => EGraphST m [EClassId]
-findRootClasses = gets (Prelude.map fst . Prelude.filter isParent . IntMap.toList . _eClass)
+findRootClasses :: ClassStore m => EGraphST m [EClassId]
+findRootClasses = do
+    classes <- allClasses
+    pure [ _eClassId ec | ec <- classes, isParent (_eClassId ec, ec) ]
   where
     isParent (k, v) = Prelude.null (_parents v) ||  (k `Set.member` (Set.map fst (_parents v)))
 
 -- | returns the e-class id with the best fitness that
 -- is true to a predicate
-getTopECLassThat :: Monad m => Bool -> Int -> (EClass -> Bool) -> EGraphST m [EClassId]
+getTopECLassThat :: ClassStore m => Bool -> Int -> (EClass -> Bool) -> EGraphST m [EClassId]
 getTopECLassThat b n p = do
   let f = if b then _fitRangeDB else _dlRangeDB
   gets (f . _eDB)
     >>= go n []
   where
-    go :: Monad m => Int -> [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
+    go :: ClassStore m => Int -> [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
     go 0 bests rt = pure bests
     go m bests rt = case RangeSet.maxView rt of
                        Nothing -> pure bests
@@ -65,7 +68,7 @@ getTopECLassThat b n p = do
                                    then go (m-1) (ecId:bests) t
                                    else go m bests t
 
-getTopEClassInRange :: Monad m => Bool -> Int -> (EClass -> Double) -> [(Double, Double)] -> EGraphST m [EClassId]
+getTopEClassInRange :: ClassStore m => Bool -> Int -> (EClass -> Double) -> [(Double, Double)] -> EGraphST m [EClassId]
 getTopEClassInRange b n p range = do
   let f = if b then _fitRangeDB else _dlRangeDB
   gets (f . _eDB)
@@ -77,7 +80,7 @@ getTopEClassInRange b n p range = do
       | v > y = 1
       | otherwise = 1 
 
-    go :: Monad m => Int -> [EClassId] -> [(Double, Double)] -> RangeTree Double -> EGraphST m [EClassId]
+    go :: ClassStore m => Int -> [EClassId] -> [(Double, Double)] -> RangeTree Double -> EGraphST m [EClassId]
     go _ bests []      _ = pure bests 
     go 0 bests (r:rs) rt = go n bests rs rt
     go m bests (r:rs) rt = case RangeSet.maxView rt of
@@ -94,14 +97,14 @@ getTopEClassInRange b n p range = do
                                                  -1 -> go n bests rs (RangeSet.insert y t)
                                                  1  -> go m bests (r:rs) t
 
-getTopECLassIn :: Monad m => Bool -> Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
+getTopECLassIn :: ClassStore m => Bool -> Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
 getTopECLassIn b n p ecs' = do
   let f = if b then _fitRangeDB else _dlRangeDB
   gets (f . _eDB)
     >>= go n []
   where
     ecs = Set.fromList ecs'
-    go :: Monad m => Int -> [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
+    go :: ClassStore m => Int -> [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
     go 0 bests rt = pure bests
     go m bests rt = case RangeSet.maxView rt of
                        Nothing -> pure bests
@@ -115,7 +118,7 @@ getTopECLassIn b n p ecs' = do
                                    then go (m-1) (ecId:bests) t
                                    else go m bests t
 
-getTopECLassNotIn :: Monad m => Bool -> Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
+getTopECLassNotIn :: ClassStore m => Bool -> Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
 getTopECLassNotIn b n p ecs' = do
   let f = if b then _fitRangeDB else _dlRangeDB
   gets (f . _eDB)
@@ -123,7 +126,7 @@ getTopECLassNotIn b n p ecs' = do
   where
     ecs = Set.fromList ecs'
 
-    go :: Monad m => Int -> [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
+    go :: ClassStore m => Int -> [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
     go 0 bests rt = pure bests
     go m bests rt = case RangeSet.maxView rt of
                        Nothing -> pure bests
@@ -137,12 +140,12 @@ getTopECLassNotIn b n p ecs' = do
                                    then go (m-1) (ecId:bests) t
                                    else go m bests t
 
-getAllEvaluatedEClasses :: Monad m => EGraphST m [EClassId]
+getAllEvaluatedEClasses :: ClassStore m => EGraphST m [EClassId]
 getAllEvaluatedEClasses = do
   gets (_fitRangeDB . _eDB)
     >>= go []
   where
-    go :: Monad m => [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
+    go :: ClassStore m => [EClassId] -> RangeTree Double -> EGraphST m [EClassId]
     go bests rt = case RangeSet.maxView rt of
                     Nothing -> pure bests
                     Just (y, t) ->
@@ -164,17 +167,17 @@ getTopEClassWithSize b sz n = do
                              Nothing         -> bests
                              Just ((f, x), t) -> if isInfinite f || isNaN f then go m bests (Just t) else go (m-1) (x:bests) (Just t)
 
-getTopFitEClassThat :: Monad m => Int -> (EClass -> Bool) -> EGraphST m [EClassId]
+getTopFitEClassThat :: ClassStore m => Int -> (EClass -> Bool) -> EGraphST m [EClassId]
 getTopFitEClassThat  = getTopECLassThat True
-getTopDLEClassThat :: Monad m => Int -> (EClass -> Bool) -> EGraphST m [EClassId]
+getTopDLEClassThat :: ClassStore m => Int -> (EClass -> Bool) -> EGraphST m [EClassId]
 getTopDLEClassThat   = getTopECLassThat False
-getTopFitEClassIn :: Monad m =>  Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
+getTopFitEClassIn :: ClassStore m =>  Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
 getTopFitEClassIn    = getTopECLassIn True
-getTopDLEClassIn :: Monad m => Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
+getTopDLEClassIn :: ClassStore m => Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
 getTopDLEClassIn     = getTopECLassIn False
-getTopFitEClassNotIn :: Monad m => Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
+getTopFitEClassNotIn :: ClassStore m => Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
 getTopFitEClassNotIn = getTopECLassNotIn True
-getTopDLEClassNotIn :: Monad m => Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
+getTopDLEClassNotIn :: ClassStore m => Int -> (EClass -> Bool) -> [EClassId] -> EGraphST m [EClassId]
 getTopDLEClassNotIn  = getTopECLassNotIn False
 getTopFitEClassWithSize :: Monad m => Int -> Int -> EGraphST m [EClassId]
 getTopFitEClassWithSize = getTopEClassWithSize True

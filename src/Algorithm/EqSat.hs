@@ -32,7 +32,7 @@ import Data.Maybe (mapMaybe)
 import Data.SRTree
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as Set
-import Control.Monad ( zipWithM )
+import Control.Monad ( zipWithM, forM_ )
 
 -- | The `Scheduler` stores a map with the banned iterations of a certain rule . 
 -- TODO: make it more customizable.
@@ -42,7 +42,7 @@ type Scheduler a = State (IntMap Int) a
 -- | runs equality saturation from an expression tree,
 -- a given set of rules, and a cost function.
 -- Returns the tree with the smallest cost.
-eqSat :: Monad m => Fix SRTree -> [Rule] -> CostFun -> Int -> EGraphST m (Fix SRTree)
+eqSat :: ClassStore m => Fix SRTree -> [Rule] -> CostFun -> Int -> EGraphST m (Fix SRTree)
 eqSat expr rules costFun maxIt =
     do root <- fromTree costFun expr
        _ <- runEqSat costFun rules maxIt
@@ -51,10 +51,11 @@ eqSat expr rules costFun maxIt =
 type CostMap = Map EClassId (Int, Fix SRTree)
 
 -- | recalculates the costs with a new cost function
-recalculateBest :: Monad m => CostFun -> EClassId -> EGraphST m (Fix SRTree)
+recalculateBest :: ClassStore m => CostFun -> EClassId -> EGraphST m (Fix SRTree)
 recalculateBest costFun eid =
-    do classes <- gets _eClass
-       let costs = fillUpCosts classes Map.empty
+    do ecls <- allClasses
+       let classes = IntMap.fromList [(_eClassId ec, ec) | ec <- ecls]
+           costs   = fillUpCosts classes Map.empty
        eid' <- canonical eid
        case Map.lookup eid' costs of
          Just (_, t) -> pure t
@@ -111,14 +112,15 @@ recalculateBest costFun eid =
 -- it back into the graph. Needed after loading a graph whose best/cost were
 -- not persisted (e.g. via srtree-db), where @_best@ may otherwise hold an
 -- arbitrary (potentially large) e-node.
-recalculateBestAll :: Monad m => CostFun -> EGraphST m ()
+recalculateBestAll :: ClassStore m => CostFun -> EGraphST m ()
 recalculateBestAll costFun = do
-  classes <- gets _eClass
-  let bests = fixpoint classes IntMap.empty
-  modify' $ over eClass (IntMap.mapWithKey $ \eid ec ->
-    case IntMap.lookup eid bests of
-      Nothing -> ec
-      Just (c, en) -> ec { _info = (_info ec) { _cost = c, _best = en } })
+  ecls <- allClasses
+  let classes = IntMap.fromList [(_eClassId ec, ec) | ec <- ecls]
+      bests = fixpoint classes IntMap.empty
+  forM_ (IntMap.toList bests) $ \(eid, (c, en)) ->
+    case IntMap.lookup eid classes of
+      Nothing -> pure ()
+      Just ec -> writeDirect ec { _info = (_info ec) { _cost = c, _best = en } }
   where
     nodeCost :: IntMap (Int, ENode) -> ENode -> (Int, ENode)
     nodeCost cm en =
@@ -155,8 +157,119 @@ recalculateBestAll costFun = do
                         | otherwise          -> (True, IntMap.insert eid new cm)
                     d' = if changed
                          then Set.foldl' (\acc (pid, _) -> IntSet.insert pid acc) d (_parents ecl)
-                         else d
-                in d' `seq` cm' `seq` (d', cm')
+                          else d
+                 in d' `seq` cm' `seq` (d', cm')
+
+-- | Like 'recalculateBestAll' but streamed: each e-class body is fetched on
+-- demand through 'ClassStore' (so a paged graph never materializes every body
+-- at once) and only the small @(cost, best e-node)@ map is kept resident. The
+-- structural worklist fixpoint is identical.
+recalculateBestAllStream :: ClassStore m => CostFun -> EGraphST m ()
+recalculateBestAllStream costFun = do
+  ids <- allKeys
+  let idSet = IntSet.fromList ids
+      costSentinel = 1000000
+      nodeCost cm en =
+        let cc = [ maybe costSentinel fst (IntMap.lookup cid cm) | cid <- eChildren en ]
+            c  = case en of
+                   ENAry op _ -> costFun (Bin (toOp op) 0 0) + sum cc
+                   _          -> costFun (replaceChildren cc (fromENode en)) + sum cc
+        in (c, en)
+      stepEid cm eid = do
+        mec <- readDirect eid
+        case mec of
+          Nothing -> pure (IntSet.empty, cm)
+          Just ecl -> do
+            let current = IntMap.lookup eid cm
+                minNode = Set.foldl' (\acc en -> let c = nodeCost cm en
+                                                 in case acc of
+                                                      Nothing  -> Just c
+                                                      Just c'  -> Just (if fst c <= fst c' then c else c'))
+                                    Nothing (_eNodes ecl)
+                (changed, cm') = case (current, minNode) of
+                  (_, Nothing)        -> (False, cm)
+                  (Nothing, Just new) -> (True, IntMap.insert eid new cm)
+                  (Just old, Just new)
+                    | fst old <= fst new -> (False, cm)
+                    | otherwise          -> (True, IntMap.insert eid new cm)
+                dirty = if changed
+                          then Set.foldl' (\acc (pid, _) -> IntSet.insert pid acc) IntSet.empty (_parents ecl)
+                          else IntSet.empty
+            pure (dirty, cm')
+      fixpoint dirty cm
+        | IntSet.null dirty = pure cm
+        | otherwise = go (IntSet.toList dirty) IntSet.empty cm
+        where
+          go [] d acc = fixpoint d acc
+          go (e : es) d acc = do
+            (d', m') <- stepEid acc e
+            go es (IntSet.union d d') m'
+  cm <- fixpoint idSet IntMap.empty
+  forM_ (IntMap.toList cm) $ \(eid, (c, en)) -> do
+    mec <- readDirect eid
+    case mec of
+      Nothing -> pure ()
+      Just ec -> writeDirect ec { _info = (_info ec) { _cost = c, _best = en } }
+
+-- | Streaming variant of 'recalculateBest': computes the cost-minimal tree for a
+-- single root without materializing every e-class body at once.
+recalculateBestStream :: ClassStore m => CostFun -> EClassId -> EGraphST m (Fix SRTree)
+recalculateBestStream costFun eid = do
+  ids <- allKeys
+  let idSet = IntSet.fromList ids
+      costSentinel = 1000000
+      nodeCost cm en =
+        let (cc, nc) = unzip [ maybe (costSentinel, Fix (Const 0)) id (Map.lookup cid cm) | cid <- eChildren en ]
+            c  = case en of
+                   ENAry op _ -> costFun (Bin (toOp op) 0 0)
+                   _          -> costFun (replaceChildren cc (fromENode en))
+        in (c + sum cc, Fix $ case en of
+               ENAry op _ -> unfix (naryTree op nc)
+               _          -> replaceChildren nc (fromENode en))
+      stepEid cm eid' = do
+        mec <- lookupClass eid'
+        case mec of
+          Nothing -> pure (IntSet.empty, cm)
+          Just ecl -> do
+            let current = Map.lookup eid' cm
+                minCost = Set.foldl' (\acc en -> let c = nodeCost cm en
+                                                 in case acc of
+                                                      Nothing -> Just c
+                                                      Just c' -> Just (if fst c <= fst c' then c else c'))
+                                   Nothing (_eNodes ecl)
+                (changed, cm') = case (current, minCost) of
+                  (_, Nothing) -> (False, cm)
+                  (Nothing, Just new) -> (True, Map.insert eid' new cm)
+                  (Just old, Just new)
+                    | fst old <= fst new -> (False, cm)
+                    | otherwise -> (True, Map.insert eid' new cm)
+                dirty = if changed
+                          then Set.foldl' (\acc (pid,_) -> IntSet.insert pid acc) IntSet.empty (_parents ecl)
+                          else IntSet.empty
+            pure (dirty, cm')
+      fixpoint dirty cm
+        | IntSet.null dirty = pure cm
+        | otherwise = go (IntSet.toList dirty) IntSet.empty cm
+        where
+          go [] d acc = fixpoint d acc
+          go (e : es) d acc = do
+            (d', m') <- stepEid acc e
+            go es (IntSet.union d d') m'
+  cm <- fixpoint idSet Map.empty
+  eid' <- canonical eid
+  case Map.lookup eid' cm of
+    Just (_, t) -> pure t
+    Nothing -> error $ "EQSAT_RECALC_MISSING eid=" <> show eid'
+                     <> " costSize=" <> show (Map.size cm)
+
+-- | Run equality saturation and stream the final extraction (see
+-- 'recalculateBestStream'), so a paged graph is never fully materialized.
+eqSatStream :: ClassStore m => Fix SRTree -> [Rule] -> CostFun -> Int -> EGraphST m (Fix SRTree)
+eqSatStream expr rules costFun maxIt = do
+  root <- fromTree costFun expr
+  _ <- runEqSat costFun rules maxIt
+  recalculateBestAllStream costFun
+  recalculateBestStream costFun root
 
 -- | replaces the equality rules with two one-way rules
 replaceEqRules :: Rule -> [Rule]
@@ -172,7 +285,7 @@ compileSource r = if hasNAry (source r)
                     else Just (compileToQuery (source r))
 
 -- | run equality saturation for a number of iterations
-runEqSat :: Monad m => CostFun -> [Rule] -> Int -> EGraphST m (Bool, Int)
+runEqSat :: ClassStore m => CostFun -> [Rule] -> Int -> EGraphST m (Bool, Int)
 runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
     where
         rules' = concatMap replaceEqRules rules
@@ -217,7 +330,7 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
                       else throttle (it-1) sch compiled
 
 -- | apply a single step of merge-only equality saturation
-applySingleMergeOnlyEqSat :: Monad m => CostFun -> [Rule] -> EGraphST m ()
+applySingleMergeOnlyEqSat :: ClassStore m => CostFun -> [Rule] -> EGraphST m ()
 applySingleMergeOnlyEqSat costFun rules =
   do let matchSch        = matchWithScheduler 10
          matchAll        = zipWithM matchSch [0..]

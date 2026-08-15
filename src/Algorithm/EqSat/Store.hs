@@ -8,6 +8,7 @@ module Algorithm.EqSat.Store
   , exportEGraph
   , importEGraph
   , mergeEGraph
+  , rebuildDBs
   ) where
 
 import Control.Lens ( over )
@@ -75,6 +76,12 @@ importEGraph rows
 
 -- | Normalize stale rows: route node->class values through the canonical map
 -- and drop non-root class rows.
+--
+-- Parent pointers come from the stored @_rcParents@ when a class has any
+-- (e.g. after a storage-layer round-trip through the @parent@ table); parent
+-- class ids are routed through the canonical map so they never reference dead
+-- classes. Classes without stored parents (legacy rows, hand-built rows) fall
+-- back to recomputing parents from the canonicalized node map.
 canonicalize :: GraphRows -> GraphRows
 canonicalize rows =
   let canon    = _grCanonical rows
@@ -87,7 +94,14 @@ canonicalize rows =
         [ (c, Set.singleton (eid, en))
         | (en, eid) <- HashMap.toList nodeMap'
         , c <- eChildren en ]
-      fixRow eid r = r { _rcParents = IntMap.findWithDefault Set.empty eid parents' }
+      stored'  = IntMap.mapWithKey
+                   (\_ r -> Set.map (\(pEid, pEn) -> (rep pEid, pEn)) (_rcParents r))
+                   classes'
+      fixRow eid r =
+        let stored = IntMap.findWithDefault Set.empty eid stored'
+        in r { _rcParents = if Set.null stored
+                              then IntMap.findWithDefault Set.empty eid parents'
+                              else stored }
   in rows { _grENodeToEClass = nodeMap'
           , _grEClasses      = IntMap.mapWithKey fixRow classes' }
 
@@ -97,6 +111,7 @@ buildCore rows = EGraph
   , _eNodeToEClass    = _grENodeToEClass rows
   , _eClass           = IntMap.mapWithKey mkEClass (_grEClasses rows)
   , _eDB              = (emptyDB){ _nextId = _grNextId rows, _trackDBs = _grTrackDBs rows }
+  , _classStore       = Nothing
   }
   where
     mkEClass eid r = EClass eid (_rcNodes r) (_rcParents r) (_rcHeight r) (_rcInfo r)

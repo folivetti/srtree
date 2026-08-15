@@ -1,5 +1,6 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RankNTypes #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Algorithm.EqSat.EqSatDB
@@ -84,9 +85,12 @@ instance Show Rule where
 -- A Query is a list of Atoms 
 type Query = [Atom]
 
--- A `Condition` is a function that takes a substitution map,
--- an e-graph and returns whether the pattern attends the condition.
-type Condition = Subst -> EGraph -> Bool
+-- | A `Condition` is a predicate over a match's substitution that runs inside
+-- the e-graph monad so it can fetch e-class data through 'ClassStore' (which
+-- streams from a paged store when the graph is out-of-core). The quantification
+-- over the monad is intentional: the same condition works for any 'ClassStore'
+-- instance, including the IO-backed paged store.
+newtype Condition = Condition (forall m. ClassStore m => Subst -> EGraphST m Bool)
 
 -- An Atom is composed of either an e-class id or pattern variable id
 -- and the tree that generated that pattern. Left is e-class id and Right is a VarPat.
@@ -198,7 +202,7 @@ cleanDB = modify' $ over (eDB. patDB) (const Map.empty)
 
 -- | Returns the substitution rules
 -- for every match of the pattern `source` inside the e-graph.
-match :: Monad m => Pattern -> EGraphST m [(Subst, ClassOrVar)]
+match :: ClassStore m => Pattern -> EGraphST m [(Subst, ClassOrVar)]
 match src = if hasNAry src
               then matchNAry src
               else matchCached (compileToQuery src)
@@ -239,13 +243,14 @@ opOf _             = error "opOf: pattern has no operator"
 ruleBudget :: Int
 ruleBudget = 64
 
-matchNAry :: Monad m => Pattern -> EGraphST m [(Subst, ClassOrVar)]
+matchNAry :: ClassStore m => Pattern -> EGraphST m [(Subst, ClassOrVar)]
 matchNAry src = do
   db <- gets (_patDB . _eDB)
   case Map.lookup (opOf src) db of
     Nothing -> pure []
     Just trie -> go (IntMap.keys (_trie trie)) 0 []
   where
+    go :: ClassStore m => [EClassId] -> Int -> [(Subst, ClassOrVar)] -> EGraphST m [(Subst, ClassOrVar)]
     go [] _ acc = pure (reverse acc)
     go _ n acc | n >= ruleBudget = pure (reverse acc)
     go (eid : eids) n acc = do
@@ -256,7 +261,7 @@ matchNAry src = do
 
 -- | Recursively match a pattern against the e-class `eid`, threading a
 -- substitution map, returning every substitution that completes the match.
-recursiveMatch :: Monad m => Pattern -> EClassId -> Subst -> EGraphST m [Subst]
+recursiveMatch :: ClassStore m => Pattern -> EClassId -> Subst -> EGraphST m [Subst]
 recursiveMatch (VarPat c) eid subst =
   pure (bindVar subst (Right (fromEnum c)) eid)
 recursiveMatch Hole _ subst = pure [subst]
@@ -277,7 +282,7 @@ bindVar subst v eid =
 -- | Match a fixed tree pattern against the e-nodes of the e-class `eid`,
 -- returning every substitution that completes the match across all candidate
 -- e-nodes.
-matchFixed :: Monad m => SRTree Pattern -> EClassId -> Subst -> EGraphST m [Subst]
+matchFixed :: ClassStore m => SRTree Pattern -> EClassId -> Subst -> EGraphST m [Subst]
 matchFixed t eid subst = do
   ec <- getEClass eid
   let cands = [n | n <- Set.toList (_eNodes ec), eOpKey n == getOperator t]
@@ -301,7 +306,7 @@ enodeChildren _            = []
 -- | Match an n-ary pattern node against the e-class `eid`: it must contain an
 -- ENAry node of the given op, whose children are matched as a multiset. Every
 -- ENAry node in the class is tried.
-matchNAryNode :: Monad m => NOp -> [NChild] -> EClassId -> Subst -> EGraphST m [Subst]
+matchNAryNode :: ClassStore m => NOp -> [NChild] -> EClassId -> Subst -> EGraphST m [Subst]
 matchNAryNode op ncs eid subst = do
   ec <- getEClass eid
   let nodes = [m | ENAry op' m <- Set.toList (_eNodes ec), op' == op]
@@ -323,10 +328,10 @@ matchNAryNode op ncs eid subst = do
 matchCap :: Int
 matchCap = 64
 
-matchNChildren :: Monad m => [NChild] -> IntMap Int -> Subst -> EGraphST m [Subst]
+matchNChildren :: ClassStore m => [NChild] -> IntMap Int -> Subst -> EGraphST m [Subst]
 matchNChildren ncs children subst = reverse <$> goB ncs children subst matchCap
   where
-    goB :: Monad m => [NChild] -> IntMap Int -> Subst -> Int -> EGraphST m [Subst]
+    goB :: ClassStore m => [NChild] -> IntMap Int -> Subst -> Int -> EGraphST m [Subst]
     goB [] m s _
       | IntMap.null m = pure [s]
       | otherwise     = pure []
@@ -339,11 +344,13 @@ matchNChildren ncs children subst = reverse <$> goB ncs children subst matchCap
       | multiplicity m <= nCh ps = pure []  -- not enough children left
       | otherwise = goC (IntMap.keys m) 0 []
       where
+        goC :: ClassStore m => [EClassId] -> Int -> [Subst] -> EGraphST m [Subst]
         goC [] _ acc = pure acc
         goC _ n acc | n >= b    = pure acc
         goC (c : cs) n acc = do
           ms <- recursiveMatch p c s
           goMs c ms cs n acc
+        goMs :: ClassStore m => EClassId -> [Subst] -> [EClassId] -> Int -> [Subst] -> EGraphST m [Subst]
         goMs c [] cs n acc = goC cs n acc
         goMs c (s' : ms) cs n acc
           | n >= b     = pure acc
