@@ -243,20 +243,31 @@ opOf _             = error "opOf: pattern has no operator"
 ruleBudget :: Int
 ruleBudget = 64
 
+-- | Cap on how many operator-trie root e-classes a single rule may visit per
+-- match. 'ruleBudget' bounds the number of *results* returned, but a rule whose
+-- matches are rare would otherwise still scan every root e-class in the trie
+-- (every @+@/@*@ class in the graph), doing an expensive 'recursiveMatch' per
+-- root -- which blows up on large graphs even though few matches result.
+-- Capping root visits bounds the *search work* independently of the result
+-- count. Sound: we only stop enumerating (fewer) genuine matches early.
+ruleRootVisit :: Int
+ruleRootVisit = 512
+
 matchNAry :: ClassStore m => Pattern -> EGraphST m [(Subst, ClassOrVar)]
 matchNAry src = do
   db <- gets (_patDB . _eDB)
   case Map.lookup (opOf src) db of
     Nothing -> pure []
-    Just trie -> go (IntMap.keys (_trie trie)) 0 []
+    Just trie -> go (IntMap.keys (_trie trie)) 0 0 []
   where
-    go :: ClassStore m => [EClassId] -> Int -> [(Subst, ClassOrVar)] -> EGraphST m [(Subst, ClassOrVar)]
-    go [] _ acc = pure (reverse acc)
-    go _ n acc | n >= ruleBudget = pure (reverse acc)
-    go (eid : eids) n acc = do
+    go :: ClassStore m => [EClassId] -> Int -> Int -> [(Subst, ClassOrVar)] -> EGraphST m [(Subst, ClassOrVar)]
+    go [] _ _ acc = pure (reverse acc)
+    go _ n _ acc | n >= ruleBudget = pure (reverse acc)
+    go (_ : _) _ r acc | r >= ruleRootVisit = pure (reverse acc)
+    go (eid : eids) n r acc = do
       substs <- recursiveMatch src eid Map.empty
       let newMs = take 1 [ (s, Left eid) | s <- substs ]
-      go eids (n + length newMs) (foldr (:) acc newMs)
+      go eids (n + length newMs) (r + 1) (foldr (:) acc newMs)
 {-# INLINE matchNAry #-}
 
 -- | Recursively match a pattern against the e-class `eid`, threading a
