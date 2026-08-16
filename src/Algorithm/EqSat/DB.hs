@@ -23,9 +23,10 @@ import Control.Monad.State
 import GHC.Stack (HasCallStack)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
-import Data.List (delete, intercalate, sortBy)
+import qualified Data.IntSet as IntSet
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.List (sortBy)
 import Data.Maybe (fromMaybe)
 import Data.Ord (comparing)
 import Data.SRTree
@@ -214,7 +215,7 @@ matchCached (q, vars, root) = do
   pure [ (s, case Map.lookup root s of
                Nothing -> error $ "MATCHCACHED_MISSING root=" <> show (getInt root) <> " substSize=" <> show (Map.size s)
                Just v  -> fromSVOne v)
-       | s <- substs, Map.size s > 0 ]
+       | s <- take ruleMatchBudget substs, Map.size s > 0 ]
 {-# INLINE matchCached #-}
 
 -- | True if the pattern (or a nested child) is an n-ary Add/Mul pattern.
@@ -253,18 +254,39 @@ ruleBudget = 64
 ruleRootVisit :: Int
 ruleRootVisit = 512
 
+-- | Cap on how many matches a non-n-ary rule (the cached @genericJoin@ path)
+-- may return per match. The n-ary matcher has 'ruleBudget'; give the cached
+-- path a separate (larger) budget so a single rule cannot flood the iteration.
+ruleMatchBudget :: Int
+ruleMatchBudget = 1024
+
+-- | Match an n-ary pattern against every root e-class of its operator trie.
+--
+-- A persistent per-source set of already-attempted roots ('_seenMatches') lets
+-- the matcher skip roots it has already tried, so the per-rule result/search
+-- budgets keep advancing to *new* roots across the scheduler's ban/unban cycles
+-- instead of re-enumerating the same head of the trie (which starves the tail).
+-- Roots are marked as attempted on the first try ('mark-on-attempt'), whether or
+-- not they yielded a match, so a match that fails 'applyMatch' conditions is not
+-- re-attempted every cycle.
 matchNAry :: ClassStore m => Pattern -> EGraphST m [(Subst, ClassOrVar)]
 matchNAry src = do
   db <- gets (_patDB . _eDB)
   case Map.lookup (opOf src) db of
     Nothing -> pure []
-    Just trie -> go (IntMap.keys (_trie trie)) 0 0 []
+    Just trie -> do
+      seen <- gets (Map.findWithDefault IntSet.empty (show src) . _seenMatches . _eDB)
+      let roots = filter (`IntSet.notMember` seen) (IntMap.keys (_trie trie))
+      go roots 0 0 []
   where
     go :: ClassStore m => [EClassId] -> Int -> Int -> [(Subst, ClassOrVar)] -> EGraphST m [(Subst, ClassOrVar)]
     go [] _ _ acc = pure (reverse acc)
     go _ n _ acc | n >= ruleBudget = pure (reverse acc)
     go (_ : _) _ r acc | r >= ruleRootVisit = pure (reverse acc)
     go (eid : eids) n r acc = do
+      -- mark-on-attempt: remember this root as tried for this rule source
+      modify' $ over (eDB . seenMatches)
+                (Map.insertWith IntSet.union (show src) (IntSet.singleton eid))
       substs <- recursiveMatch src eid Map.empty
       let newMs = take 1 [ (s, Left eid) | s <- substs ]
       go eids (n + length newMs) (r + 1) (foldr (:) acc newMs)

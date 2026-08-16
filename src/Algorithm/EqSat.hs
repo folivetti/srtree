@@ -284,6 +284,15 @@ compileSource r = if hasNAry (source r)
                     then Nothing
                     else Just (compileToQuery (source r))
 
+-- | Cap on the total number of rule matches applied in a single eqsat
+-- iteration. Combined with the per-rule caps ('ruleBudget'/'ruleRootVisit' for
+-- n-ary, 'ruleMatchBudget' for the cached path) and the persistent
+-- mark-on-attempt seen-set (which makes each rule's budget advance to new
+-- matches), this bounds a single iteration's apply/rebuild work regardless of
+-- graph size.
+iterMatchBudget :: Int
+iterMatchBudget = 2000
+
 -- | run equality saturation for a number of iterations
 runEqSat :: ClassStore m => CostFun -> [Rule] -> Int -> EGraphST m (Bool, Int)
 runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
@@ -305,7 +314,10 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
              matches <- mapM (\(rule, cq) -> map (rule,) <$> case cq of
                                 Just q  -> matchCached q
                                 Nothing -> match (source rule)) $ concat filtered
-             mapM_ (uncurry (applyMatch costFun)) $ concat matches
+             -- bound the total number of matches applied per iteration so a
+             -- single iteration's apply/rebuild work stays bounded on huge
+             -- graphs (genuine matches; we just process them over more iters).
+             mapM_ (uncurry (applyMatch costFun)) (take iterMatchBudget (concat matches))
              rebuild costFun
 
              -- check dirty flag: if no modifications occurred, we've saturated

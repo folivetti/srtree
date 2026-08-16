@@ -167,10 +167,11 @@ data EGraphDB = EDB { _worklist      :: HashSet (EClassId, ENode)      -- e-node
                     , _sizeFitDB     :: IntMap (RangeTree Double)  -- hacky! Size x Fitness DB
                     , _sizeDLDB      :: IntMap (RangeTree Double)
                     , _unevaluated   :: IntSet                     -- set of not-evaluated e-classes
-                     , _nextId        :: Int                        -- next available id
-                     , _changed       :: !Bool                      -- dirty flag: true if modified since last check
-                     , _trackDBs      :: !Bool                      -- maintain range DBs (False during pure simplify)
-                     } deriving (Show, Generic)
+                      , _nextId        :: Int                        -- next available id
+                      , _changed       :: !Bool                      -- dirty flag: true if modified since last check
+                      , _trackDBs      :: !Bool                      -- maintain range DBs (False during pure simplify)
+                      , _seenMatches   :: Map String IntSet          -- persistent (rule source -> attempted root classes)
+                      } deriving (Show, Generic)
 
 data EClass = EClass { _eClassId :: {-# UNPACK #-} !Int                   -- e-class id (maybe we don't need that here)
                      , _eNodes   :: HashSet ENode           -- set of e-nodes inside this e-class
@@ -257,9 +258,9 @@ instance Binary EClassData
 -- Custom: keep `_trackDBs` out of the wire format so on-disk EGraphDB data
 -- (written before the flag existed) decodes unchanged; it defaults to True.
 instance Binary EGraphDB where
-  put (EDB w a r p f d s sf sdl u n c _) =
+  put (EDB w a r p f d s sf sdl u n c _ _) =
     put w >> put a >> put r >> put p >> put f >> put d >> put s >> put sf >> put sdl >> put u >> put n >> put c
-  get = EDB <$> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> pure True
+  get = EDB <$> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> pure True <*> pure Map.empty
 -- Custom: the wire format omits `_classStore` (a runtime handle to the paged
 -- store, never serialized); it decodes to Nothing.
 instance Binary EGraph where
@@ -477,6 +478,7 @@ emptyDB = EDB
   0
   False
   True
+  Map.empty
 {-# INLINE emptyDB #-}
 
 -- | like 'emptyDB' but skips range-DB maintenance (pure simplify mode)
