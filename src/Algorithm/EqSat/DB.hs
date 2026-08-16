@@ -23,7 +23,6 @@ import Control.Monad.State
 import GHC.Stack (HasCallStack)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
-import qualified Data.IntSet as IntSet
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.List (sortBy)
@@ -202,21 +201,53 @@ cleanDB = modify' $ over (eDB. patDB) (const Map.empty)
 {-# INLINE cleanDB #-}
 
 -- | Returns the substitution rules
--- for every match of the pattern `source` inside the e-graph.
+-- for every match of the pattern `source` inside the e-graph. This is the pure
+-- matcher (no seen-set) used by user pattern queries; saturation uses
+-- 'matchSaturated'.
 match :: ClassStore m => Pattern -> EGraphST m [(Subst, ClassOrVar)]
 match src = if hasNAry src
-              then matchNAry src
-              else matchCached (compileToQuery src)
+              then matchNAryWith Nothing src
+              else matchCachedWith Nothing (compileToQuery src)
 {-# INLINE match #-}
 
-matchCached :: Monad m => (Query, [ClassOrVar], ClassOrVar) -> EGraphST m [(Subst, ClassOrVar)]
-matchCached (q, vars, root) = do
-  substs <- genericJoin q vars root               -- find the substituion rules for this pattern
+-- | Non-n-ary matching. The match's root e-class anchors it the same way the
+-- n-ary matcher anchors one match per trie root, so it shares the same cheap
+-- persistent mark-on-attempt seen-set ('_seenMatches', keyed by rule source ->
+-- root class id): already-processed roots are skipped so the per-rule budget
+-- advances to new matches across the scheduler's ban/unban cycles. Keying by
+-- the root (an @O(1)@ class id) avoids serializing every substitution, which
+-- would dominate on rules whose @genericJoin@ yields many matches. 'Nothing'
+-- disables the seen-set (pure queries).
+matchCachedWith :: Monad m => Maybe String -> (Query, [ClassOrVar], ClassOrVar) -> EGraphST m [(Subst, ClassOrVar)]
+matchCachedWith mSk (q, vars, root) = do
+  ss <- genericJoin q vars root
+  seenSk <- case mSk of
+    Nothing -> pure RangeSet.empty
+    Just sk -> gets (Map.findWithDefault RangeSet.empty sk . _seenMatches . _eDB)
+  let rootOf s = case Map.lookup root s of
+                   Just (SVOne (Left eid)) -> eid
+                   _                       -> 0
+      fresh = [ s | s <- ss
+                  , Map.size s > 0
+                  , maybe True (\_ -> not (RangeSet.member (show (rootOf s)) seenSk)) mSk ]
+      taken = take ruleMatchBudget fresh
+  case mSk of
+    Just sk -> modify' $ over (eDB . seenMatches)
+               (Map.insertWith RangeSet.union sk (RangeSet.fromList (map (show . rootOf) taken)))
+    Nothing -> pure ()
   pure [ (s, case Map.lookup root s of
                Nothing -> error $ "MATCHCACHED_MISSING root=" <> show (getInt root) <> " substSize=" <> show (Map.size s)
                Just v  -> fromSVOne v)
-       | s <- take ruleMatchBudget substs, Map.size s > 0 ]
-{-# INLINE matchCached #-}
+       | s <- taken ]
+{-# INLINE matchCachedWith #-}
+
+-- | Saturation matching: consults/marks the persistent seen-set so each rule's
+-- per-iteration budget advances to genuinely new matches across ban/unban.
+matchSaturated :: ClassStore m => Pattern -> EGraphST m [(Subst, ClassOrVar)]
+matchSaturated src = if hasNAry src
+                       then matchNAryWith (Just (show src)) src
+                       else matchCachedWith (Just (show src)) (compileToQuery src)
+{-# INLINE matchSaturated #-}
 
 -- | True if the pattern (or a nested child) is an n-ary Add/Mul pattern.
 hasNAry :: Pattern -> Bool
@@ -269,14 +300,17 @@ ruleMatchBudget = 1024
 -- Roots are marked as attempted on the first try ('mark-on-attempt'), whether or
 -- not they yielded a match, so a match that fails 'applyMatch' conditions is not
 -- re-attempted every cycle.
-matchNAry :: ClassStore m => Pattern -> EGraphST m [(Subst, ClassOrVar)]
-matchNAry src = do
+matchNAryWith :: ClassStore m => Maybe String -> Pattern -> EGraphST m [(Subst, ClassOrVar)]
+matchNAryWith mSk src = do
   db <- gets (_patDB . _eDB)
   case Map.lookup (opOf src) db of
     Nothing -> pure []
     Just trie -> do
-      seen <- gets (Map.findWithDefault IntSet.empty (show src) . _seenMatches . _eDB)
-      let roots = filter (`IntSet.notMember` seen) (IntMap.keys (_trie trie))
+      seen <- case mSk of
+        Nothing -> pure RangeSet.empty
+        Just sk -> gets (Map.findWithDefault RangeSet.empty sk . _seenMatches . _eDB)
+      let keep e = maybe True (`RangeSet.notMember` seen) mSk
+          roots = filter keep (IntMap.keys (_trie trie))
       go roots 0 0 []
   where
     go :: ClassStore m => [EClassId] -> Int -> Int -> [(Subst, ClassOrVar)] -> EGraphST m [(Subst, ClassOrVar)]
@@ -285,12 +319,14 @@ matchNAry src = do
     go (_ : _) _ r acc | r >= ruleRootVisit = pure (reverse acc)
     go (eid : eids) n r acc = do
       -- mark-on-attempt: remember this root as tried for this rule source
-      modify' $ over (eDB . seenMatches)
-                (Map.insertWith IntSet.union (show src) (IntSet.singleton eid))
+      case mSk of
+        Just sk -> modify' $ over (eDB . seenMatches)
+                   (Map.insertWith RangeSet.union sk (RangeSet.singleton (show eid)))
+        Nothing -> pure ()
       substs <- recursiveMatch src eid Map.empty
       let newMs = take 1 [ (s, Left eid) | s <- substs ]
       go eids (n + length newMs) (r + 1) (foldr (:) acc newMs)
-{-# INLINE matchNAry #-}
+{-# INLINE matchNAryWith #-}
 
 -- | Recursively match a pattern against the e-class `eid`, threading a
 -- substitution map, returning every substitution that completes the match.

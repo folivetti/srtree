@@ -170,7 +170,7 @@ data EGraphDB = EDB { _worklist      :: HashSet (EClassId, ENode)      -- e-node
                       , _nextId        :: Int                        -- next available id
                       , _changed       :: !Bool                      -- dirty flag: true if modified since last check
                       , _trackDBs      :: !Bool                      -- maintain range DBs (False during pure simplify)
-                      , _seenMatches   :: Map String IntSet          -- persistent (rule source -> attempted root classes)
+                      , _seenMatches   :: Map String (RangeSet.Set String) -- persistent (rule source -> attempted match keys)
                       } deriving (Show, Generic)
 
 data EClass = EClass { _eClassId :: {-# UNPACK #-} !Int                   -- e-class id (maybe we don't need that here)

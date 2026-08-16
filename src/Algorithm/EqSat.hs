@@ -312,8 +312,8 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
 
              -- step 2: apply matches and rebuild
              matches <- mapM (\(rule, cq) -> map (rule,) <$> case cq of
-                                Just q  -> matchCached q
-                                Nothing -> match (source rule)) $ concat filtered
+                                Just q  -> matchCachedWith (Just (show (source rule))) q
+                                Nothing -> matchSaturated (source rule)) $ concat filtered
              -- bound the total number of matches applied per iteration so a
              -- single iteration's apply/rebuild work stays bounded on huge
              -- graphs (genuine matches; we just process them over more iters).
@@ -355,7 +355,7 @@ applySingleMergeOnlyEqSat costFun rules =
         getNMatches n []       = pure []
         getNMatches 0 _        = pure []
         getNMatches n ([]:rss) = getNMatches n rss
-        getNMatches n ((r:rs):rss) = do matches <- map (r,) <$> match (source r)
+        getNMatches n ((r:rs):rss) = do matches <- map (r,) <$> matchSaturated (source r)
                                         let (x, _) = splitAt n matches
                                             m      = length x
                                         if m == n
