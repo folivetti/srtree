@@ -150,6 +150,9 @@ data EClassPageStore = EClassPageStore
   , cpsKeys   :: IO [EClassId]              -- ^ all e-class ids currently in the store
   , cpsStreamRoots :: SRTree () -> Int -> [EClassId] -> IO [EClassId]  -- ^ bounded candidate roots for an operator, skipping an attempted set
   , cpsRecordNode  :: ENode -> EClassId -> IO ()         -- ^ register a newly-created node for write-back
+  , cpsNodeToClass :: ENode -> IO (Maybe EClassId)       -- ^ content-address node -> class lookup (live)
+  , cpsCanonicalOf :: EClassId -> IO (Maybe EClassId)    -- ^ e-class -> canonical representative (live)
+  , cpsRecordCanonical :: EClassId -> EClassId -> IO ()  -- ^ persist a canonical mapping (write-back)
   }
 
 data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId   -- maps an e-class id to its canonical form
@@ -334,6 +337,24 @@ class Monad m => ClassStore m where
   -- the resident @_patDB@ is already updated by 'addToDB'.
   recordNode :: ENode -> EClassId -> EGraphST m ()
   recordNode _ _ = pure ()
+  -- | Content-address node -> class lookup. The default reads the resident
+  -- @_eNodeToEClass@ map (complete for a resident graph); a paged graph bounds
+  -- that map and falls back to the backing store on a miss.
+  lookupNode :: ENode -> EGraphST m (Maybe EClassId)
+  lookupNode en = gets (HashMap.lookup en . _eNodeToEClass)
+  -- | Record a node -> class mapping. The default keeps the resident (full)
+  -- map; a paged graph bounds it (evicting, since the store is authoritative).
+  insertNode :: ENode -> EClassId -> EGraphST m ()
+  insertNode en eid = modify' $ over eNodeToEClass (HashMap.insert en eid)
+  -- | Record a canonical mapping (e-class -> representative), persisting it on a
+  -- paged graph so the store-backed canonical lookup sees merges/new classes.
+  insertCanonical :: EClassId -> EClassId -> EGraphST m ()
+  insertCanonical eid canon = modify' $ over canonicalMap (IntMap.insert eid canon)
+  -- | The canonical representative of an e-class, or @Nothing@ when unknown. The
+  -- default reads the resident @_canonicalMap@; a paged graph bounds it and
+  -- falls back to the store.
+  canonicalOf :: EClassId -> EGraphST m (Maybe EClassId)
+  canonicalOf eid = gets (IntMap.lookup eid . _canonicalMap)
 
 -- | Default candidate-root enumeration from the resident @_patDB@ trie, capped
 -- at @budget@ after skipping @exclude@ (used by the pure instances and as the
@@ -390,7 +411,8 @@ residentClassCap = 50000
 
 -- | Trim the resident @_eClass@ cache to at most 'residentClassCap' entries
 -- by keeping the largest ids. No-op for graphs without a paged store (their
--- resident map must stay complete for the pure instances).
+-- resident map must stay complete for the pure instances). Halving on 2x keeps
+-- steady churn from triggering an O(n) rebuild on every insert.
 trimResidentCache :: Monad m => EGraphST m ()
 trimResidentCache = modify' $ \eg ->
   case _classStore eg of
@@ -398,9 +420,47 @@ trimResidentCache = modify' $ \eg ->
     Just _  ->
       let m = _eClass eg
           n = IntMap.size m
-      in if n <= residentClassCap
+      in if n <= 2 * residentClassCap
             then eg
             else over eClass (const (IntMap.fromList (Prelude.drop (n - residentClassCap) (IntMap.toAscList m)))) eg
+
+-- | Bound on the resident @_eNodeToEClass@ cache on a paged graph. Beyond the
+-- cap (checked at 2x, halved back to cap) the map is pruned; the backing store
+-- is authoritative, so eviction only trades a little dedup accuracy for bounded
+-- memory, never correctness.
+nodeCacheCap :: Int
+nodeCacheCap = 100000
+
+-- | Bound on the resident @_canonicalMap@ cache on a paged graph (same
+-- halve-on-2x policy; evicted entries are re-read from the store).
+canonicalCacheCap :: Int
+canonicalCacheCap = 100000
+{-# INLINE nodeCacheCap #-}
+{-# INLINE canonicalCacheCap #-}
+
+trimNodeCache :: Monad m => EGraphST m ()
+trimNodeCache = modify' $ \eg ->
+  case _classStore eg of
+    Nothing -> eg
+    Just _  ->
+      let m = _eNodeToEClass eg
+          n = HashMap.size m
+      in if n <= 2 * nodeCacheCap
+            then eg
+            else over eNodeToEClass (const (HashMap.fromList (Prelude.take nodeCacheCap (HashMap.toList m)))) eg
+{-# INLINE trimNodeCache #-}
+
+trimCanonicalCache :: Monad m => EGraphST m ()
+trimCanonicalCache = modify' $ \eg ->
+  case _classStore eg of
+    Nothing -> eg
+    Just _  ->
+      let m = _canonicalMap eg
+          n = IntMap.size m
+      in if n <= 2 * canonicalCacheCap
+            then eg
+            else over canonicalMap (const (IntMap.fromList (Prelude.take canonicalCacheCap (IntMap.toAscList m)))) eg
+{-# INLINE trimCanonicalCache #-}
 
 instance ClassStore Identity where
   lookupClass = pureLookupClass
@@ -499,6 +559,48 @@ instance {-# OVERLAPPABLE #-} (Monad m, MonadIO m) => ClassStore m where
     case _classStore eg of
       Nothing -> pure ()
       Just h  -> liftIO (cpsRecordNode h en eid)
+  lookupNode en = do
+    eg <- gets id
+    case _classStore eg of
+      Nothing -> gets (HashMap.lookup en . _eNodeToEClass)
+      Just h  -> do
+        m <- gets (HashMap.lookup en . _eNodeToEClass)
+        case m of
+          Just eid -> pure (Just eid)
+          Nothing -> do
+            r <- liftIO (cpsNodeToClass h en)
+            case r of
+              Just eid -> do insertNode en eid
+                             pure (Just eid)
+              Nothing  -> pure Nothing
+  insertNode en eid = do
+    eg <- gets id
+    case _classStore eg of
+      Nothing -> modify' $ over eNodeToEClass (HashMap.insert en eid)
+      Just _  -> do modify' $ over eNodeToEClass (HashMap.insert en eid)
+                    trimNodeCache
+  insertCanonical eid canon = do
+    eg <- gets id
+    case _classStore eg of
+      Nothing -> modify' $ over canonicalMap (IntMap.insert eid canon)
+      Just h  -> do modify' $ over canonicalMap (IntMap.insert eid canon)
+                    trimCanonicalCache
+                    liftIO (cpsRecordCanonical h eid canon)
+  canonicalOf eid = do
+    eg <- gets id
+    case _classStore eg of
+      Nothing -> gets (IntMap.lookup eid . _canonicalMap)
+      Just h  -> do
+        m <- gets (IntMap.lookup eid . _canonicalMap)
+        case m of
+          Just c  -> pure (Just c)
+          Nothing -> do
+            r <- liftIO (cpsCanonicalOf h eid)
+            case r of
+              Just c  -> do modify' $ over canonicalMap (IntMap.insert eid c)
+                            trimCanonicalCache
+                            pure (Just c)
+              Nothing -> pure Nothing
 
 -- * E-Graph basic supporting functions
 
@@ -543,26 +645,39 @@ createEClass cId enode' info h = EClass cId (Set.singleton enode') Set.empty h i
 {-# INLINE createEClass #-}
 
 -- | gets the canonical id of an e-class with full path compression
-canonical :: (Monad m, HasCallStack) => EClassId -> EGraphST m EClassId
-canonical eclassId =
-  do m <- gets _canonicalMap
-     let oneStep = case IntMap.lookup eclassId m of
-           Just x -> x
-           Nothing -> error $ "CANON_MISSING eid=" <> show eclassId <> " mapSize=" <> show (IntMap.size m)
-     if oneStep == eclassId
-        then pure eclassId
-        else do
-          let loop path ecId
-                | m IntMap.! ecId == ecId = (ecId, eclassId : path)
-                | otherwise = loop (ecId : path) (m IntMap.! ecId)
-              (root, path) = loop [] oneStep
+canonical :: ClassStore m => EClassId -> EGraphST m EClassId
+canonical eclassId = do
+  mStep <- canonicalOf eclassId
+  case mStep of
+    Nothing -> canonError eclassId
+    Just oneStep
+      | oneStep == eclassId -> pure eclassId
+      | otherwise -> do
+          (root, chain) <- walk [eclassId] oneStep
+          -- compress the chain in the resident cache (cache-only: the store
+          -- keeps the authoritative semantic mappings recorded at insert
+          -- time, so eviction just loses the shortcut, never correctness).
           modify' $ \eg -> eg{ _canonicalMap =
-                        foldl' (\m' k -> IntMap.insert k root m') (_canonicalMap eg) path }
+                        foldl' (\m' k -> IntMap.insert k root m') (_canonicalMap eg) chain }
           pure root
+  where
+    walk :: ClassStore m => [EClassId] -> EClassId -> EGraphST m (EClassId, [EClassId])
+    walk chain ecId = do
+      mNext <- canonicalOf ecId
+      case mNext of
+        Nothing -> canonError ecId
+        Just n
+          | n == ecId -> pure (ecId, chain)
+          | otherwise -> walk (ecId : chain) n
+
+    canonError :: ClassStore m => EClassId -> EGraphST m a
+    canonError eid = do
+      m <- gets _canonicalMap
+      error $ "CANON_MISSING eid=" <> show eid <> " mapSize=" <> show (IntMap.size m)
 {-# INLINE canonical #-}
 
 -- | canonize the e-node children
-canonize :: (Monad m, HasCallStack) => ENode -> EGraphST m ENode
+canonize :: (ClassStore m, HasCallStack) => ENode -> EGraphST m ENode
 canonize (EVar ix)     = pure (EVar ix)
 canonize (EParam ix)   = pure (EParam ix)
 canonize (EConst x)    = pure (EConst x)

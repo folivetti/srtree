@@ -48,14 +48,14 @@ add costFun enode = do
   enode''  <- canonize enode
   enode''' <- foldConsts costFun enode''
 
-  maybeEid <- gets (HashMap.lookup enode''' . _eNodeToEClass)
+  maybeEid <- lookupNode enode'''
   case maybeEid of
        Just eid -> pure eid
        Nothing  -> do
          curId <- gets (_nextId . _eDB)                             -- get the next available e-class id
-         modify' $ over canonicalMap (IntMap.insert curId curId)           -- insert e-class id into canon map
-                 . over eNodeToEClass (HashMap.insert enode''' curId)     -- associate new e-node with id
-                 . over (eDB . nextId) (+1)                                -- update next id
+         insertCanonical curId curId                                 -- register the class as its own representative
+         insertNode enode''' curId                                  -- associate new e-node with id (bounded on paged graphs)
+         modify' $ over (eDB . nextId) (+1)                          -- update next id
                  . over (eDB . worklist) (Set.insert (curId, enode'''))      -- add e-node and id into worklist
          forM_ (eChildren enode''') (addParents curId enode''')        -- update the children's parent list
          info <- makeAnalysis costFun enode'''
@@ -81,7 +81,8 @@ add costFun enode = do
     addParents cId node c =
       do ec <- getEClass c
          let ec' = ec{ _parents = Set.insert (cId, node) (_parents ec) }
-         modify' $ over eClass (IntMap.insert c ec')
+         -- write through 'insertClass' so a paged store keeps the updated parents
+         insertClass ec'
 
 -- | Add a binary (SRTree-based) node, converting it to a flattened ENode.
 -- Sub and Div are canonicalized away at insertion: `x - y` becomes
@@ -191,12 +192,12 @@ repair costFun ecId enode =
   do modify' $ over eNodeToEClass (HashMap.delete enode)
      enode'  <- canonize enode
      ecId'   <- canonical ecId
-     doExist <- gets (HashMap.lookup enode' . _eNodeToEClass)
+     doExist <- lookupNode enode'
      case doExist of
         Just ecIdCanon -> do mergedId <- merge costFun ecIdCanon ecId'
-                             modify' $ over eNodeToEClass (HashMap.insert enode' mergedId)
+                             insertNode enode' mergedId
                              addToDB enode' mergedId
-        Nothing        -> do modify' $ over eNodeToEClass (HashMap.insert enode' ecId')
+        Nothing        -> do insertNode enode' ecId'
                              addToDB enode' ecId'
 {-# INLINE repair #-}
 
@@ -213,8 +214,9 @@ repairAnalysis costFun ecId enode =
      when (_info eclass /= newData) $
        do let bestChanged = _best (_info eclass) /= _best newData
           modify' $ over (eDB . analysis) (_parents eclass <>)
-                  . over eClass (IntMap.insert ecId' eclass')
-                   . (if bestChanged && isJust (_fitness (_info eclass)) then over (eDB . refits) (IntSet.insert ecId') else id)
+                  . (if bestChanged && isJust (_fitness (_info eclass)) then over (eDB . refits) (IntSet.insert ecId') else id)
+          -- write through 'insertClass' so a paged store keeps the updated body
+          insertClass eclass'
           _ <- modifyEClass costFun ecId'
           pure ()
 {-# INLINE repairAnalysis #-}
@@ -231,15 +233,19 @@ merge costFun c1 c2 =
   where
     mergeClasses :: (ClassStore m, HasCallStack) => EClassId -> EClass -> EClassId -> EClassId -> EClass -> EClassId -> EGraphST m EClassId
     mergeClasses led ledC ledO sub subC subO =
-      do modify' $ over canonicalMap (IntMap.insert sub led . IntMap.insert subO led)
+      do insertCanonical sub led       -- persist/register the canonical merges
+         insertCanonical subO led
          let newC = EClass led
                          (_eNodes ledC `Set.union` _eNodes subC)
                          (_parents ledC <> _parents subC)
                          (min (_height ledC) (_height subC))
                          (joinData (_info ledC) (_info subC))
-         modify' $ \eg -> eg { _eNodeToEClass = Set.foldl' (\acc en -> HashMap.insert en led acc) (_eNodeToEClass eg) (_eNodes subC) }
-         modify' $ over eClass (IntMap.insert led newC . IntMap.delete sub)
-                 . over (eDB . worklist) (_parents subC <>)
+         forM_ (Set.toList (_eNodes subC)) $ \en -> insertNode en led
+         -- write the merged body through the class store (a paged store keeps the
+         -- authoritative page) and drop the absorbed class
+         insertClass newC
+         deleteClass sub
+         modify' $ over (eDB . worklist) (_parents subC <>)
          when (_info newC /= _info ledC)
            $ do let bestChanged = _best (_info newC) /= _best (_info ledC)
                 modify' $ over (eDB . analysis) (_parents ledC <>)
@@ -304,22 +310,23 @@ modifyEClass costFun ecId =
   do ec <- getEClass ecId
      case (_consts . _info) ec of
        ConstVal x ->
-         do let en = EConst x
-            c <- calculateCost costFun en
-            let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
-            maybeEid <- gets (HashMap.lookup en . _eNodeToEClass)
-            modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.singleton en , _info = infoEc})
-            when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (IntSet.insert ecId)
-            case maybeEid of
-              Nothing   -> pure ecId
-              Just eid' -> merge costFun eid' ecId
+        do let en = EConst x
+           c <- calculateCost costFun en
+           let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
+           maybeEid <- lookupNode en
+           -- write through 'insertClass' (a paged store keeps the authoritative page)
+           insertClass ec{ _eNodes = Set.singleton en, _info = infoEc }
+           when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (IntSet.insert ecId)
+           case maybeEid of
+             Nothing   -> pure ecId
+             Just eid' -> merge costFun eid' ecId
 
        ParamIx x ->
          do let en = EParam x
             c <- calculateCost costFun en
             let infoEc = (_info ec){ _cost = c, _best = en, _consts = toConst en }
-            maybeEid <- gets (HashMap.lookup en . _eNodeToEClass)
-            modify' $ over eClass (IntMap.insert ecId ec{_eNodes = Set.insert en (_eNodes ec), _info = infoEc})
+            maybeEid <- lookupNode en
+            insertClass ec{ _eNodes = Set.insert en (_eNodes ec), _info = infoEc }
             when (isJust $ _fitness $ _info ec) $ modify' $ over (eDB . refits) (IntSet.insert ecId)
             case maybeEid of
               Nothing   -> pure ecId
@@ -371,15 +378,15 @@ populate (Just tId) (eid:eids) = let nextTrie = IntMap.lookup eid (_trie tId)
                                   in Just $ IntTrie (IntMap.insert eid val (_trie tId))
 {-# INLINE populate #-}
 
-canonizeMap :: (Monad m, HasCallStack) => (Subst, ClassOrVar) -> EGraphST m (Subst, ClassOrVar)
+canonizeMap :: (ClassStore m, HasCallStack) => (Subst, ClassOrVar) -> EGraphST m (Subst, ClassOrVar)
 canonizeMap (subst, cv) = (,cv) <$> traverse g subst
   where
-    g :: Monad m => SubVal -> EGraphST m SubVal
+    g :: ClassStore m => SubVal -> EGraphST m SubVal
     g (SVOne e2)  = SVOne <$> canonOne e2
     g (SVMap m)   = SVMap . IntMap.fromListWith (+) <$> mapM (\(e2, n) -> do
                        e2' <- canonOne (Left e2)
                        pure (getInt e2', n)) (IntMap.toList m)
-    canonOne :: Monad m => ClassOrVar -> EGraphST m ClassOrVar
+    canonOne :: ClassStore m => ClassOrVar -> EGraphST m ClassOrVar
     canonOne (Left e2) = Left <$> canonical e2
     canonOne e2        = pure e2
 {-# INLINE canonizeMap #-}
@@ -711,20 +718,21 @@ getRndExpressionFrom eId' = do
 
 cleanMaps :: ClassStore m => EGraphST m ()
 cleanMaps = do
-  enode2eclass <- gets _eNodeToEClass
-  entries <- forM (HashMap.toList enode2eclass) $ \(k,v) -> do
-    k' <- canonize k
-    v' <- canonical v
-    pure (k',v')
-  let enode2eclass' = HashMap.fromList entries
-  -- canonicalize the node -> class map; the e-class map is pruned to its
-  -- canonical representatives. For a paged graph the store is authoritative,
-  -- so the resident cache is simply reset rather than rebuilt from it.
   hasStore <- gets (isJust . _classStore)
   if hasStore
-    then modify' $ \eg -> eg { _eNodeToEClass = enode2eclass'
+    -- the paged store is authoritative for both node->class and canonical
+    -- lookups, so the bounded resident caches are simply reset (an O(n) rebuild
+    -- of an unbounded map would defeat the out-of-core goal).
+    then modify' $ \eg -> eg { _eNodeToEClass = HashMap.empty
+                             , _canonicalMap = IntMap.empty
                              , _eClass = IntMap.empty }
     else do
+      enode2eclass <- gets _eNodeToEClass
+      entries <- forM (HashMap.toList enode2eclass) $ \(k,v) -> do
+        k' <- canonize k
+        v' <- canonical v
+        pure (k',v')
+      let enode2eclass' = HashMap.fromList entries
       eclassMap <- gets _eClass
       entries' <- forM (IntMap.toList eclassMap) $ \(k,v) -> do
         k' <- canonical k

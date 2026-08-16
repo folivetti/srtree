@@ -184,7 +184,7 @@ getTopFitEClassWithSize = getTopEClassWithSize True
 getTopDLEClassWithSize :: Monad m => Int -> Int -> EGraphST m [EClassId]
 getTopDLEClassWithSize  = getTopEClassWithSize False
 
-rebuildAllRanges :: Monad m => EGraphST m ()
+rebuildAllRanges :: ClassStore m => EGraphST m ()
 rebuildAllRanges = do szF <- gets (_sizeFitDB._eDB) >>= traverse rebuildRange
                       dlF <- gets (_sizeDLDB._eDB) >>= traverse rebuildRange
                       fR  <- gets (_fitRangeDB._eDB) >>= rebuildRange
@@ -195,10 +195,10 @@ rebuildAllRanges = do szF <- gets (_sizeFitDB._eDB) >>= traverse rebuildRange
                               . over (eDB.sizeFitDB) (const szF)
                               . over (eDB.sizeDLDB) (const dlF)
 
-canonizeRange :: Monad m => RangeTree Double -> EGraphST m (RangeTree Double)
+canonizeRange :: ClassStore m => RangeTree Double -> EGraphST m (RangeTree Double)
 canonizeRange = fmap RangeSet.fromList . mapM (\(x, eid) -> (x,) <$> canonical eid) . RangeSet.toList
 
-rebuildRange :: Monad m => RangeTree Double -> EGraphST m (RangeTree Double)
+rebuildRange :: ClassStore m => RangeTree Double -> EGraphST m (RangeTree Double)
 rebuildRange rt = do
   canonRt <- canonizeRange rt
   pure $ snd $ go canonRt
