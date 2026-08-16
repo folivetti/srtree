@@ -312,7 +312,10 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
 
              -- step 2: apply matches and rebuild
              matches <- mapM (\(rule, cq) -> map (rule,) <$> case cq of
-                                Just q  -> matchCachedWith (Just (show (source rule))) q
+                                Just q  -> do paged <- isPagedGraph
+                                              if paged
+                                                then matchStreamCached (Just (show (source rule))) (source rule)
+                                                else matchCachedWith (Just (show (source rule))) q
                                 Nothing -> matchSaturated (source rule)) $ concat filtered
              -- bound the total number of matches applied per iteration so a
              -- single iteration's apply/rebuild work stays bounded on huge

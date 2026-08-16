@@ -347,6 +347,13 @@ streamRootsFromDB op budget exclude = do
     Just trie -> pure (take budget [ e | e <- IntMap.keys (_trie trie), not (IntSet.member e ex) ])
 {-# INLINE streamRootsFromDB #-}
 
+-- | Whether the graph is backed by a lazily paged e-class store. Streaming
+-- matchers dispatch on this: a paged graph enumerates candidates from the
+-- backing store (bounded memory), a resident graph from @_patDB@.
+isPagedGraph :: Monad m => EGraphST m Bool
+isPagedGraph = gets (maybe False (const True) . _classStore)
+{-# INLINE isPagedGraph #-}
+
 -- Resident-map implementations (used by every pure monad) ------------------
 
 pureLookupClass :: Monad m => EClassId -> EGraphST m (Maybe EClass)

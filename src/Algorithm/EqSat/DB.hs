@@ -208,7 +208,11 @@ cleanDB = modify' $ over (eDB. patDB) (const Map.empty)
 match :: ClassStore m => Pattern -> EGraphST m [(Subst, ClassOrVar)]
 match src = if hasNAry src
               then matchNAryWith Nothing src
-              else matchCachedWith Nothing (compileToQuery src)
+              else do
+                paged <- isPagedGraph
+                if paged
+                  then matchStreamCached Nothing src
+                  else matchCachedWith Nothing (compileToQuery src)
 {-# INLINE match #-}
 
 -- | Non-n-ary matching. The match's root e-class anchors it the same way the
@@ -247,7 +251,11 @@ matchCachedWith mSk (q, vars, root) = do
 matchSaturated :: ClassStore m => Pattern -> EGraphST m [(Subst, ClassOrVar)]
 matchSaturated src = if hasNAry src
                        then matchNAryWith (Just (show src)) src
-                       else matchCachedWith (Just (show src)) (compileToQuery src)
+                       else do
+                         paged <- isPagedGraph
+                         if paged
+                           then matchStreamCached (Just (show src)) src
+                           else matchCachedWith (Just (show src)) (compileToQuery src)
 {-# INLINE matchSaturated #-}
 
 -- | True if the pattern (or a nested child) is an n-ary Add/Mul pattern.
@@ -292,6 +300,12 @@ ruleRootVisit = 512
 ruleMatchBudget :: Int
 ruleMatchBudget = 1024
 
+-- | Cap on how many operator-root e-classes the streaming cached matcher visits
+-- per match, bounding the search work (and the page reads) independently of the
+-- result count, exactly as 'ruleRootVisit' does for the n-ary matcher.
+ruleMatchRootVisit :: Int
+ruleMatchRootVisit = 2048
+
 -- | Match an n-ary pattern against every root e-class of its operator trie.
 --
 -- A persistent per-source set of already-attempted roots ('_seenMatches') lets
@@ -326,6 +340,53 @@ matchNAryWith mSk src = do
       let newMs = take 1 [ (s, Left eid) | s <- substs ]
       go eids (n + length newMs) (r + 1) (foldr (:) acc newMs)
 {-# INLINE matchNAryWith #-}
+
+-- | Streaming matcher for the cached (non-n-ary @genericJoin@) path on a paged
+-- graph. Instead of enumerating candidates from the in-RAM @_patDB@ trie, it
+-- streams the candidate root e-classes of the pattern's operator through
+-- 'streamRoots' (bounded, skipping the already-attempted seen-set) and matches
+-- each root incrementally with 'recursiveMatch' (which reads e-classes through
+-- the paged store). This is the out-of-core analogue of 'matchCachedWith': the
+-- resident/pure path keeps the optimized trie 'genericJoin', and only a paged
+-- graph takes this route, so the matcher never builds an O(nodes) structure.
+--
+-- 'ruleMatchBudget' bounds the results and 'ruleMatchRootVisit' bounds the root
+-- visits; the persistent mark-on-attempt seen-set makes each rule's budgets
+-- advance to new roots across the scheduler's ban/unban cycles.
+matchStreamCached :: ClassStore m => Maybe String -> Pattern -> EGraphST m [(Subst, ClassOrVar)]
+matchStreamCached mSk src = do
+  seen <- case mSk of
+    Nothing -> pure RangeSet.empty
+    Just sk -> gets (Map.findWithDefault RangeSet.empty sk . _seenMatches . _eDB)
+  let exclude = [ i | s <- RangeSet.toList seen, Just i <- [readMaybe s :: Maybe EClassId] ]
+  roots <- case opOfMay src of
+             Just op  -> streamRoots op ruleMatchRootVisit exclude
+             Nothing  -> pure []
+  go roots 0 0 []
+  where
+    go :: ClassStore m => [EClassId] -> Int -> Int -> [(Subst, ClassOrVar)] -> EGraphST m [(Subst, ClassOrVar)]
+    go [] _ _ acc = pure (reverse acc)
+    go _ n _ acc | n >= ruleMatchBudget = pure (reverse acc)
+    go (_ : _) _ r acc | r >= ruleMatchRootVisit = pure (reverse acc)
+    go (eid : eids) n r acc = do
+      case mSk of
+        Just sk -> modify' $ over (eDB . seenMatches)
+                   (Map.insertWith RangeSet.union sk (RangeSet.singleton (show eid)))
+        Nothing -> pure ()
+      substs <- recursiveMatch src eid Map.empty
+      let newMs = take (ruleMatchBudget - n) [ (s, Left eid) | s <- substs ]
+      go eids (n + length newMs) (r + 1) (foldr (:) acc newMs)
+{-# INLINE matchStreamCached #-}
+
+-- | The operator trie key of the top-level pattern, or @Nothing@ for a pattern
+-- with no operator (e.g. a bare variable), which the streaming matcher treats
+-- as matching nothing.
+opOfMay :: Pattern -> Maybe (SRTree ())
+opOfMay (NAry EAdd _) = Just (Bin Add () ())
+opOfMay (NAry EMul _) = Just (Bin Mul () ())
+opOfMay (Fixed t)     = Just (getOperator t)
+opOfMay _             = Nothing
+{-# INLINE opOfMay #-}
 
 -- | Recursively match a pattern against the e-class `eid`, threading a
 -- substitution map, returning every substitution that completes the match.
