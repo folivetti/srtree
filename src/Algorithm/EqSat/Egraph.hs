@@ -148,6 +148,8 @@ data EClassPageStore = EClassPageStore
   , cpsFlush  :: IO ()                      -- ^ write back all pending dirty pages
   , cpsAll    :: IO [EClass]                -- ^ all e-classes currently in the store
   , cpsKeys   :: IO [EClassId]              -- ^ all e-class ids currently in the store
+  , cpsStreamRoots :: SRTree () -> Int -> [EClassId] -> IO [EClassId]  -- ^ bounded candidate roots for an operator, skipping an attempted set
+  , cpsRecordNode  :: ENode -> EClassId -> IO ()         -- ^ register a newly-created node for write-back
   }
 
 data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId   -- maps an e-class id to its canonical form
@@ -318,6 +320,32 @@ class Monad m => ClassStore m where
   allKeys     = gets (IntMap.keys . _eClass)
   readDirect  = lookupClass
   writeDirect = insertClass
+  -- | Enumerate (bounded) candidate e-class ids that contain a node of the
+  -- given operator, to drive the streaming matcher, skipping any ids in
+  -- @exclude@ (the already-attempted seen-set, so the per-rule budget advances
+  -- to new roots across scheduler cycles). The default reads the resident
+  -- @_patDB@ trie (the fully-in-RAM path); a paged graph streams the candidates
+  -- from its backing store instead, so the matcher never builds an O(nodes)
+  -- structure.
+  streamRoots :: SRTree () -> Int -> [EClassId] -> EGraphST m [EClassId]
+  streamRoots = streamRootsFromDB
+  -- | Record a newly-created e-node (and its e-class) so a streaming matcher's
+  -- candidate source can see it. The default (fully resident graph) is a no-op:
+  -- the resident @_patDB@ is already updated by 'addToDB'.
+  recordNode :: ENode -> EClassId -> EGraphST m ()
+  recordNode _ _ = pure ()
+
+-- | Default candidate-root enumeration from the resident @_patDB@ trie, capped
+-- at @budget@ after skipping @exclude@ (used by the pure instances and as the
+-- no-store fallback for a @MonadIO@ graph).
+streamRootsFromDB :: Monad m => SRTree () -> Int -> [EClassId] -> EGraphST m [EClassId]
+streamRootsFromDB op budget exclude = do
+  db <- gets (_patDB . _eDB)
+  let ex = IntSet.fromList exclude
+  case Map.lookup op db of
+    Nothing  -> pure []
+    Just trie -> pure (take budget [ e | e <- IntMap.keys (_trie trie), not (IntSet.member e ex) ])
+{-# INLINE streamRootsFromDB #-}
 
 -- Resident-map implementations (used by every pure monad) ------------------
 
@@ -454,6 +482,16 @@ instance {-# OVERLAPPABLE #-} (Monad m, MonadIO m) => ClassStore m where
     case _classStore eg of
       Nothing -> pureInsertClass ec
       Just h  -> liftIO (cpsInsert h ec)
+  streamRoots op budget exclude = do
+    eg <- gets id
+    case _classStore eg of
+      Nothing -> streamRootsFromDB op budget exclude
+      Just h  -> liftIO (cpsStreamRoots h op budget exclude)
+  recordNode en eid = do
+    eg <- gets id
+    case _classStore eg of
+      Nothing -> pure ()
+      Just h  -> liftIO (cpsRecordNode h en eid)
 
 -- * E-Graph basic supporting functions
 

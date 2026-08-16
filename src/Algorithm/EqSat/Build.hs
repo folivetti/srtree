@@ -355,6 +355,7 @@ addToDB enode' eid = do
   case populate trie ids of      -- populates the trie
     Nothing -> pure ()
     Just t  -> modify' $ over (eDB . patDB) (Map.insert op t) -- if something was created, insert back into the DB
+  recordNode enode eid            -- register the node for the streaming matcher's source
 {-# INLINE addToDB #-}
 
 -- | Populates an IntTrie with a sequence of e-class ids

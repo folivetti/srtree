@@ -34,6 +34,7 @@ import qualified Data.HashSet as Set
 import qualified Data.Set as RangeSet
 import Data.String (IsString (..))
 import Data.SRTree.Recursion (cata)
+import Text.Read (readMaybe)
 
 
 -- A Pattern is either a fixed-point of a tree, an index to a pattern variable
@@ -302,16 +303,14 @@ ruleMatchBudget = 1024
 -- re-attempted every cycle.
 matchNAryWith :: ClassStore m => Maybe String -> Pattern -> EGraphST m [(Subst, ClassOrVar)]
 matchNAryWith mSk src = do
-  db <- gets (_patDB . _eDB)
-  case Map.lookup (opOf src) db of
-    Nothing -> pure []
-    Just trie -> do
-      seen <- case mSk of
-        Nothing -> pure RangeSet.empty
-        Just sk -> gets (Map.findWithDefault RangeSet.empty sk . _seenMatches . _eDB)
-      let keep e = maybe True (`RangeSet.notMember` seen) mSk
-          roots = filter keep (IntMap.keys (_trie trie))
-      go roots 0 0 []
+  seen <- case mSk of
+    Nothing -> pure RangeSet.empty
+    Just sk -> gets (Map.findWithDefault RangeSet.empty sk . _seenMatches . _eDB)
+  -- skip already-attempted roots so the per-rule budget advances to new roots
+  -- across the scheduler's ban/unban cycles (matches the trie path's semantics).
+  let exclude = [ i | s <- RangeSet.toList seen, Just i <- [readMaybe s :: Maybe EClassId] ]
+  roots <- streamRoots (opOf src) ruleRootVisit exclude
+  go roots 0 0 []
   where
     go :: ClassStore m => [EClassId] -> Int -> Int -> [(Subst, ClassOrVar)] -> EGraphST m [(Subst, ClassOrVar)]
     go [] _ _ acc = pure (reverse acc)
