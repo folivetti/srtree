@@ -153,6 +153,8 @@ data EClassPageStore = EClassPageStore
   , cpsNodeToClass :: ENode -> IO (Maybe EClassId)       -- ^ content-address node -> class lookup (live)
   , cpsCanonicalOf :: EClassId -> IO (Maybe EClassId)    -- ^ e-class -> canonical representative (live)
   , cpsRecordCanonical :: EClassId -> EClassId -> IO ()  -- ^ persist a canonical mapping (write-back)
+  , cpsBeginFrontier :: IO ()                            -- ^ start a frontier re-saturation (restrict matcher to changed classes)
+  , cpsEndFrontier    :: IO ()                           -- ^ end it: clear the frontier (a pass re-saturated everything)
   }
 
 data EGraph = EGraph { _canonicalMap  :: ClassIdMap EClassId   -- maps an e-class id to its canonical form
