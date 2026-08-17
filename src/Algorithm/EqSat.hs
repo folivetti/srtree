@@ -81,11 +81,12 @@ recalculateBest costFun eid =
         costSentinel = 1000000
 
         fillUpCosts :: IntMap EClass -> CostMap -> CostMap
-        fillUpCosts classes = go (IntMap.keysSet classes)
+        fillUpCosts classes = go (IntMap.size classes + 1) (IntMap.keysSet classes)
           where
-            go dirty m
+            go 0 _ m = m
+            go n dirty m
               | IntSet.null dirty = m
-              | otherwise = go dirty' m'
+              | otherwise = go (n - 1) dirty' m'
               where
                 (dirty', m') = IntSet.foldl' step (IntSet.empty, m) dirty
                 step (d, cm) eid = case IntMap.lookup eid classes of
@@ -133,11 +134,12 @@ recalculateBestAll costFun = do
     costSentinel = 1000000
 
     fixpoint :: IntMap EClass -> IntMap (Int, ENode) -> IntMap (Int, ENode)
-    fixpoint classes0 = go (IntMap.keysSet classes0)
+    fixpoint classes0 = go (IntMap.size classes0 + 1) (IntMap.keysSet classes0)
       where
-        go dirty m
+        go 0 _ m        = m
+        go n dirty m
           | IntSet.null dirty = m
-          | otherwise = go dirty' m'
+          | otherwise = go (n - 1) dirty' m'
           where
             (dirty', m') = IntSet.foldl' step (IntSet.empty, m) dirty
             step (d, cm) eid = case IntMap.lookup eid classes0 of
@@ -196,15 +198,15 @@ recalculateBestAllStream costFun = do
                           then Set.foldl' (\acc (pid, _) -> IntSet.insert pid acc) IntSet.empty (_parents ecl)
                           else IntSet.empty
             pure (dirty, cm')
-      fixpoint dirty cm
-        | IntSet.null dirty = pure cm
+      fixpoint n dirty cm
+        | n <= 0 || IntSet.null dirty = pure cm
         | otherwise = go (IntSet.toList dirty) IntSet.empty cm
         where
-          go [] d acc = fixpoint d acc
+          go [] d acc = fixpoint (n - 1) d acc
           go (e : es) d acc = do
             (d', m') <- stepEid acc e
             go es (IntSet.union d d') m'
-  cm <- fixpoint idSet IntMap.empty
+  cm <- fixpoint (IntSet.size idSet + 1) idSet IntMap.empty
   forM_ (IntMap.toList cm) $ \(eid, (c, en)) -> do
     mec <- readDirect eid
     case mec of
@@ -247,15 +249,15 @@ recalculateBestStream costFun eid = do
                           then Set.foldl' (\acc (pid,_) -> IntSet.insert pid acc) IntSet.empty (_parents ecl)
                           else IntSet.empty
             pure (dirty, cm')
-      fixpoint dirty cm
-        | IntSet.null dirty = pure cm
+      fixpoint n dirty cm
+        | n <= 0 || IntSet.null dirty = pure cm
         | otherwise = go (IntSet.toList dirty) IntSet.empty cm
         where
-          go [] d acc = fixpoint d acc
+          go [] d acc = fixpoint (n - 1) d acc
           go (e : es) d acc = do
             (d', m') <- stepEid acc e
             go es (IntSet.union d d') m'
-  cm <- fixpoint idSet Map.empty
+  cm <- fixpoint (IntSet.size idSet + 1) idSet Map.empty
   eid' <- canonical eid
   case Map.lookup eid' cm of
     Just (_, t) -> pure t
