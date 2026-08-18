@@ -831,11 +831,63 @@ getEClass :: (ClassStore m, HasCallStack) => EClassId -> EGraphST m EClass
 getEClass c = do c' <- canonical c; getClass c'
 {-# INLINE getEClass #-}
 
--- | gets the best expression given the default cost function
+-- | gets the best expression given the default cost function. Cycle-safe and
+-- budgeted: see 'getBestExprBounded'.
 getBestExpr :: (ClassStore m, HasCallStack) => EClassId -> EGraphST m (Fix SRTree)
-getBestExpr eid = do
-  best <- (_best . _info) <$> getEClass eid
-  enodeToTree best
+getBestExpr eid = getBestExprBounded eid
+
+-- | Like 'getBestExpr' but terminates on pathological graphs: a visited set
+-- stops the expansion from re-entering an already-expanded class (a @_best@
+-- cycle arising from supersaturation/merges), and a node budget caps the total
+-- expanded size (so an exponentially-shared DAG is truncated rather than
+-- exploded). Both guards substitute a @Var 0@ placeholder for the part that
+-- would otherwise blow up. On well-formed acyclic graphs with small bests
+-- neither guard triggers, so the result is identical to the unbounded version.
+-- This keeps out-of-core extraction (e.g. 'dbTop') bounded in memory.
+getBestExprBounded :: (ClassStore m, HasCallStack) => EClassId -> EGraphST m (Fix SRTree)
+getBestExprBounded eid = fst <$> expand Set.empty 0 eid
+  where
+    budget :: Int
+    budget = 200
+    -- expand returns the tree and the running count of expanded nodes, so the
+    -- budget bounds the TOTAL size (not just the depth): an exponentially-shared
+    -- DAG is truncated instead of exploded. A revisited (cyclic) class or a
+    -- full budget yields a @Var 0@ placeholder.
+    expand :: ClassStore m => HashSet EClassId -> Int -> EClassId -> EGraphST m (Fix SRTree, Int)
+    expand _ n _ | n >= budget = pure (Fix (Var 0), n)
+    expand seen n eid
+      | Set.member eid seen = pure (Fix (Var 0), n)
+      | otherwise = do
+          best <- (_best . _info) <$> getEClass eid
+          let seen' = Set.insert eid seen
+              n0    = n + 1
+          case best of
+            EVar ix   -> pure (Fix (Var ix), n0)
+            EParam ix -> pure (Fix (Param ix), n0)
+            EConst x  -> pure (Fix (Const x), n0)
+            EUni f t  -> do (tt, n1) <- expand seen' n0 t
+                            pure (Fix (Uni f tt), n1)
+            EBin op l r -> do
+              (tl, n1) <- expand seen' n0 l
+              (tr, n2) <- expand seen' n1 r
+              pure (Fix (Bin op tl tr), n2)
+            ENAry op m -> do
+              (xs, nEnd) <- goNary seen' n0 (IntMap.toAscList m) []
+              pure (if null xs then (Fix (Var 0), nEnd) else (naryTree op xs, nEnd))
+    -- build the ENAry children from the multiset WITHOUT materialising the
+    -- expanded multiplicity list: an enormous count (a pathological supersaturated
+    -- class) is capped per-child and by the total budget, so each copy counts
+    -- toward the budget and no giant list is ever allocated.
+    goNary seen n es acc
+      | n >= budget = pure (reverse acc, n)
+      | otherwise = case es of
+          [] -> pure (reverse acc, n)
+          ((c, cnt) : rest) -> do
+            (t, n1) <- expand seen n c
+            let take = min cnt (budget - n1 + 1)
+                n2   = n1 + (take - 1)
+                acc' = Prelude.replicate take t ++ acc
+            goNary seen n2 rest acc'
 
 -- | Creates a singleton trie from an e-class id
 trie :: EClassId -> IntMap IntTrie -> IntTrie
