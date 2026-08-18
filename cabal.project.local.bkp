@@ -1,9 +1,0 @@
-profiling: True
-executable-profiling: True
-library-profiling: True
-shared: True
-executable-dynamic: True
-library-dynamic: True
-
-package *
-  ghc-options: -fexternal-dynamic-refs
