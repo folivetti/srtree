@@ -1,5 +1,20 @@
 # Changelog for srtree
 
+## 3.0.0.0
+
+- **BREAKING**: Removed the Accelerate AD backend (`Algorithm.SRTree.AD.Accelerate`).
+  The `ADBackEnd` type now only has `SingleThread` and `MultiThread` constructors.
+  This removes the `accelerate` and `accelerate-llvm-native` dependencies.
+- Out-of-core equality saturation with paged e-graph store (SQLite/PostgreSQL)
+- Frontier re-saturation: mark changed classes and re-saturate only the frontier
+- Streaming matcher for n-ary and cached genericJoin paths (O(1) memory on paged graphs)
+- Cycle-safe and size-budgeted `getBestExpr` extraction
+- Bounded cost/best fixpoints so recalc terminates on cyclic graphs
+- Bounded node-to-class and canonical maps on paged graphs (LRU caches)
+- Fast ByteString double parser for dataset loading
+- Thread `Loss` (not `Distribution`) through fitness functions; add `readLoss`
+- Multiset e-graph improvements
+
 ## 2.0.1.7 
 
 - Added log10 MSE fitness function 

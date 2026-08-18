@@ -7,7 +7,6 @@ import qualified Data.Vector.Unboxed as V
 import qualified Data.Vector as VB
 import qualified Data.Vector.Generic as G
 import qualified Data.Vector.Storable as VS
-import System.Environment (setEnv)
 
 import Data.SRTree
 import Data.SRTree.Print
@@ -48,7 +47,6 @@ getT (t, _, _) = t
 
 main :: IO ()
 main = do
-    setEnv "ACCELERATE_LLVM_NATIVE_THREADS" "1"
     -- 1. Initialization: Load the dataset
     putStrLn "Loading dataset..."
     ((dataset, y, _, _), _, _, _) <- loadDataset "data.tsv" True
@@ -89,7 +87,6 @@ main = do
     print $ sum $ map (\t ->  V.sum $ naiveEval t) trees
     print $ sum $ map (\t ->  V.sum $ t theta) compiledFn
     print $ sum $ map (\t -> getF $ minimizeNLL MultiThread MSE Nothing 0 dataset y t theta1) trees
-    print $ sum $ map (\t -> getF $ minimizeNLL Accelerate MSE Nothing 0 dataset y t theta1) trees
     --print $ sum $ map (\t -> getF $ minimizeNLLCompiled MSE Nothing 0 dataset y t theta1) trees
 
     --print $ sum $ map (\t -> VS.sum . snd $ gradNLLGraph MSE dataset' y' Nothing t theta1') trees
@@ -117,9 +114,7 @@ main = do
 
             -- The fast version: executing the pre-compiled, stream-fused closure
             bench "minimizeNLLCompiled (Compiled Closure)" $
-                nf (\ts -> sum [V.sum . getT $ minimizeNLL MultiThread MSE Nothing 100 dataset' y' t theta1' | t <- ts]) trees,
-            bench "minimizeNLLCompiled (accelerate)" $
-                nf (\ts -> sum [V.sum . getT $ minimizeNLL Accelerate MSE Nothing 100 dataset' y' t theta1' | t <- ts]) trees
+                nf (\ts -> sum [V.sum . getT $ minimizeNLL MultiThread MSE Nothing 100 dataset' y' t theta1' | t <- ts]) trees
 
             --bench "minimizeNLLO (Naive optimized AST Traversal)" $
             --    nf (\ts -> sum [V.sum . getT $ minimizeNLLO MSE Nothing 100 dataset y t theta1 | t <- ts]) trees

@@ -5,7 +5,7 @@ cabal-version: 1.12
 -- see: https://github.com/sol/hpack
 
 name:               srtree
-version:            2.0.1.8
+version:            3.0.0.0
 synopsis:           A general library to work with Symbolic Regression expression trees.
 description:        A Symbolic Regression Tree data structure to work with mathematical expressions with support to first order derivative and simplification;
 license:            BSD3
@@ -37,7 +37,6 @@ library
           Algorithm.EqSat.Simplify
           Algorithm.EqSat.Store
           Algorithm.SRTree.AD
-          Algorithm.SRTree.AD.Accelerate
           Algorithm.SRTree.AD.CompiledAD
           Algorithm.SRTree.AD.Unboxed
           Algorithm.SRTree.Compile
@@ -61,9 +60,7 @@ library
     other-modules:
           Paths_srtree
     build-depends:
-          accelerate
-        , accelerate-llvm-native
-        , async
+          async
         , attoparsec >=0.14.4 && <0.15
         , attoparsec-expr >=0.1.1.2 && <0.2
         , base >=4.19 && <5
@@ -102,9 +99,7 @@ executable bench
           apps/Bench
     ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2 -fllvm -pgmlo opt-20 -pgmlc llc-20 -optlo-O3 -optlc-mcpu=native -mavx2 -mfma -fspec-constr -fmax-simplifier-iterations=20 -fexpose-all-unfoldings
     build-depends:
-          accelerate
-        , accelerate-llvm-native
-        , async
+          async
         , attoparsec >=0.14.4 && <0.15
         , attoparsec-expr >=0.1.1.2 && <0.2
         , base >=4.19 && <5
@@ -139,9 +134,7 @@ executable bench-eqsat
           apps/BenchEqSat
     ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2
     build-depends:
-          accelerate
-        , accelerate-llvm-native
-        , async
+          async
         , attoparsec >=0.14.4 && <0.15
         , attoparsec-expr >=0.1.1.2 && <0.2
         , base >=4.19 && <5
@@ -176,9 +169,7 @@ executable srtree-report
           apps/Report
     ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2
     build-depends:
-          accelerate
-        , accelerate-llvm-native
-        , async
+          async
         , attoparsec
         , attoparsec-expr >=0.1.1.2 && <0.2
         , base >=4.19 && <5
@@ -217,8 +208,6 @@ test-suite srtree-test
     ghc-options: -threaded -rtsopts -with-rtsopts=-N
     build-depends:
           HUnit
-        , accelerate
-        , accelerate-llvm-native
         , ad
         , async
         , attoparsec >=0.14.4 && <0.15
