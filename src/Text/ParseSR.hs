@@ -39,7 +39,7 @@ type ParseTree = Parser (Fix SRTree)
 -- * Data types and caller functions
 
 -- | Supported algorithms.
-data SRAlgs = TIR | HL | OPERON | BINGO | GOMEA | PYSR | SBP | EPLEX deriving (Show, Read, Enum, Bounded)
+data SRAlgs = TIR | HL | OPERON | BINGO | GOMEA | PYSR | SBP | EPLEX | NEOGP deriving (Show, Read, Enum, Bounded)
 
 -- | Supported outputs.
 data Output = PYTHON | MATH | TIKZ | LATEX deriving (Show, Read, Enum, Bounded)
@@ -64,6 +64,7 @@ parseSR GOMEA  header reparam = eitherResult . (`feed` "") . parse (parseGOMEA T
 parseSR SBP    header reparam = eitherResult . (`feed` "") . parse (parseGOMEA True reparam $ splitHeader header) . putEOL . B.strip
 parseSR EPLEX  header reparam = eitherResult . (`feed` "") . parse (parseGOMEA True reparam $ splitHeader header) . putEOL . B.strip
 parseSR PYSR   header reparam = eitherResult . (`feed` "") . parse (parsePySR True reparam $ splitHeader header) . putEOL .  B.strip
+parseSR NEOGP  header reparam = eitherResult . (`feed` "") . parse (parseNeoGP True reparam $ splitHeader header) . putEOL .  B.strip
 
 --parsePat :: B.ByteString -> Either String Pattern
 --parsePat = eitherResult . (`feed` "") . parse parsePatExpr . putEOL . B.strip
@@ -216,6 +217,43 @@ parseTIR b = parseExpr b (prefixOps : binOps) binFuns var
           <|> do char 't'
                  ix <- decimal
                  pure $ Fix $ Param ix
+          <?> "var"
+
+-- | parser for NeoGP
+parseNeoGP :: Bool -> Bool -> [(B.ByteString, Int)] -> ParseTree
+parseNeoGP b = parseExpr b (prefixOps : binOps) binFuns var
+  where
+    binFuns   = [ ]
+    prefixOps = map (uncurry prefix)
+                [   ("id", id), ("abs", abs)
+                  , ("sinh", sinh), ("cosh", cosh), ("tanh", tanh)
+                  , ("sin", sin), ("cos", cos), ("tan", tan)
+                  , ("asinh", asinh), ("acosh", acosh), ("atanh", atanh)
+                  , ("asin", asin), ("acos", acos), ("atan", atan)
+                  , ("sqrtabs", sqrtabs), ("sqrt", sqrt), ("cbrt", cbrt), ("square", (**2))
+                  , ("logabs", logabs), ("log", log), ("exp", exp), ("cube", cube), ("recip", recip)
+                  , ("Id", id), ("Abs", abs)
+                  , ("Sinh", sinh), ("Cosh", cosh), ("Tanh", tanh)
+                  , ("Sin", sin), ("Cos", cos), ("Tan", tan)
+                  , ("ASinh", asinh), ("ACosh", acosh), ("ATanh", atanh)
+                  , ("ASin", asin), ("ACos", acos), ("ATan", atan)
+                  , ("SqrtAbs", sqrtabs), ("Sqrt", sqrt), ("Cbrt", cbrt), ("Square", (**2))
+                  , ("LogAbs", logabs), ("Log", log), ("Exp", exp), ("Recip", recip), ("Cube", cube)
+                ]
+    binOps = [[binary "^" (**) AssocLeft], [binary "**" (**) AssocLeft]
+            , [binary "*" (*) AssocLeft, binary "/" (/) AssocLeft]
+            , [binary "+" (+) AssocLeft, binary "-" (-) AssocLeft]
+            , [binary "|**|" powabs AssocLeft], [binary "aq" aq AssocLeft]
+            ]
+    powabs l r = Fix $ Bin PowerAbs l r
+    aq l r = Fix $ Bin AQ l r
+
+    var = do char 'x'
+             ix <- decimal
+             pure $ Fix $ Var (ix-1)
+          <|> do char 'p'
+                 ix <- decimal
+                 pure $ Fix $ Param (ix-1)
           <?> "var"
 
 -- | parser for Operon.

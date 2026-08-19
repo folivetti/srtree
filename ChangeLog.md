@@ -1,5 +1,9 @@
 # Changelog for srtree
 
+## 3.0.0.2
+
+- Added parser for NeoGP.jl 
+
 ## 3.0.0.1
 
 - Fixed some wrong bounds 
