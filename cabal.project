@@ -15,10 +15,9 @@ constraints:
   , statistics >=0.15 && <0.17
   , time >=1.9 && <1.15
   , unordered-containers >=0.2 && <0.3
-  , optparse-applicative >=0.16 && <0.19
+  , optparse-applicative >=0.18 && <0.20
   , criterion >=1.5 && <2
   , HUnit >=1.6 && <1.7
-  , ad >=5.0 && <6
   , mwc-random ==0.15.2.0
 
 source-repository-package

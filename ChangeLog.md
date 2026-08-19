@@ -1,5 +1,9 @@
 # Changelog for srtree
 
+## 3.0.0.1
+
+- Fixed some wrong bounds 
+
 ## 3.0.0.0
 
 - **BREAKING**: Removed the Accelerate AD backend (`Algorithm.SRTree.AD.Accelerate`).
