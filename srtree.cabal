@@ -184,7 +184,7 @@ executable srtree-report
         , ieee754 >=0.8 && <0.9
         , lens >=5.0 && <6
         , mtl >=2.2 && <2.4
-        , optparse-applicative >=0.18 && <0.20
+        , optparse-applicative >=0.16 && <0.20
         ,           parallel >=3.2 && <3.4
         , primitive >=0.8 && <0.10
         , random >=1.2 && <1.4
