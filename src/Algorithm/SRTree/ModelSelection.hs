@@ -38,8 +38,6 @@ import Data.SRTree.Recursion (cata)
 import qualified Data.Vector.Unboxed as U
 import Algorithm.SRTree.Compile
 
-import Debug.Trace
-
 -- | Bayesian information criterion
 bic :: EvaluatedTree -> Double
 bic et = valParams et * log (valRows et) + 2 * valLoss et

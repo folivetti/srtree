@@ -48,7 +48,6 @@ import qualified Data.Vector.Unboxed          as VU
 import qualified Data.Vector.Unboxed.Mutable  as VUM
 import qualified Data.Vector as VB
 import qualified Data.Vector.Mutable as VMB
-import Debug.Trace (trace, traceShow)
 import qualified Data.IntMap.Strict as IntMap
 import Data.List ( foldl', foldl1' )
 import Data.Maybe (isJust, fromMaybe)

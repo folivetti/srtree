@@ -30,8 +30,6 @@ import Numeric.Optimization.NLOPT
 import System.IO.Unsafe ( unsafePerformIO )
 import Control.Monad.Catch ( catch, SomeException )
 
-import Debug.Trace ( trace )
-
 -- | profile likelihood algorithms: Bates (classical), ODE (faster), Constrained (fastest)
 -- The Constrained approach returns only the endpoints.
 data PType = Bates | ODE | Constrained deriving (Show, Read, Eq)
@@ -349,7 +347,7 @@ getStatsFromModel dist mYerr xss ys tree theta = MkStats cov corr stdErr
     hess = hessianNLL dist mYerr xss ys tree theta
 
     fexcept :: SomeException -> IO Columns
-    fexcept e = trace ("cov NegDef" <> show (toRowMajor hess)) $ pure ident
+    fexcept _ = pure ident
 
     cov = unsafePerformIO $ catch (invChol hess) fexcept
 

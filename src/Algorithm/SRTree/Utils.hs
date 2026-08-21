@@ -15,7 +15,6 @@ import Control.Arrow
 import Data.List (unfoldr)
 
 import Data.SRTree.Eval
-import Debug.Trace (traceShow)
 
 -- | Internal helper to get dimensions (rows, columns)
 matSize :: Columns -> (Int, Int)

@@ -262,6 +262,7 @@ myCost :: SRTree Int -> Int
 myCost (Var _)      = 1
 myCost (Const _)    = 3
 myCost (Param _)    = 3
+myCost (Y _)        = 1
 myCost (Bin op l r) = 2 + l + r
 myCost (Uni _ t)    = 3 + t
 

@@ -12,7 +12,13 @@
 --
 -----------------------------------------------------------------------------
 module Algorithm.SRTree.NonlinearOpt
-    where
+    ( minimizeNLLWith
+    , minimizeNLL'
+    , minimizeNLL
+    , minimizeNLLWithFixedParam'
+    , minimizeNLLWithFixedParam
+    , compileLossAndGrad
+    ) where
 
 import Algorithm.SRTree.Likelihoods
 import Numeric.Optimization.NLOPT
@@ -30,8 +36,6 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.SRTree.Recursion
 import Control.Monad.State.Strict
 import Control.Monad.Identity
-
-import Debug.Trace
 
 minimizeNLLWith :: (VS.Vector Double -> (Double, VS.Vector Double)) -> (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> Int -> Target -> (Target, Double, Int)
 minimizeNLLWith funAndGrad alg niter t0
@@ -53,13 +57,20 @@ minimizeNLLWith funAndGrad alg niter t0
     t_opt'      = G.convert t_opt
 {-# INLINE minimizeNLLWith #-}
 
+-- | Compile the loss function and gradient for a tree, returning a reusable
+-- closure. Use this when you need to optimize the same expression with
+-- multiple random restarts — compile once, call the closure many times.
+compileLossAndGrad :: ADBackEnd -> Loss -> Maybe Target -> Columns -> Target -> Fix SRTree -> VS.Vector Double -> (Double, VS.Vector Double)
+compileLossAndGrad backend dist mYerr xss ys tree =
+  let m          = V.length ys
+      tree'      = buildLoss dist (fromIntegral m) tree
+  in compileFunAndGrad backend xss ys mYerr tree'
+
 -- | minimizes the negative log-likelihood of the expression
 minimizeNLL' :: (ObjectiveD -> (Maybe VectorStorage) -> LocalAlgorithm) -> ADBackEnd -> Loss -> Maybe Target -> Int -> Columns -> Target -> Fix SRTree -> Target -> (Target, Double, Int)
 minimizeNLL' alg backend dist mYerr niter xss ys tree t0 = minimizeNLLWith funAndGrad alg niter t0
   where
-    m          = V.length ys
-    tree'      = buildLoss dist (fromIntegral m) tree
-    funAndGrad = compileFunAndGrad backend xss ys mYerr tree'
+    funAndGrad = compileLossAndGrad backend dist mYerr xss ys tree
  
 
 minimizeNLL :: ADBackEnd -> Loss -> Maybe Target -> Int -> Columns -> Target -> Fix SRTree -> Target -> (Target, Double, Int)

@@ -47,7 +47,6 @@ import qualified Data.Vector.Unboxed.Mutable as VM
 import Control.Concurrent (getNumCapabilities)
 import Control.Concurrent.Async (forConcurrently)
 
-import Debug.Trace
 import Data.SRTree.Print
 import Control.Monad.State.Strict
 import Control.Monad.Identity

@@ -26,8 +26,6 @@ import qualified Data.SRTree.Print as P
 import qualified Data.Map.Strict as Map
 import Data.List.Split ( splitOn )
 
-import Debug.Trace (trace, traceShow)
-
 -- * Data types
 
 -- | Parser of a symbolic regression tree with `Int` variable index and
@@ -68,9 +66,6 @@ parseSR NEOGP  header reparam = eitherResult . (`feed` "") . parse (parseNeoGP T
 
 --parsePat :: B.ByteString -> Either String Pattern
 --parsePat = eitherResult . (`feed` "") . parse parsePatExpr . putEOL . B.strip
-
-eitherResult' :: Show r => Result r -> Either String r
-eitherResult' res = trace (show res) $ eitherResult res
 
 -- * Parsers
 
