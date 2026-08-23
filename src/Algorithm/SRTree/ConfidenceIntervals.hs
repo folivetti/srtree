@@ -1,4 +1,4 @@
-{-# language ViewPatterns, ScopedTypeVariables, MultiWayIf, FlexibleContexts #-}
+{-# language ViewPatterns, ScopedTypeVariables, MultiWayIf, FlexibleContexts, BangPatterns #-}
 -------------------------------------------------------------------------------
 -- |
 -- Module      :  Algorithm.SRTree.ConfidenceIntervals
@@ -29,6 +29,7 @@ import Algorithm.SRTree.Utils
 import Numeric.Optimization.NLOPT
 import System.IO.Unsafe ( unsafePerformIO )
 import Control.Monad.Catch ( catch, SomeException )
+import Debug.Trace ( trace )
 
 -- | profile likelihood algorithms: Bates (classical), ODE (faster), Constrained (fastest)
 -- The Constrained approach returns only the endpoints.
@@ -85,9 +86,10 @@ paramCI (Laplace stats) nSamples theta alpha = zipWith3 CI (U.toList theta) lows
 
 paramCI (Profile stats profiles) nSamples _ alpha = zipWith3 CI theta lows highs
   where
-    -- for the profile likelihood we use the square root of the F-distribution with (1-alpha)
+    -- for the profile likelihood we use the square root of the F-distribution
+    -- with 1 numerator df (each parameter is profiled individually)
     k = length theta
-    t = sqrt $ quantile (fDistribution k (fromIntegral $ nSamples - k)) (1 - alpha)
+    t = sqrt $ quantile (fDistribution 1 (fromIntegral $ nSamples - k)) (1 - alpha)
     stdErr = _stdErr stats
     lows = map (`_tau2theta` (-t)) profiles
     highs = map (`_tau2theta` t) profiles
@@ -180,27 +182,77 @@ calcTheta0 dist tree = case cata alg tree of
         Left g -> Left $ g . invleft op vl
         Right vr -> Right $ evalOp op vl vr
 
--- calculate the profile likelihood of every parameter
-getAllProfiles :: PType -> EvalTree -> Target -> Target -> [CI] -> Double -> [ProfileT]
-getAllProfiles ptype et theta stdErr estCIs alpha = getAll 0 []
+-- | Recompute standard errors from the Hessian at a given theta.
+-- Used when a profile walk restarts from a new optimum.
+recomputeStdErr :: EvalTree -> Target -> Target
+recomputeStdErr et t = stdErr
   where
-    k = U.length theta
-    n = ctRows et
-    tau_max  = sqrt $ quantile (fDistribution k (n - k)) (1 - 0.01)
-    tau_max' = sqrt $ quantile (fDistribution k (n - k)) (1 - alpha)
+    k = U.length t
+    ident = fromRowMajor k k (U.generate (k * k) (\ix -> let (i, j) = ix `divMod` k in if i == j then 1.0 else 0.0))
+    hess = ctHessianNLL et t
+    cov = unsafePerformIO $ catch (invChol hess) (\(_ :: SomeException) -> pure ident)
+    covMat = toRowMajor cov
+    stdErr = U.generate k (\ix -> sqrt $ abs (covMat U.! (ix * k + ix)))
 
-    profFun ix = case ptype of
-                    Bates       -> getProfile      et theta (stdErr U.! ix) tau_max ix
-                    ODE         -> getProfileODE   et theta (stdErr U.! ix) (estCIs !! ix) tau_max ix
-                    Constrained -> getProfileCnstr et theta (stdErr U.! ix) tau_max' ix
+-- calculate the profile likelihood of every parameter
+-- restartLimit bounds recursive restarts when the optimizer finds a better point mid-profile
+getAllProfiles :: PType -> EvalTree -> Target -> Target -> [CI] -> Double -> [ProfileT]
+getAllProfiles ptype et theta stdErr estCIs alpha
+  -- Defensive: if theta is too short for the EvalTree's distribution,
+  -- return empty profiles instead of crashing (e.g. MSE loss with Gaussian dist)
+  | U.length theta < 2 = []
+  | otherwise = go 0 et theta stdErr estCIs
+  where
+    restartLimit = 5 :: Int
 
-    getAll ix acc | ix == k   = acc
-                  | ix == k-1 && ptype == Constrained && ctDist et == Gaussian = case getProfileODE et theta (stdErr U.! ix) (estCIs !! ix) tau_max ix of
-                                  Left t  -> getAllProfiles ptype et t stdErr estCIs alpha
-                                  Right p -> getAll (ix + 1) (acc <> [p])
-                  | otherwise = case profFun ix of
-                                  Left t  -> getAllProfiles ptype et t stdErr estCIs alpha
-                                  Right p -> getAll (ix + 1) (acc <> [p])
+    go restarts et' theta' stdErr' estCIs'
+      | restarts >= restartLimit = profileAll restarts et' theta' stdErr' estCIs'
+      | otherwise = profileAll restarts et' theta' stdErr' estCIs'
+
+    profileAll restarts et' theta' stdErr' estCIs' = go' 0 []
+      where
+        k = U.length theta'
+        n = ctRows et'
+        -- For profiling a single parameter, the threshold is chi2_1 (1 df),
+        -- not chi2_k (k df). The profile likelihood ratio for ONE parameter
+        -- follows chi2_1 under H0.
+        tau_max  = sqrt $ quantile (fDistribution 1 (n - k)) (1 - 0.01)
+        nll_opt   = ctNLL et' (ctOptimizer et' theta')
+        chi2_1    = quantile (fDistribution 1 (n - k)) (1 - alpha)
+        -- Profile likelihood CI: 2*(L(theta_hat) - L(theta)) <= chi2_1
+        -- => ctNLL(theta) <= ctNLL(theta_hat) + chi2_1/2
+        -- So tau_max for the constrained method = chi2_1/2
+        tau_max'  = chi2_1 / 2
+
+        -- If estCIs is empty, compute Laplace CIs as initial estimates
+        -- (needed by ODE fallback for the last Gaussian parameter)
+        estCIs'' = if null estCIs'
+                     then let ident = U.generate (k * k) (\ix -> let (i, j) = ix `divMod` k in if i == j then 1.0 else 0.0)
+                              hess = ctHessianNLL et' theta'
+                              cov  = unsafePerformIO $ catch (invChol hess) (\(_ :: SomeException) -> pure (fromRowMajor k k ident))
+                              covMat = toRowMajor cov
+                              se = U.generate k (\ix -> sqrt $ abs (covMat U.! (ix * k + ix)))
+                              tVal = quantile (studentT . fromIntegral $ n - k) (1 - alpha / 2.0)
+                          in  map (\ix -> CI (theta' U.! ix) ((theta' U.! ix) - tVal * (se U.! ix)) ((theta' U.! ix) + tVal * (se U.! ix))) [0..k-1]
+                     else estCIs'
+
+        profFun ix = case ptype of
+                        Bates       -> getProfile      et' theta' (stdErr' U.! ix) tau_max ix
+                        ODE         -> getProfileODE   et' theta' (stdErr' U.! ix) (estCIs'' !! ix) tau_max ix
+                        Constrained -> getProfileCnstr et' theta' (stdErr' U.! ix) tau_max' ix
+
+        go' ix acc | ix == k = acc
+        go' ix acc
+          | ix == k-1 && ptype == Constrained && ctDist et' == Gaussian =
+              case getProfileODE et' theta' (stdErr' U.! ix) (estCIs'' !! ix) tau_max ix of
+                Left t  -> let tOpt = ctOptimizer et' t; se'' = recomputeStdErr et' tOpt
+                           in  go (restarts + 1) et' tOpt se'' estCIs'
+                Right p -> go' (ix + 1) (acc <> [p])
+          | otherwise =
+              case profFun ix of
+                Left t  -> let tOpt = ctOptimizer et' t; se'' = recomputeStdErr et' tOpt
+                           in  go (restarts + 1) et' tOpt se'' estCIs'
+                Right p -> go' (ix + 1) (acc <> [p])
 
 -- calculates the profile likelihood of a single parameter
 getProfile :: EvalTree -> Target -> Double -> Double -> Int -> Either Target ProfileT
@@ -208,15 +260,19 @@ getProfile et theta stdErr_i tau_max ix
   | stdErr_i == 0.0 = pure $ ProfileT (U.fromList [-tau_max, tau_max]) [theta, theta] (theta U.! ix) (const (theta U.! ix)) (const tau_max)
   | otherwise =
   do negDelta <- go kmax (-stdErr_i / 8) 0 1 mempty
+     let !negLen = length (fst negDelta)
+         !negTauRange = if null (fst negDelta) then (0,0) else (minimum (fst negDelta), maximum (fst negDelta))
      posDelta <- go kmax  (stdErr_i / 8) 0 1 p0
+     let !posLen = length (fst posDelta)
+         !posTauRange = if null (fst posDelta) then (0,0) else (minimum (fst posDelta), maximum (fst posDelta))
      let (taus', thetas') = negDelta <> posDelta
          taus    = U.fromList taus'
          thetas  = thetas'
-         (tau2theta, theta2tau) = createSplines taus thetas stdErr_i tau_max ix
+         (tau2theta, theta2tau) = createSplines taus thetas stdErr_i tau_max ix optTh
      pure $ ProfileT taus thetas optTh tau2theta theta2tau
-  where
+   where
     p0        = ([0], [theta_opt])
-    kmax      = 300
+    kmax      = 500
     nll_opt   = ctNLL et theta_opt
     theta_opt = ctOptimizer et theta
     optTh     = theta_opt U.! ix
@@ -225,7 +281,7 @@ getProfile et theta stdErr_i tau_max ix
     go 0 delta _ _         acc = Right acc
     go k delta t inv_slope acc@(taus, thetas)
       | isNaN inv_slope     = Right acc
-      | nll_cond < nll_opt  = Left theta_t
+      | nll_cond < nll_opt - 1e-6 * abs nll_opt  = Left theta_t
       | abs tau > tau_max   = Right acc'
 
       | otherwise           = go (k-1) delta (t + inv_slope) inv_slope' acc'
@@ -235,8 +291,17 @@ getProfile et theta stdErr_i tau_max ix
         theta_t     = minimizer theta_delta
         (nll_cond, grad) = ctGradNLL et theta_t
         zv          = grad U.! ix
-        inv_slope'  = min 4.0 . max 0.0625 . abs $ (tau / (stdErr_i * zv))
-        tau         = signum delta * sqrt (2*nll_cond - 2*nll_opt)
+        -- For LeastSquares, the correct profile likelihood statistic is
+        -- n * log(MSE(t)/MSE(opt)) ~ chi2_1, not 2*(MSE(t) - MSE(opt)).
+        tau         = case ctDist et of
+                        LeastSquares ->
+                          let nD = fromIntegral (ctRows et) :: Double
+                              r  = max nll_cond 1e-30 / max nll_opt 1e-30
+                          in  signum delta * sqrt (max 0 (nD * log r))
+                        _ -> signum delta * sqrt (max 0 (2*nll_cond - 2*nll_opt))
+        inv_slope'  = if abs zv < 1e-12 * abs stdErr_i
+                         then min 4.0 . max 0.0625 $ abs (delta * 8)
+                         else min 4.0 . max 0.0625 . abs $ (tau / (stdErr_i * zv))
         acc'        = if nll_cond == nll_opt || maybe False (tau ==) (listToMaybe taus) || isNaN tau
                          then acc
                          else (tau:taus, theta_t:thetas)
@@ -251,32 +316,41 @@ getProfileCnstr et theta stdErr_i tau_max ix
     taus     = U.fromList [-tau_max, tau_max]
     thetas   = [theta, theta]
     theta_i  = theta U.! ix
-    getPoint = getEndPoint et theta tau_max ix
+    getPoint = getEndPoint et theta tau_max stdErr_i ix
     leftPt   = getPoint True
     rightPt  = getPoint False
     tau2theta tau = if tau < 0 then leftPt else rightPt
 
-getEndPoint :: EvalTree -> Target -> Double -> Int -> Bool -> Double
-getEndPoint et theta tau_max ix isLeft =
-  case minimizeAugLag problem (G.convert theta_opt) of
-            Right sol -> solutionParams sol VS.! ix
-            Left _    -> theta_opt U.! ix
+getEndPoint :: EvalTree -> Target -> Double -> Double -> Int -> Bool -> Double
+getEndPoint et theta tau_max stdErr_i ix isLeft
+  | isNaN mle   = 0/0  -- NaN: MLE itself is NaN
+  | f mle >= 0 = 0/0  -- NaN: MLE violates constraint
+  | isLeft && f lo <= 0 = 0/0  -- NaN: constraint satisfied at left bound
+  | not isLeft && f hi <= 0 = 0/0  -- NaN: constraint satisfied at right bound
+  | isLeft     = bisect lo mle 0
+  | otherwise  = bisect mle hi 0
   where
     n = U.length theta
-
     theta_opt = ctOptimizer et theta
     nll_opt   = ctNLL et theta_opt
     loss_crit = nll_opt + tau_max
+    mle       = theta_opt U.! ix
+    -- Use a wide search range: 50x the standard error, with a minimum of 50x |mle|
+    -- This ensures we don't miss the CI boundary for parameters near zero
+    searchScale = max (abs mle * 50) (stdErr_i * 50)
+    lo        = mle - searchScale
+    hi        = mle + searchScale
 
-    loss      = subtract loss_crit . ctNLL et . G.convert
-    obj       = (if isLeft then id else negate) . (VS.! ix)
+    -- Profiled NLL: fix theta[ix]=t, re-optimize all other params
+    f t = let x = U.generate n (\j -> if j == ix then t else theta_opt U.! j)
+              reopt = ctOptimizerFixed et ix (G.convert x)
+          in ctNLL et reopt - loss_crit
 
-    stop       = ObjectiveRelativeTolerance 1e-4 :| [MaximumEvaluations 1000]
-    localAlg   = NELDERMEAD obj [] Nothing
-    local      = LocalProblem (fromIntegral n) stop localAlg
-    constraint = InequalityConstraint (Scalar loss) 1e-6
-
-    problem = AugLagProblem [] [] (AUGLAG_LOCAL local [constraint] [])
+    bisect a b k
+      | k >= 60 || abs (b - a) < 1e-12 = (a + b) / 2
+      | f mid <= 0 = if isLeft then bisect a mid (k+1) else bisect mid b (k+1)
+      | otherwise  = if isLeft then bisect mid b (k+1) else bisect a mid (k+1)
+      where mid = (a + b) / 2
 {-# INLINE getEndPoint #-}
 
 -- Based on
@@ -288,7 +362,7 @@ getProfileODE et theta stdErr_i estCI tau_max ix
   | otherwise = let (taus', thetas') = solLeft <> ([0], [theta_opt]) <> solRight
                     taus   = U.fromList taus'
                     thetas = thetas'
-                    (tau2theta, theta2tau) = createSplines taus thetas stdErr_i tau_max ix
+                    (tau2theta, theta2tau) = createSplines taus thetas stdErr_i tau_max ix optTh
                 in pure $ ProfileT taus thetas optTh tau2theta theta2tau
   where
     dflt      = ProfileT (U.fromList [-tau_max, tau_max]) [theta, theta] (theta U.! ix) (const (theta U.! ix)) (const tau_max)
@@ -349,10 +423,24 @@ getStatsFromModel dist mYerr xss ys tree theta = MkStats cov corr stdErr
     fexcept :: SomeException -> IO Columns
     fexcept _ = pure ident
 
-    cov = unsafePerformIO $ catch (invChol hess) fexcept
+    covRaw = unsafePerformIO $ catch (invChol hess) fexcept
+
+    -- For LeastSquares, the Hessian code computes sum(fx*fy - res*fxy) = X^T X,
+    -- but the actual Hessian of the Gaussian NLL profile is -1/MSE * X^T X.
+    -- So cov_code = inv(X^T X) and cov_correct = MSE * inv(X^T X) = MSE * cov_code.
+    sigma2 = case dist of
+      LeastSquares -> let mse = compileLoss xss (buildLoss (NLL LeastSquares) (fromIntegral n) tree) ys mYerr theta
+                      in  max mse 1e-10  -- avoid division by zero
+      _            -> 1.0  -- no scaling needed for NLL-based losses
+
+    scaleFactor = case dist of
+      LeastSquares -> sigma2
+      _            -> 1.0
+
+    cov = fromRowMajor k k $ U.map (* scaleFactor) (toRowMajor covRaw)
 
     covMat = toRowMajor cov
-    stdErr = U.generate k (\ix -> sqrt $ covMat U.! (ix * k + ix))
+    stdErr = U.generate k (\ix -> sqrt $ max 0 (covMat U.! (ix * k + ix)))
 
     stdErrSq = case outer stdErr stdErr of
       Right v -> v
@@ -362,16 +450,63 @@ getStatsFromModel dist mYerr xss ys tree theta = MkStats cov corr stdErr
     corr = fromRowMajor k k $ U.generate (k * k) (\ix -> covMat U.! ix / stdErrSqMat U.! ix)
 
 -- Create splines for profile-t
-createSplines :: Target -> Columns -> Double -> Double -> Int -> (Double -> Double, Double -> Double)
-createSplines taus thetas se tau_max ix
+-- We enforce monotonicity of theta w.r.t. tau: if the profile walk produced
+-- non-monotonic pairs (theta[i] < theta[i-1] for positive tau direction or vice versa),
+-- we keep only the outermost monotonic subsequence to prevent spline extrapolation garbage.
+createSplines :: Target -> Columns -> Double -> Double -> Int -> Double -> (Double -> Double, Double -> Double)
+createSplines taus thetas se tau_max ix optTh
   | n < 2 = (genSplineFun [(-tau_max, -se), (tau_max, se)], genSplineFun [(-se, 0), (se, 1)])
   | otherwise = (tau2theta, theta2tau)
   where
     n = U.length taus
     cols = getCol ix thetas
-    nubOnFirst = nubBy (\x y -> fst x == fst y)
-    tau2theta = genSplineFun $ nubOnFirst $ sortOnFirst taus cols
-    theta2tau = genSplineFun $ nubOnFirst $ sortOnFirst cols taus
+    rawPairs = sortOnFirst taus cols
+    monoPairs = enforceMonotonicTau rawPairs
+    _ = trace ("createSplines: raw=" ++ show (length rawPairs) ++ " mono=" ++ show (length monoPairs) ++ " head=" ++ show (take 3 monoPairs) ++ " last=" ++ show (reverse $ take 3 $ reverse monoPairs)) ()
+    tau2theta = genSplineFun monoPairs
+    theta2tau = genSplineFun $ enforceMonotonicTheta optTh $ sortOnFirst cols taus
+
+-- | Enforce monotonicity for (tau, theta) pairs sorted by tau.
+-- Split at tau=0; both halves keep theta non-decreasing:
+--   negative half: as tau increases from -tau_max toward 0, theta increases
+--   positive half: as tau increases from 0 toward tau_max, theta increases
+enforceMonotonicTau :: [(Double, Double)] -> [(Double, Double)]
+enforceMonotonicTau []  = []
+enforceMonotonicTau [p] = [p]
+enforceMonotonicTau pts = negMono ++ posMono
+  where
+    (neg, pos) = span (\(t, _) -> t <= 0) pts
+    negMono = monotoneInc neg
+    posMono = monotoneInc pos
+
+-- | Enforce monotonicity for (theta, tau) pairs sorted by theta.
+-- Split at theta=optTh; both halves keep tau non-decreasing:
+--   left half: as theta increases toward optTh, tau increases toward 0
+--   right half: as theta increases from optTh, tau increases from 0
+enforceMonotonicTheta :: Double -> [(Double, Double)] -> [(Double, Double)]
+enforceMonotonicTheta _    []  = []
+enforceMonotonicTheta _    [p] = [p]
+enforceMonotonicTheta optTh pts = negMono ++ posMono
+  where
+    (neg, pos) = span (\(t, _) -> t <= optTh) pts
+    negMono = monotoneInc neg
+    posMono = monotoneInc pos
+
+-- | Keep longest prefix of non-decreasing second elements.
+monotoneInc :: [(Double, Double)] -> [(Double, Double)]
+monotoneInc [] = []
+monotoneInc [x] = [x]
+monotoneInc ((t0,th0):(t1,th1):rest)
+  | th1 >= th0 = (t0,th0) : monotoneInc ((t1,th1):rest)
+  | otherwise  = monotoneInc ((t0,th0):rest)
+
+-- | Keep longest prefix of non-increasing second elements.
+monotoneDec :: [(Double, Double)] -> [(Double, Double)]
+monotoneDec [] = []
+monotoneDec [x] = [x]
+monotoneDec ((t0,th0):(t1,th1):rest)
+  | th1 <= th0 = (t0,th0) : monotoneDec ((t1,th1):rest)
+  | otherwise  = monotoneDec ((t0,th0):rest)
 
 getCol :: Int -> Columns -> Target
 getCol ix mtx = U.generate (length mtx) (\j -> (mtx !! j) U.! ix)

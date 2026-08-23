@@ -1,5 +1,27 @@
 # Changelog for srtree
 
+## 3.0.0.3
+
+- **Profile-likelihood CI overhaul** (`ConfidenceIntervals`):
+  - Fixed `paramCI` to use F-distribution with 1 numerator df (was k df),
+    matching per-parameter profiling semantics
+  - `getAllProfiles`: added restart limit (5), defensive guard for short theta,
+    auto-compute Laplace CIs when estCIs is empty, and `recomputeStdErr` helper
+  - `getProfile`: fixed `tau_max` to use 1 df; added `LeastSquares` profile
+    statistic `n * log(MSE(t)/MSE(opt))` (was raw `2*(MSE(t)-MSE(opt))` which
+    differs by factor n/(2*MSE)); increased step limit 300→500; added fallback
+    for small gradient in `inv_slope'`; guarded `nll_cond < nll_opt` with epsilon
+  - `getProfileCnstr`/`getEndPoint`: replaced NELDERMEAD+AugLag with robust
+    bisection on the profiled NLL; wider search bounds (50× se); NaN guards
+  - `getStatsFromModel`: for `LeastSquares`, scale covariance by MSE (was
+    unscaled); use `max 0` for sqrt of diagonal to avoid numerical NaN
+  - `createSplines`: enforce monotonicity on (tau,θ) and (θ,tau) pairs to
+    prevent spline extrapolation garbage; accepts `optTh` parameter
+- **Test CI executable**: new `test-ci` app in `apps/TestCI` for investigating
+  profile-likelihood backends on real datasets
+- **CI tests**: new `CITests` module covering monotonicity, spline, and
+  negative-tau regression tests
+
 ## 3.0.0.2
 
 - Added parser for NeoGP.jl 

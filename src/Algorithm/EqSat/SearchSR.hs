@@ -213,10 +213,9 @@ printBest fitFun printExprFun = do
                        printExprFun 0 bec
         Nothing  -> pure ()
 
---paretoFront :: Int -> (Int -> EClassId -> RndEGraph ()) -> RndEGraph ()
+paretoFront :: (Fix SRTree -> RndEGraph (Double, [Target])) -> Int -> (Int -> EClassId -> RndEGraph b) -> RndEGraph [b]
 paretoFront fitFun maxSize printExprFun = go 1 0 (-(1.0/0.0))
     where
-    go :: Int -> Int -> Double -> RndEGraph [[String]]
     go n ix f
         | n > maxSize = pure []
         | otherwise   = do
