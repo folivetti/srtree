@@ -24,7 +24,7 @@ module Algorithm.EqSat.Egraph where
 import Control.Lens (element, makeLenses, view, over, (&), (+~), (-~), (.~), (^.))
 --import Control.Monad (forM_, when, foldM, void)
 import Data.List ( intercalate, foldl' )
-import Control.Monad (forM)
+import Control.Monad (forM, unless)
 import Control.Monad.State.Strict hiding ( get, put )
 import Control.Monad.IO.Class (MonadIO(..))
 import Data.Functor.Identity (Identity)
@@ -143,6 +143,7 @@ getGreatest = RangeSet.lookupMax
 -- behaviour.
 data EClassPageStore = EClassPageStore
   { cpsLookup :: EClassId -> IO (Maybe EClass)
+  , cpsBulkLookup :: [EClassId] -> IO (IntMap.IntMap EClass)  -- ^ bulk-load pages for multiple eclasses
   , cpsInsert :: EClass -> IO ()
   , cpsDelete :: EClassId -> IO ()
   , cpsFlush  :: IO ()                      -- ^ write back all pending dirty pages
@@ -178,6 +179,9 @@ data EGraphDB = EDB { _worklist      :: HashSet (EClassId, ENode)      -- e-node
                       , _changed       :: !Bool                      -- dirty flag: true if modified since last check
                       , _trackDBs      :: !Bool                      -- maintain range DBs (False during pure simplify)
                       , _seenMatches   :: Map String (RangeSet.Set String) -- persistent (rule source -> attempted match keys)
+                      , _residentCap   :: !Int                        -- resident class cache capacity (default 50000)
+                      , _nodeCap       :: !Int                        -- node-to-class cache capacity (default 100000)
+                      , _canonicalCap  :: !Int                        -- canonical map cache capacity (default 100000)
                       } deriving (Show, Generic)
 
 data EClass = EClass { _eClassId :: {-# UNPACK #-} !Int                   -- e-class id (maybe we don't need that here)
@@ -264,10 +268,11 @@ instance Binary Property
 instance Binary EClassData
 -- Custom: keep `_trackDBs` out of the wire format so on-disk EGraphDB data
 -- (written before the flag existed) decodes unchanged; it defaults to True.
+-- Cache cap fields are runtime-only configuration, not serialized.
 instance Binary EGraphDB where
-  put (EDB w a r p f d s sf sdl u n c _ _) =
+  put (EDB w a r p f d s sf sdl u n c _ _ _ _ _) =
     put w >> put a >> put r >> put p >> put f >> put d >> put s >> put sf >> put sdl >> put u >> put n >> put c
-  get = EDB <$> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> pure True <*> pure Map.empty
+  get = EDB <$> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> pure True <*> pure Map.empty <*> pure 50000 <*> pure 100000 <*> pure 100000
 -- Custom: the wire format omits `_classStore` (a runtime handle to the paged
 -- store, never serialized); it decodes to Nothing.
 instance Binary EGraph where
@@ -357,6 +362,13 @@ class Monad m => ClassStore m where
   -- falls back to the store.
   canonicalOf :: EClassId -> EGraphST m (Maybe EClassId)
   canonicalOf eid = gets (IntMap.lookup eid . _canonicalMap)
+  -- | Bulk-load pages for the given e-class ids into the resident cache.
+  -- For paged graphs, this triggers a single SQL query instead of per-class
+  -- lookups. For resident graphs, this is a no-op (all classes are already
+  -- in memory). Used by 'rebuild' to warm the cache before processing the
+  -- worklist, eliminating I/O cascades during repair/repairAnalysis.
+  bulkLoad :: [EClassId] -> EGraphST m ()
+  bulkLoad _ = pure ()
 
 -- | Default candidate-root enumeration from the resident @_patDB@ trie, capped
 -- at @budget@ after skipping @exclude@ (used by the pure instances and as the
@@ -411,7 +423,7 @@ pureAdjustClass cid f = modify' $ over eClass (IntMap.adjust f cid)
 residentClassCap :: Int
 residentClassCap = 50000
 
--- | Trim the resident @_eClass@ cache to at most 'residentClassCap' entries
+-- | Trim the resident @_eClass@ cache to at most '_residentCap' entries
 -- by keeping the largest ids. No-op for graphs without a paged store (their
 -- resident map must stay complete for the pure instances). Halving on 2x keeps
 -- steady churn from triggering an O(n) rebuild on every insert.
@@ -420,11 +432,12 @@ trimResidentCache = modify' $ \eg ->
   case _classStore eg of
     Nothing -> eg
     Just _  ->
-      let m = _eClass eg
+      let cap = _residentCap (_eDB eg)
+          m = _eClass eg
           n = IntMap.size m
-      in if n <= 2 * residentClassCap
+      in if n <= 2 * cap
             then eg
-            else over eClass (const (IntMap.fromList (Prelude.drop (n - residentClassCap) (IntMap.toAscList m)))) eg
+            else over eClass (const (IntMap.fromList (Prelude.drop (n - cap) (IntMap.toAscList m)))) eg
 
 -- | Bound on the resident @_eNodeToEClass@ cache on a paged graph. Beyond the
 -- cap (checked at 2x, halved back to cap) the map is pruned; the backing store
@@ -445,11 +458,12 @@ trimNodeCache = modify' $ \eg ->
   case _classStore eg of
     Nothing -> eg
     Just _  ->
-      let m = _eNodeToEClass eg
+      let cap = _nodeCap (_eDB eg)
+          m = _eNodeToEClass eg
           n = HashMap.size m
-      in if n <= 2 * nodeCacheCap
+      in if n <= 2 * cap
             then eg
-            else over eNodeToEClass (const (HashMap.fromList (Prelude.take nodeCacheCap (HashMap.toList m)))) eg
+            else over eNodeToEClass (const (HashMap.fromList (Prelude.take cap (HashMap.toList m)))) eg
 {-# INLINE trimNodeCache #-}
 
 trimCanonicalCache :: Monad m => EGraphST m ()
@@ -457,11 +471,12 @@ trimCanonicalCache = modify' $ \eg ->
   case _classStore eg of
     Nothing -> eg
     Just _  ->
-      let m = _canonicalMap eg
+      let cap = _canonicalCap (_eDB eg)
+          m = _canonicalMap eg
           n = IntMap.size m
-      in if n <= 2 * canonicalCacheCap
+      in if n <= 2 * cap
             then eg
-            else over canonicalMap (const (IntMap.fromList (Prelude.take canonicalCacheCap (IntMap.toAscList m)))) eg
+            else over canonicalMap (const (IntMap.fromList (Prelude.take cap (IntMap.toAscList m)))) eg
 {-# INLINE trimCanonicalCache #-}
 
 instance ClassStore Identity where
@@ -603,6 +618,18 @@ instance {-# OVERLAPPABLE #-} (Monad m, MonadIO m) => ClassStore m where
                             trimCanonicalCache
                             pure (Just c)
               Nothing -> pure Nothing
+  bulkLoad eids = do
+    eg <- gets id
+    case _classStore eg of
+      Nothing -> pure ()  -- resident graph: nothing to do
+      Just h  -> do
+        -- Filter out already-cached eclasses to avoid unnecessary I/O
+        let cached = IntMap.keysSet (_eClass eg)
+            toLoad = filter (\eid -> not (IntSet.member eid cached)) eids
+        unless (null toLoad) $ do
+          pages <- liftIO (cpsBulkLookup h toLoad)
+          modify' $ \eg' -> eg' { _eClass = IntMap.union (_eClass eg') pages }
+          trimResidentCache
 
 -- * E-Graph basic supporting functions
 
@@ -628,6 +655,9 @@ emptyDB = EDB
   False
   True
   Map.empty
+  50000   -- _residentCap
+  100000  -- _nodeCap
+  100000  -- _canonicalCap
 {-# INLINE emptyDB #-}
 
 -- | like 'emptyDB' but skips range-DB maintenance (pure simplify mode)

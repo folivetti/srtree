@@ -180,6 +180,12 @@ rebuild costFun =
      al <- gets (_analysis . _eDB)
      modify' $ over (eDB . worklist) (const Set.empty)
              . over (eDB . analysis) (const Set.empty)
+     -- Batch-load all dirty class pages before processing
+     -- This eliminates I/O cascades during repair/repairAnalysis
+     let allIds = Set.foldl' (\s (eid, _) -> IntSet.insert eid s) IntSet.empty wl
+                  `IntSet.union`
+                  Set.foldl' (\s (eid, _) -> IntSet.insert eid s) IntSet.empty al
+     bulkLoad (IntSet.toList allIds)
      forM_ wl (uncurry (repair costFun))
      forM_ al (uncurry (repairAnalysis costFun))
 {-# INLINE rebuild #-}
@@ -741,3 +747,20 @@ cleanMaps = do
       modify' $ \eg -> eg { _eNodeToEClass = enode2eclass'
                           , _eClass = eclassMap' }
 {-# INLINE cleanMaps #-}
+
+-- | Evict the oldest @pct@ percent of entries from the resident caches.
+-- For paged graphs, this selectively drops entries instead of wiping all caches
+-- (which would destroy warm state). For resident graphs, this is a no-op.
+evictOldestPct :: ClassStore m => Int -> EGraphST m ()
+evictOldestPct pct
+  | pct <= 0 || pct >= 100 = pure ()
+  | otherwise = do
+      hasStore <- gets (isJust . _classStore)
+      when hasStore $ modify' $ \eg ->
+        let m = _eClass eg
+            n = IntMap.size m
+            keep = n * (100 - pct) `div` 100
+        in if keep < n && keep > 0
+              then over eClass (const (IntMap.fromList (Prelude.drop (n - keep) (IntMap.toAscList m)))) eg
+              else eg
+{-# INLINE evictOldestPct #-}

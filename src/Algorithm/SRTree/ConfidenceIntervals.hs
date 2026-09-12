@@ -27,8 +27,10 @@ import Data.List ( sortOn, nubBy )
 import Data.Maybe ( listToMaybe )
 import Algorithm.SRTree.Utils
 import Numeric.Optimization.NLOPT
+import Data.IORef
 import System.IO.Unsafe ( unsafePerformIO )
 import Control.Monad.Catch ( catch, SomeException )
+import Control.Exception ( evaluate )
 import Debug.Trace ( trace )
 
 -- | profile likelihood algorithms: Bates (classical), ODE (faster), Constrained (fastest)
@@ -190,17 +192,18 @@ recomputeStdErr et t = stdErr
     k = U.length t
     ident = fromRowMajor k k (U.generate (k * k) (\ix -> let (i, j) = ix `divMod` k in if i == j then 1.0 else 0.0))
     hess = ctHessianNLL et t
-    cov = unsafePerformIO $ catch (invChol hess) (\(_ :: SomeException) -> pure ident)
+    cov = unsafePerformIO $ catch (invChol hess >>= evaluate) (\(_ :: SomeException) -> pure ident)
     covMat = toRowMajor cov
     stdErr = U.generate k (\ix -> sqrt $ abs (covMat U.! (ix * k + ix)))
 
--- calculate the profile likelihood of every parameter
--- restartLimit bounds recursive restarts when the optimizer finds a better point mid-profile
-getAllProfiles :: PType -> EvalTree -> Target -> Target -> [CI] -> Double -> [ProfileT]
+-- | Calculate the profile likelihood of every parameter.
+-- restartLimit bounds recursive restarts when getProfileODE finds a better point mid-profile.
+-- For Bates, getProfile handles restarts internally and never returns Left.
+getAllProfiles :: PType -> EvalTree -> Target -> Target -> [CI] -> Double -> IO [ProfileT]
 getAllProfiles ptype et theta stdErr estCIs alpha
   -- Defensive: if theta is too short for the EvalTree's distribution,
   -- return empty profiles instead of crashing (e.g. MSE loss with Gaussian dist)
-  | U.length theta < 2 = []
+  | U.length theta < 2 = pure []
   | otherwise = go 0 et theta stdErr estCIs
   where
     restartLimit = 5 :: Int
@@ -229,7 +232,7 @@ getAllProfiles ptype et theta stdErr estCIs alpha
         estCIs'' = if null estCIs'
                      then let ident = U.generate (k * k) (\ix -> let (i, j) = ix `divMod` k in if i == j then 1.0 else 0.0)
                               hess = ctHessianNLL et' theta'
-                              cov  = unsafePerformIO $ catch (invChol hess) (\(_ :: SomeException) -> pure (fromRowMajor k k ident))
+                              cov  = unsafePerformIO $ catch (invChol hess >>= evaluate) (\(_ :: SomeException) -> pure (fromRowMajor k k ident))
                               covMat = toRowMajor cov
                               se = U.generate k (\ix -> sqrt $ abs (covMat U.! (ix * k + ix)))
                               tVal = quantile (studentT . fromIntegral $ n - k) (1 - alpha / 2.0)
@@ -237,74 +240,84 @@ getAllProfiles ptype et theta stdErr estCIs alpha
                      else estCIs'
 
         profFun ix = case ptype of
-                        Bates       -> getProfile      et' theta' (stdErr' U.! ix) tau_max ix
-                        ODE         -> getProfileODE   et' theta' (stdErr' U.! ix) (estCIs'' !! ix) tau_max ix
-                        Constrained -> getProfileCnstr et' theta' (stdErr' U.! ix) tau_max' ix
+                        Bates       -> Right <$> getProfile      et' theta' (stdErr' U.! ix) tau_max ix
+                        ODE         -> pure $ getProfileODE   et' theta' (stdErr' U.! ix) (estCIs'' !! ix) tau_max ix
+                        Constrained -> pure $ getProfileCnstr et' theta' (stdErr' U.! ix) tau_max' ix
 
-        go' ix acc | ix == k = acc
+        go' ix acc | ix == k = pure acc
         go' ix acc
           | ix == k-1 && ptype == Constrained && ctDist et' == Gaussian =
               case getProfileODE et' theta' (stdErr' U.! ix) (estCIs'' !! ix) tau_max ix of
                 Left t  -> let tOpt = ctOptimizer et' t; se'' = recomputeStdErr et' tOpt
                            in  go (restarts + 1) et' tOpt se'' estCIs'
                 Right p -> go' (ix + 1) (acc <> [p])
-          | otherwise =
-              case profFun ix of
+          | otherwise = do
+              result <- profFun ix
+              case result of
                 Left t  -> let tOpt = ctOptimizer et' t; se'' = recomputeStdErr et' tOpt
                            in  go (restarts + 1) et' tOpt se'' estCIs'
                 Right p -> go' (ix + 1) (acc <> [p])
 
--- calculates the profile likelihood of a single parameter
-getProfile :: EvalTree -> Target -> Double -> Double -> Int -> Either Target ProfileT
+-- | Calculate the profile likelihood of a single parameter.
+-- When a better optimum is found mid-walk, the walk restarts from the new MLE
+-- internally (discarding previously collected points for this parameter only),
+-- rather than propagating a restart to getAllProfiles.
+getProfile :: EvalTree -> Target -> Double -> Double -> Int -> IO ProfileT
 getProfile et theta stdErr_i tau_max ix
   | stdErr_i == 0.0 = pure $ ProfileT (U.fromList [-tau_max, tau_max]) [theta, theta] (theta U.! ix) (const (theta U.! ix)) (const tau_max)
-  | otherwise =
-  do negDelta <- go kmax (-stdErr_i / 8) 0 1 mempty
-     let !negLen = length (fst negDelta)
-         !negTauRange = if null (fst negDelta) then (0,0) else (minimum (fst negDelta), maximum (fst negDelta))
-     posDelta <- go kmax  (stdErr_i / 8) 0 1 p0
-     let !posLen = length (fst posDelta)
-         !posTauRange = if null (fst posDelta) then (0,0) else (minimum (fst posDelta), maximum (fst posDelta))
-     let (taus', thetas') = negDelta <> posDelta
-         taus    = U.fromList taus'
-         thetas  = thetas'
-         (tau2theta, theta2tau) = createSplines taus thetas stdErr_i tau_max ix optTh
-     pure $ ProfileT taus thetas optTh tau2theta theta2tau
+  | otherwise = do
+      nllOptRef <- newIORef nll_opt0
+      thetaOptRef <- newIORef theta_opt0
+
+      negDelta <- go kmax (-stdErr_i / 8) 0 1 mempty nllOptRef thetaOptRef
+      thetaOpt1 <- readIORef thetaOptRef
+      posDelta <- go kmax  (stdErr_i / 8) 0 1 ([0], [thetaOpt1]) nllOptRef thetaOptRef
+
+      thetaOpt2 <- readIORef thetaOptRef
+      let optTh' = thetaOpt2 U.! ix
+          (taus', thetas') = negDelta <> posDelta
+          taus    = U.fromList taus'
+          thetas  = thetas'
+          (tau2theta, theta2tau) = createSplines taus thetas stdErr_i tau_max ix optTh'
+      pure $ ProfileT taus thetas optTh' tau2theta theta2tau
    where
-    p0        = ([0], [theta_opt])
     kmax      = 500
-    nll_opt   = ctNLL et theta_opt
-    theta_opt = ctOptimizer et theta
-    optTh     = theta_opt U.! ix
+    nll_opt0  = ctNLL et theta_opt0
+    theta_opt0 = ctOptimizer et theta
     minimizer = ctOptimizerFixed et ix
 
-    go 0 delta _ _         acc = Right acc
-    go k delta t inv_slope acc@(taus, thetas)
-      | isNaN inv_slope     = Right acc
-      | nll_cond < nll_opt - 1e-6 * abs nll_opt  = Left theta_t
-      | abs tau > tau_max   = Right acc'
-
-      | otherwise           = go (k-1) delta (t + inv_slope) inv_slope' acc'
-      where
-        t_delta     = (theta_opt U.! ix) + delta * (t + inv_slope)
-        theta_delta = updateS theta_opt [(ix, t_delta)]
-        theta_t     = minimizer theta_delta
-        (nll_cond, grad) = ctGradNLL et theta_t
-        zv          = grad U.! ix
-        -- For LeastSquares, the correct profile likelihood statistic is
-        -- n * log(MSE(t)/MSE(opt)) ~ chi2_1, not 2*(MSE(t) - MSE(opt)).
-        tau         = case ctDist et of
-                        LeastSquares ->
-                          let nD = fromIntegral (ctRows et) :: Double
-                              r  = max nll_cond 1e-30 / max nll_opt 1e-30
-                          in  signum delta * sqrt (max 0 (nD * log r))
-                        _ -> signum delta * sqrt (max 0 (2*nll_cond - 2*nll_opt))
-        inv_slope'  = if abs zv < 1e-12 * abs stdErr_i
-                         then min 4.0 . max 0.0625 $ abs (delta * 8)
-                         else min 4.0 . max 0.0625 . abs $ (tau / (stdErr_i * zv))
-        acc'        = if nll_cond == nll_opt || maybe False (tau ==) (listToMaybe taus) || isNaN tau
-                         then acc
-                         else (tau:taus, theta_t:thetas)
+    go 0 _delta _t _inv_slope acc _nllRef _thetaRef = pure acc
+    go k delta t inv_slope acc@(taus, thetas) nllOptRef thetaOptRef = do
+      nllOpt <- readIORef nllOptRef
+      thetaOpt <- readIORef thetaOptRef
+      let t_delta     = (thetaOpt U.! ix) + delta * (t + inv_slope)
+          theta_delta = updateS thetaOpt [(ix, t_delta)]
+          validDelta  = not (isNaN t_delta) && not (isInfinite t_delta)
+                         && not (U.any isNaN theta_delta) && not (U.any isInfinite theta_delta)
+          theta_t     = if validDelta then minimizer theta_delta else thetaOpt
+          (nll_cond, grad) = ctGradNLL et theta_t
+          zv          = grad U.! ix
+          tau         = case ctDist et of
+                          LeastSquares ->
+                            let nD = fromIntegral (ctRows et) :: Double
+                                r  = max nll_cond 1e-30 / max nllOpt 1e-30
+                            in  signum delta * sqrt (max 0 (nD * log r))
+                          _ -> signum delta * sqrt (max 0 (2*nll_cond - 2*nllOpt))
+          inv_slope'  = if abs zv < 1e-12 * abs stdErr_i
+                           then min 4.0 . max 0.0625 $ abs (delta * 8)
+                           else min 4.0 . max 0.0625 . abs $ (tau / (stdErr_i * zv))
+          acc'        = if nll_cond == nllOpt || maybe False (tau ==) (listToMaybe taus) || isNaN tau
+                           then acc
+                           else (tau:taus, theta_t:thetas)
+      if | not validDelta || isNaN inv_slope -> pure acc
+         | nll_cond < nllOpt - 1e-6 * abs nllOpt -> do
+             -- Better optimum found: update references and restart walk
+             -- from the new MLE, discarding previously collected points.
+             writeIORef nllOptRef nll_cond
+             writeIORef thetaOptRef theta_t
+             go kmax delta 0 1 mempty nllOptRef thetaOptRef
+         | abs tau > tau_max   -> pure acc'
+         | otherwise           -> go (k-1) delta (t + inv_slope) inv_slope' acc' nllOptRef thetaOptRef
 
 -- Based on https://insysbio.github.io/LikelihoodProfiler.jl/latest/
 -- Borisov, Ivan, and Evgeny Metelkin. "Confidence intervals by constrained optimization—An algorithm and software package for practical identifiability analysis in systems biology." PLOS Computational Biology 16.12 (2020): e1008495.
@@ -423,7 +436,7 @@ getStatsFromModel dist mYerr xss ys tree theta = MkStats cov corr stdErr
     fexcept :: SomeException -> IO Columns
     fexcept _ = pure ident
 
-    covRaw = unsafePerformIO $ catch (invChol hess) fexcept
+    covRaw = unsafePerformIO $ catch (invChol hess >>= evaluate) fexcept
 
     -- For LeastSquares, the Hessian code computes sum(fx*fy - res*fxy) = X^T X,
     -- but the actual Hessian of the Gaussian NLL profile is -1/MSE * X^T X.

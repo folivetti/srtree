@@ -208,7 +208,7 @@ parseTIR b = parseExpr b (prefixOps : binOps) binFuns var
 
     var = do char 'x'
              ix <- decimal
-             pure $ Fix $ Var ix
+             pure $ Fix $ Var ix  -- TIR is 0-based (x0, x1, x2...)
           <|> do char 't'
                  ix <- decimal
                  pure $ Fix $ Param ix

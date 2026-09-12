@@ -169,7 +169,7 @@ processOne args xss ys mYerr (idx, src) = do
     cis <- case raCI args of
       LaplaceCI -> return laplaceCIs
       ProfileCI -> do
-        let profiles = getAllProfiles ptype et thetaOpt (_stdErr stats) laplaceCIs (raAlpha args)
+        profiles <- getAllProfiles ptype et thetaOpt (_stdErr stats) laplaceCIs (raAlpha args)
         when (raDbg args) $ forM_ (zip [0..] profiles) $ \(i, ProfileT taus thetas _ tau2theta _) -> do
           putStrLn $ "DEBUG Profile " ++ show i ++ " (opt=" ++ show (thetaOpt U.! i) ++ "):"
           putStrLn $ "  tau range: [" ++ show (if U.null taus then 0 else U.head taus)

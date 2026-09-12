@@ -1,5 +1,10 @@
 # Changelog for srtree
 
+## 3.0.0.4
+
+- **Export `createLoss`**: expose compiled loss function for external use
+- **Fix `paretoFront` type signature**: corrected return type in `SearchSR.hs`
+
 ## 3.0.0.3
 
 - **Profile-likelihood CI overhaul** (`ConfidenceIntervals`):

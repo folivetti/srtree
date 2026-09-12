@@ -292,19 +292,19 @@ ruleBudget = 64
 -- Capping root visits bounds the *search work* independently of the result
 -- count. Sound: we only stop enumerating (fewer) genuine matches early.
 ruleRootVisit :: Int
-ruleRootVisit = 512
+ruleRootVisit = 256
 
 -- | Cap on how many matches a non-n-ary rule (the cached @genericJoin@ path)
 -- may return per match. The n-ary matcher has 'ruleBudget'; give the cached
 -- path a separate (larger) budget so a single rule cannot flood the iteration.
 ruleMatchBudget :: Int
-ruleMatchBudget = 1024
+ruleMatchBudget = 256
 
 -- | Cap on how many operator-root e-classes the streaming cached matcher visits
 -- per match, bounding the search work (and the page reads) independently of the
 -- result count, exactly as 'ruleRootVisit' does for the n-ary matcher.
 ruleMatchRootVisit :: Int
-ruleMatchRootVisit = 2048
+ruleMatchRootVisit = 512
 
 -- | Match an n-ary pattern against every root e-class of its operator trie.
 --

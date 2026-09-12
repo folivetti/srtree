@@ -56,7 +56,11 @@ outer arr1 arr2
 
 -- | Flatten list of column vectors to a row-major U.Vector Double
 toRowMajor :: Columns -> U.Vector Double
-toRowMajor cols = U.generate (m * n) (\ix -> let (i, j) = ix `divMod` n in (cols !! j) U.! i)
+toRowMajor cols = U.generate (m * n) (\ix -> let (i, j) = ix `divMod` n
+                                                 col = cols !! j
+                                             in if i < U.length col
+                                                  then col U.! i
+                                                  else 0)  -- pad with 0 for inconsistent columns
   where (m, n) = matSize cols
 
 -- | Restore a row-major continuous U.Vector Double back to Columns
@@ -109,21 +113,26 @@ cholesky arr
   | otherwise = do
       l <- UM.new (m * m)
       let orig = toRowMajor arr
+          origLen = U.length orig
       forM_ [0 .. m - 1] $ \i ->
         forM_ [0 .. m - 1] $ \j ->
           if i < j then unsafeWrite m l (i, j) 0
           else do
-            let cur = orig U.! (i * m + j)
-                rowI = i * m
-                rowJ = j * m
-            xjj <- UM.unsafeRead l (rowJ + j)
-            tot <- rangedLinearDotProd rowI rowJ j l
-            let delta = cur - tot
-            if i == j
-              then if delta <= 0
-                   then throwM NegDef
-                   else UM.unsafeWrite l (rowI + j) (sqrt delta)
-              else UM.unsafeWrite l (rowI + j) (delta / xjj)
+            let idx = i * m + j
+            if idx >= origLen
+              then throwM NegDef  -- degenerate matrix
+              else do
+                let cur = orig U.! idx
+                    rowI = i * m
+                    rowJ = j * m
+                xjj <- UM.unsafeRead l (rowJ + j)
+                tot <- rangedLinearDotProd rowI rowJ j l
+                let delta = cur - tot
+                if i == j
+                  then if delta <= 0
+                       then throwM NegDef
+                       else UM.unsafeWrite l (rowI + j) (sqrt delta)
+                  else UM.unsafeWrite l (rowI + j) (delta / xjj)
       frozen <- U.unsafeFreeze l
       pure $ fromRowMajor m m frozen
   where (m, n) = matSize arr

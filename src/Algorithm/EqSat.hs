@@ -28,7 +28,7 @@ import qualified Data.IntSet as IntSet
 import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, isJust)
 import Data.SRTree
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as Set
@@ -293,7 +293,7 @@ compileSource r = if hasNAry (source r)
 -- matches), this bounds a single iteration's apply/rebuild work regardless of
 -- graph size.
 iterMatchBudget :: Int
-iterMatchBudget = 2000
+iterMatchBudget = 500
 
 -- | run equality saturation for a number of iterations
 runEqSat :: ClassStore m => CostFun -> [Rule] -> Int -> EGraphST m (Bool, Int)
@@ -305,6 +305,9 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
         go it sch compiled =
           do -- reset dirty flag before processing this iteration
              modify' $ over (eDB . changed) (const False)
+
+             -- NEW: pre-load frontier transitive closure to warm the cache
+             preLoadFrontier
 
              -- step 1: match the rules using cached compiled queries
              let matchSch  = matchWithScheduler it
@@ -336,7 +339,8 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
                         else go (it-1) sch' compiled
 
         throttle it sch compiled = do
-          cleanMaps
+          -- Instead of wiping all caches, evict oldest 50% to preserve warm state
+          evictOldestPct 50
           eClasses <- gets _eClass
           if IntMap.size eClasses <= 1500
             then go (it-1) sch compiled
@@ -345,6 +349,21 @@ runEqSat costFun rules maxIter = go maxIter IntMap.empty compiledRules
                     if it <= 1 || not changed
                       then pure (False, it)  -- give up and return early stop
                       else throttle (it-1) sch compiled
+
+-- | Pre-load pages for recently-changed classes into the resident cache.
+-- This ensures the matcher's hot path is cache-warm, reducing I/O during
+-- the matching phase. Only does work on paged graphs.
+preLoadFrontier :: ClassStore m => EGraphST m ()
+preLoadFrontier = do
+  hasStore <- gets (isJust . _classStore)
+  if not hasStore then pure ()
+  else do
+    -- Load pages for all classes in the worklist and analysis set
+    wl <- gets (Set.map fst . _worklist . _eDB)
+    al <- gets (Set.map fst . _analysis . _eDB)
+    let toLoad = IntSet.toList (Set.foldl' (flip IntSet.insert) IntSet.empty (Set.union wl al))
+    -- Touch each class to trigger page load into resident cache
+    mapM_ (\eid -> lookupClass eid >> pure ()) toLoad
 
 -- | apply a single step of merge-only equality saturation
 applySingleMergeOnlyEqSat :: ClassStore m => CostFun -> [Rule] -> EGraphST m ()

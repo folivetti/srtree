@@ -28,6 +28,7 @@ import Algorithm.SRTree.ModelSelection (logFunctional, logFunctionalFreq)
 import qualified Algorithm.SRTree.Compile as C
 import Algorithm.SRTree.ConfidenceIntervals
 import Algorithm.SRTree.NonlinearOpt (minimizeNLL)
+import System.IO.Unsafe (unsafePerformIO)
 import Data.SRTree.Print (showExpr)
 
 import Args
@@ -228,7 +229,7 @@ getCI args dset basic alpha' = (stats', cis, pisTr, pisVal, pisTe, Plot contours
     laplaceCIs = paramCI (Laplace stats') nTr theta (raAlpha args)
       where raAlpha = alpha -- FIX: alpha from args is the significance level
 
-    profiles   = getAllProfiles (ptype args) et theta (_stdErr stats') (estCIs) alpha'
+    profiles   = unsafePerformIO $ getAllProfiles (ptype args) et theta (_stdErr stats') (estCIs) alpha'
     estCIs     = paramCI (Laplace stats') nTr theta 0.001
 
     method     = if useProfile args then Profile stats' profiles else Laplace stats'
@@ -242,7 +243,7 @@ getCI args dset basic alpha' = (stats', cis, pisTr, pisVal, pisTe, Plot contours
           (thOpt, _, _) = minimizeNLL MultiThread (NLL dist') (_yErrTr dset) 100 xTr yTr t th
           stdErr = _stdErr stats' U.! 0
           fun = case ptype args of
-                  Bates       -> getProfile      et' thOpt stdErr tauMax 0
+                  Bates       -> Right $ unsafePerformIO $ getProfile      et' thOpt stdErr tauMax 0
                   ODE         -> getProfileODE   et' thOpt stdErr estPi tauMax 0
                   Constrained -> getProfileCnstr et' thOpt stdErr tauMaxAl 0
       in case fun of

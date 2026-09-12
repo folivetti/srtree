@@ -208,8 +208,8 @@ runTestCase xTr yTr mYErr nSamples tc = do
           putStrLn "  === BATES (profile walk) ==="
           catch (do
             let estCIs = laplaceCI
-                profiles_bates = getAllProfiles Bates et theta_opt stdErrs estCIs 0.05
-                batesCI = paramCI (Profile stats profiles_bates) nSamples theta_opt 0.05
+            profiles_bates <- getAllProfiles Bates et theta_opt stdErrs estCIs 0.05
+            let batesCI = paramCI (Profile stats profiles_bates) nSamples theta_opt 0.05
             putStrLn $ "  95% CIs:"
             putStrLn $ "    " ++ showCIList (zip paramNames batesCI)
             putStrLn $ "  Widths: " ++ show (map (\(CI _ l h) -> h - l) batesCI)
@@ -234,8 +234,8 @@ runTestCase xTr yTr mYErr nSamples tc = do
           putStrLn "  === ODE (Chen & Jennrich) ==="
           catch (do
             let estCIs = laplaceCI
-                profiles_ode = getAllProfiles ODE et theta_opt stdErrs estCIs 0.05
-                odeCI = paramCI (Profile stats profiles_ode) nSamples theta_opt 0.05
+            profiles_ode <- getAllProfiles ODE et theta_opt stdErrs estCIs 0.05
+            let odeCI = paramCI (Profile stats profiles_ode) nSamples theta_opt 0.05
             putStrLn $ "  95% CIs:"
             putStrLn $ "    " ++ showCIList (zip paramNames odeCI)
             putStrLn $ "  Widths: " ++ show (map (\(CI _ l h) -> h - l) odeCI)
@@ -245,8 +245,8 @@ runTestCase xTr yTr mYErr nSamples tc = do
           -- ---- CONSTRAINED ----
           putStrLn "  === CONSTRAINED (bisection) ==="
           catch (do
-            let profiles_cnstr = getAllProfiles Constrained et theta_opt stdErrs [] 0.05
-                cnstrCI = paramCI (Profile stats profiles_cnstr) nSamples theta_opt 0.05
+            profiles_cnstr <- getAllProfiles Constrained et theta_opt stdErrs [] 0.05
+            let cnstrCI = paramCI (Profile stats profiles_cnstr) nSamples theta_opt 0.05
             putStrLn $ "  95% CIs:"
             putStrLn $ "    " ++ showCIList (zip paramNames cnstrCI)
             putStrLn $ "  Widths: " ++ show (map (\(CI _ l h) -> h - l) cnstrCI)
