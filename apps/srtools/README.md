@@ -1,3 +1,6 @@
+# **NOTE:** This tool is replaced by the current version of rEGGression at https://github.com/folivetti/reggression/tree/multiset-egraph 
+
+
 # srtools a swiss knife for symbolic regression models 
 
 `srtools` offers a multitude of tools for parsing and processing symbolic models.
