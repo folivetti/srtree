@@ -122,7 +122,10 @@ fitnessFun backend skipVal nIter loss (x, y, mYErr) (x_val, y_val, mYErr_val) tr
     else (val, theta)
   where
     nParams       = countParamsUniq tree + if loss == NLL ROXY then 3 else if loss == NLL Gaussian then 1 else 0
-    (theta, lossVal, _) = minimizeNLL' VAR1 backend loss mYErr nIter x y tree thetaOrig
+    -- force the NLopt result once so the parallel fit's `DeepSeq.force` of both
+    -- the fitness and the theta never re-runs the optimization (which otherwise
+    -- re-entered NLopt thousands of times for degenerate expressions).
+    (theta, lossVal, _) = DeepSeq.force (minimizeNLL' VAR1 backend loss mYErr nIter x y tree thetaOrig)
     evalF a b c   = negate $ compileLoss a (buildLoss loss (fromIntegral (V.length b)) tree) b c $ if nParams == 0 then thetaOrig else theta
     -- at folds=1 the validation split is the training data itself, so the
     -- train loss returned by minimizeNLL' already is the val loss; skipping

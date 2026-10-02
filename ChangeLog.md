@@ -1,5 +1,19 @@
 # Changelog for srtree
 
+## 3.0.0.5
+
+- **Fix NLopt re-entered thousands of times per fit** (`NonlinearOpt` + `SearchSR`):
+  - `minimizeNLLWith` no longer `{-# INLINE #-}` and forces the NLopt result
+    once (`t_opt `seq` nEvs `seq` ...`), so the optimization is not re-run at
+    every use site. Previously GHC duplicated the lazy `where` thunk, re-entering
+    NLopt ~tens of thousands of times for a single fit of expressions with a
+    parameter in a division/log denominator (e.g. `t1/(x0+t1)`).
+  - `fitnessFun` now `DeepSeq.force`s the `minimizeNLL'` result, so the parallel
+    fit's forcing of both the fitness and the theta does not re-trigger the
+    unshared optimization.
+  - Effect: previously-hanging eggp fits (e.g. `gen=6, nPop=30`) now complete in
+    ~1-9 s.
+
 ## 3.0.0.4
 
 - **Export `createLoss`**: expose compiled loss function for external use

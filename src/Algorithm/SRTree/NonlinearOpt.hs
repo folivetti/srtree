@@ -41,7 +41,11 @@ minimizeNLLWith :: (VS.Vector Double -> (Double, VS.Vector Double)) -> (Objectiv
 minimizeNLLWith funAndGrad alg niter t0
   | niter == 0 = (t0, f, 0)
   | n == 0     = (t0, f, 0)
-  | otherwise  = (t_opt', fst (funAndGrad t_opt), nEvs)
+  | otherwise  = let (t_opt, nEvs) = case minimizeLocal problem t0' of
+                                        Right sol -> (solutionParams sol, nEvals sol)
+                                        Left e    -> (t0', 0)
+                     t_opt'        = G.convert t_opt
+                 in t_opt `seq` nEvs `seq` (t_opt', fst (funAndGrad t_opt), nEvs)
   where
     t0'        = G.convert t0
     n          = V.length t0
@@ -51,11 +55,8 @@ minimizeNLLWith funAndGrad alg niter t0
     algorithm  = alg funAndGrad (Just $ VectorStorage $ fromIntegral n)
     stop       = ObjectiveRelativeTolerance 1e-6 :| [ObjectiveAbsoluteTolerance 1e-6, MaximumEvaluations (fromIntegral niter)]
     problem    = LocalProblem (fromIntegral n) stop algorithm
-    (t_opt, nEvs) = case minimizeLocal problem t0' of
-                      Right sol -> (solutionParams sol, nEvals sol)
-                      Left e    -> (t0', 0)
-    t_opt'      = G.convert t_opt
-{-# INLINE minimizeNLLWith #-}
+-- no INLINE: inlining duplicated the lazy `where` thunk so the NLopt call was
+-- re-evaluated thousands of times per fit.
 
 -- | Compile the loss function and gradient for a tree, returning a reusable
 -- closure. Use this when you need to optimize the same expression with
